@@ -26,8 +26,9 @@ import {
   formatAmount,
 } from "@/lib/program";
 import { useToast } from "@/lib/toast";
-import { playStake, playTax, playClaim } from "@/lib/sound";
+import { playStake, playTax, playClaim, haptic } from "@/lib/sound";
 import { friendlyError } from "@/lib/errors";
+import { markActedToday } from "@/lib/daily";
 
 export function StakePanel({
   mint,
@@ -162,7 +163,9 @@ export function StakePanel({
       setAmount("");
       await refresh();
       onUpdate();
+      markActedToday();
       playStake();
+      haptic(20);
       fireConfetti();
       toast.push("success", "💎 Diamond hands!", `Staked ${amount} HOLD.`);
     } catch (err) {
@@ -212,7 +215,9 @@ export function StakePanel({
       setAmount("");
       await refresh();
       onUpdate();
+      markActedToday();
       playTax();
+      haptic([30, 50, 30]);
       fireShake();
       toast.push(
         "danger",
@@ -254,7 +259,9 @@ export function StakePanel({
         .rpc();
       await refresh();
       onUpdate();
+      markActedToday();
       playClaim();
+      haptic(20);
       fireConfetti();
       toast.push("success", "✨ Rebate claimed!", `Collected ${pending} HOLD.`);
     } catch (err) {

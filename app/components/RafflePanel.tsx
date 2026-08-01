@@ -23,8 +23,9 @@ import {
   RAFFLE_PRIZE_BPS,
 } from "@/lib/program";
 import { useToast } from "@/lib/toast";
-import { playRaffleWin } from "@/lib/sound";
+import { playRaffleWin, playTick } from "@/lib/sound";
 import { friendlyError } from "@/lib/errors";
+import { markActedToday } from "@/lib/daily";
 import idl from "@/lib/idl.json";
 
 const HOLD_DECIMALS = 6;
@@ -124,6 +125,15 @@ export function RafflePanel({
   const ready = secondsLeft === 0;
   const prizeEstimate = (jackpot * RAFFLE_PRIZE_BPS) / 10000;
 
+  // Audible tension in the last 10 seconds. The 1s-precision tick only kicks
+  // in inside the final minute (see the tick scheduler above), so this can't
+  // fire more than once per second.
+  useEffect(() => {
+    if (secondsLeft !== null && secondsLeft > 0 && secondsLeft <= 10) {
+      playTick();
+    }
+  }, [secondsLeft]);
+
   const draw = async () => {
     if (!wallet.publicKey || !ready) return;
     setLoading(true);
@@ -180,6 +190,8 @@ export function RafflePanel({
         .rpc();
 
       onUpdate();
+
+      markActedToday();
       playRaffleWin();
       if (!reduceMotion) {
         confetti({

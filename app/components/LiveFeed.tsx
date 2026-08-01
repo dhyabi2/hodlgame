@@ -5,8 +5,16 @@ import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AnchorProvider, Program, EventParser } from "@coral-xyz/anchor";
 import { PROGRAM_ID, formatAmount } from "@/lib/program";
-import { playStake, playTax, playClaim, playSwap, playRaffleWin } from "@/lib/sound";
+import {
+  playStake,
+  playTax,
+  playClaim,
+  playSwap,
+  playRaffleWin,
+  playWhaleAlert,
+} from "@/lib/sound";
 import { useToast } from "@/lib/toast";
+import { chronicleLine } from "@/lib/chronicle";
 import idl from "@/lib/idl.json";
 
 interface FeedEvent {
@@ -24,6 +32,13 @@ interface FeedEvent {
 
 const HISTORY_LIMIT = 15;
 const MAX_EVENTS = 40;
+/** A stake/unstake at or above this size gets the whale treatment. */
+const WHALE_THRESHOLD_HOLD = 10_000;
+
+function isWhale(amountStr: string): boolean {
+  const n = parseFloat(amountStr.replace(/,/g, ""));
+  return Number.isFinite(n) && n >= WHALE_THRESHOLD_HOLD;
+}
 
 function mapEvent(
   name: string,
@@ -93,6 +108,7 @@ export function LiveFeed() {
   const toast = useToast();
   const [events, setEvents] = useState<FeedEvent[]>([]);
   const [flashIds, setFlashIds] = useState<Set<string>>(new Set());
+  const [chronicle, setChronicle] = useState(false);
   const seen = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -159,14 +175,32 @@ export function LiveFeed() {
         const ev = mapEvent("StakeEvent", data, signature, Date.now());
         if (ev) {
           pushEvent(ev);
-          playStake();
+          if (isWhale(ev.amount)) {
+            playWhaleAlert();
+            toast.push(
+              "info",
+              "🐋 Whale alert",
+              `${ev.amount} HOLD just entered the vault.`
+            );
+          } else {
+            playStake();
+          }
         }
       }),
       program.addEventListener("UnstakeEvent", (data, _slot, signature) => {
         const ev = mapEvent("UnstakeEvent", data, signature, Date.now());
         if (ev) {
           pushEvent(ev);
-          playTax();
+          if (isWhale(ev.amount)) {
+            playWhaleAlert();
+            toast.push(
+              "info",
+              "🐋 Whale alert",
+              `${ev.amount} HOLD just left — the vault ate well.`
+            );
+          } else {
+            playTax();
+          }
         }
       }),
       program.addEventListener("ClaimEvent", (data, _slot, signature) => {
@@ -211,7 +245,18 @@ export function LiveFeed() {
 
   return (
     <div className="rounded-2xl border border-holder-700 bg-holder-800/60 p-6 h-full flex flex-col">
-      <h2 className="text-2xl font-bold mb-4">Live Feed</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-2xl font-bold">
+          {chronicle ? "The Chronicle" : "Live Feed"}
+        </h2>
+        <button
+          onClick={() => setChronicle((c) => !c)}
+          title="Toggle narrated view"
+          className="text-xs px-3 py-1 rounded-lg border border-holder-700 text-slate-400 hover:border-holder-accent hover:text-holder-accent transition"
+        >
+          {chronicle ? "📊 Raw" : "📜 Narrate"}
+        </button>
+      </div>
       <div className="space-y-2 overflow-y-auto pr-1 flex-1 max-h-[520px]">
         <AnimatePresence initial={false}>
           {events.length === 0 ? (
@@ -227,7 +272,12 @@ export function LiveFeed() {
             </div>
           ) : (
             events.map((ev) => (
-              <FeedRow key={ev.id} ev={ev} flash={flashIds.has(ev.id)} />
+              <FeedRow
+                key={ev.id}
+                ev={ev}
+                flash={flashIds.has(ev.id)}
+                chronicle={chronicle}
+              />
             ))
           )}
         </AnimatePresence>
@@ -269,8 +319,44 @@ const KIND_CONFIG = {
   },
 } as const;
 
-function FeedRow({ ev, flash }: { ev: FeedEvent; flash?: boolean }) {
+function FeedRow({
+  ev,
+  flash,
+  chronicle,
+}: {
+  ev: FeedEvent;
+  flash?: boolean;
+  chronicle?: boolean;
+}) {
   const config = KIND_CONFIG[ev.kind];
+
+  if (chronicle) {
+    const line = chronicleLine({
+      id: ev.id,
+      kind: ev.kind,
+      user: ev.user,
+      amount: ev.amount,
+    });
+    return (
+      <motion.div
+        layout
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0 }}
+        className={`flex items-start gap-3 rounded-xl bg-holder-900/50 border ${config.border} p-3 ${
+          flash ? "animate-flash-accent" : ""
+        }`}
+      >
+        <span className="text-xl leading-none mt-0.5">{config.icon}</span>
+        <div>
+          <p className="text-sm text-slate-300 leading-snug italic">{line}</p>
+          <p className="text-xs text-slate-600 mt-1">
+            {new Date(ev.time).toLocaleTimeString()}
+          </p>
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div

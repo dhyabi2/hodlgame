@@ -26,8 +26,9 @@ import {
   quoteSwapOut,
 } from "@/lib/program";
 import { useToast } from "@/lib/toast";
-import { playSwap } from "@/lib/sound";
+import { playSwap, haptic } from "@/lib/sound";
 import { friendlyError } from "@/lib/errors";
+import { markActedToday } from "@/lib/daily";
 
 const SLIPPAGE_BPS = 100; // 1% tolerance
 const HOLD_DECIMALS = 6;
@@ -171,7 +172,9 @@ export function SwapPanel({
 
       setAmount("");
       onUpdate();
+      markActedToday();
       playSwap();
+      haptic(20);
       if (!reduceMotion) {
         confetti({
           particleCount: 60,

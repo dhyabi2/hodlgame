@@ -19,6 +19,7 @@ import { SplashIntro } from "@/components/SplashIntro";
 import { HowItWorks } from "@/components/HowItWorks";
 import { PersonalStats } from "@/components/PersonalStats";
 import { AmbientParticles } from "@/components/AmbientParticles";
+import { DailyQuests } from "@/components/DailyQuests";
 import {
   findVaultStatePDA,
   findVaultTokenAccount,
@@ -220,11 +221,12 @@ export default function Home() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               <div className="space-y-8">
                 <SwapPanel mint={MINT} onUpdate={bumpRefresh} />
+                <DailyQuests position={position} refreshTick={refreshTick} />
                 {position && (
                   <StreakMeter points={position.points} amount={position.amount} />
                 )}
                 <StakePanel mint={MINT} onUpdate={bumpRefresh} onPosition={setPosition} />
-                <PersonalStats />
+                <PersonalStats position={position} />
               </div>
               <div className="space-y-8">
                 <LiveFeed />

@@ -1,7 +1,7 @@
 "use client";
 
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnchorProvider, Program, BN } from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
 import { PROGRAM_ID, formatAmount } from "@/lib/program";
@@ -75,6 +75,35 @@ export function Leaderboard() {
 
   const list = tab === "stakers" ? topStakers : topDiamonds;
 
+  // Track the previous ranking per tab so we can show genuine movement between
+  // refreshes. First render has no baseline, so nothing is marked as moved.
+  const prevRanks = useRef<Record<string, Record<string, number>>>({
+    stakers: {},
+    diamond: {},
+  });
+  const [deltas, setDeltas] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (list.length === 0) return;
+    const previous = prevRanks.current[tab];
+    const next: Record<string, number> = {};
+    const moved: Record<string, number> = {};
+    list.forEach((row, i) => {
+      next[row.owner] = i;
+      const before = previous[row.owner];
+      if (before !== undefined && before !== i) {
+        moved[row.owner] = before - i; // positive = climbed
+      }
+    });
+    prevRanks.current[tab] = next;
+    if (Object.keys(moved).length > 0) {
+      setDeltas(moved);
+      const id = setTimeout(() => setDeltas({}), 6000);
+      return () => clearTimeout(id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, tab]);
+
   return (
     <div className="rounded-2xl border border-holder-700 bg-holder-800/60 p-6">
       <div className="flex items-center justify-between mb-4">
@@ -136,6 +165,21 @@ export function Leaderboard() {
                   <span className="font-mono text-sm">
                     {isYou ? "👈 You" : short(row.owner)}
                   </span>
+                  {deltas[row.owner] !== undefined && (
+                    <span
+                      title={`Moved ${Math.abs(deltas[row.owner])} place${
+                        Math.abs(deltas[row.owner]) === 1 ? "" : "s"
+                      }`}
+                      className={`text-xs font-bold ${
+                        deltas[row.owner] > 0
+                          ? "text-holder-success"
+                          : "text-holder-danger"
+                      }`}
+                    >
+                      {deltas[row.owner] > 0 ? "▲" : "▼"}
+                      {Math.abs(deltas[row.owner])}
+                    </span>
+                  )}
                 </div>
                 <div className="text-right">
                   {tab === "stakers" ? (

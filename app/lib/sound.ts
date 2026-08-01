@@ -1,8 +1,12 @@
 "use client";
 
 const MUTE_KEY = "holder:muted";
+const VOLUME_KEY = "holder:volume";
+const DEFAULT_VOLUME = 0.7;
 
 let ctx: AudioContext | null = null;
+/** Every sound routes through this, so the volume slider is truly global. */
+let masterGain: GainNode | null = null;
 
 function getContext(): AudioContext | null {
   if (typeof window === "undefined") return null;
@@ -10,11 +14,18 @@ function getContext(): AudioContext | null {
     const Ctor = window.AudioContext || (window as any).webkitAudioContext;
     if (!Ctor) return null;
     ctx = new Ctor();
+    masterGain = ctx.createGain();
+    masterGain.gain.value = getVolume();
+    masterGain.connect(ctx.destination);
   }
   if (ctx.state === "suspended") {
     ctx.resume().catch(() => {});
   }
   return ctx;
+}
+
+function destination(audioCtx: AudioContext): AudioNode {
+  return masterGain ?? audioCtx.destination;
 }
 
 export function isMuted(): boolean {
@@ -25,6 +36,32 @@ export function isMuted(): boolean {
 export function setMuted(muted: boolean) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(MUTE_KEY, muted ? "1" : "0");
+}
+
+export function getVolume(): number {
+  if (typeof window === "undefined") return DEFAULT_VOLUME;
+  const raw = window.localStorage.getItem(VOLUME_KEY);
+  const parsed = raw === null ? NaN : parseFloat(raw);
+  return Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : DEFAULT_VOLUME;
+}
+
+export function setVolume(v: number) {
+  if (typeof window === "undefined") return;
+  const clamped = Math.min(1, Math.max(0, v));
+  window.localStorage.setItem(VOLUME_KEY, String(clamped));
+  if (masterGain) masterGain.gain.value = clamped;
+}
+
+/** Short vibration on supporting devices — silent no-op elsewhere. */
+export function haptic(pattern: number | number[] = 15) {
+  if (typeof navigator === "undefined" || isMuted()) return;
+  if (typeof navigator.vibrate === "function") {
+    try {
+      navigator.vibrate(pattern);
+    } catch {
+      /* some browsers throw on unsupported patterns — not worth surfacing */
+    }
+  }
 }
 
 function tone(
@@ -43,7 +80,7 @@ function tone(
   gain.gain.linearRampToValueAtTime(gainPeak, startTime + 0.02);
   gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
   osc.connect(gain);
-  gain.connect(audioCtx.destination);
+  gain.connect(destination(audioCtx));
   osc.start(startTime);
   osc.stop(startTime + duration + 0.05);
 }
@@ -74,7 +111,7 @@ export function playTax() {
     gain.gain.setValueAtTime(0.14, now);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
     osc.connect(gain);
-    gain.connect(audioCtx.destination);
+    gain.connect(destination(audioCtx));
     osc.start(now);
     osc.stop(now + 0.45);
   });
@@ -110,7 +147,7 @@ export function playSwap() {
     gain.gain.linearRampToValueAtTime(0.12, now + 0.05);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.25);
     osc.connect(gain);
-    gain.connect(audioCtx.destination);
+    gain.connect(destination(audioCtx));
     osc.start(now);
     osc.stop(now + 0.3);
   });
@@ -120,5 +157,33 @@ export function playSwap() {
 export function playClick() {
   play((audioCtx, now) => {
     tone(320, now, 0.05, "square", 0.06, audioCtx);
+  });
+}
+
+/** Low ominous horn — a whale-sized move just hit the feed. */
+export function playWhaleAlert() {
+  play((audioCtx, now) => {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(70, now);
+    osc.frequency.linearRampToValueAtTime(110, now + 0.5);
+    osc.frequency.linearRampToValueAtTime(65, now + 1.0);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.16, now + 0.12);
+    gain.gain.setValueAtTime(0.16, now + 0.7);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 1.1);
+    osc.connect(gain);
+    gain.connect(destination(audioCtx));
+    osc.start(now);
+    osc.stop(now + 1.15);
+  });
+  haptic([25, 40, 25]);
+}
+
+/** Dry tick — raffle countdown in the final seconds. */
+export function playTick() {
+  play((audioCtx, now) => {
+    tone(1200, now, 0.035, "square", 0.05, audioCtx);
   });
 }

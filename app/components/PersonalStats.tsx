@@ -4,6 +4,8 @@ import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useEffect, useState } from "react";
 import { AnchorProvider, BN, Program, EventParser } from "@coral-xyz/anchor";
 import { PROGRAM_ID, formatAmount } from "@/lib/program";
+import { getAchievements } from "@/lib/achievements";
+import { getHoldingScore } from "@/lib/tiers";
 import idl from "@/lib/idl.json";
 
 const HISTORY_LIMIT = 30;
@@ -24,7 +26,11 @@ const EMPTY: Stats = {
   raffleWins: 0,
 };
 
-export function PersonalStats() {
+export function PersonalStats({
+  position,
+}: {
+  position?: { amount: BN; points: BN } | null;
+}) {
   const { connection } = useConnection();
   const wallet = useWallet();
   const [stats, setStats] = useState<Stats | null>(null);
@@ -101,6 +107,20 @@ export function PersonalStats() {
     stats !== null &&
     (s.totalStaked.gtn(0) || s.totalTaxPaid.gtn(0) || s.totalClaimed.gtn(0));
 
+  const avgHoldDays = position
+    ? getHoldingScore(position.points, position.amount).avgHoldDays
+    : 0;
+  const achievements = getAchievements({
+    stakedAmount: position?.amount ?? new BN(0),
+    avgHoldDays,
+    totalStaked: s.totalStaked,
+    totalTaxPaid: s.totalTaxPaid,
+    totalBurned: s.totalBurned,
+    totalClaimed: s.totalClaimed,
+    raffleWins: s.raffleWins,
+  });
+  const unlockedCount = achievements.filter((a) => a.unlocked).length;
+
   return (
     <div className="rounded-2xl border border-holder-700 bg-holder-800/60 p-6">
       <h3 className="text-sm uppercase tracking-wider text-slate-400 mb-3">
@@ -128,6 +148,41 @@ export function PersonalStats() {
       <p className="text-xs text-slate-600 mt-3">
         Based on your last {HISTORY_LIMIT} transactions.
       </p>
+
+      {stats !== null && (
+        <div className="mt-5 pt-5 border-t border-holder-700">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm uppercase tracking-wider text-slate-400">
+              Achievements
+            </h3>
+            <span className="text-xs text-slate-500">
+              {unlockedCount}/{achievements.length}
+            </span>
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            {achievements.map((a) => (
+              <div
+                key={a.id}
+                title={`${a.name} — ${a.description}`}
+                className={`rounded-xl p-2 text-center border transition ${
+                  a.unlocked
+                    ? "bg-holder-jackpot/10 border-holder-jackpot/40"
+                    : "bg-holder-900/40 border-holder-700 opacity-40 grayscale"
+                }`}
+              >
+                <p className="text-xl leading-none">{a.emoji}</p>
+                <p
+                  className={`text-[10px] mt-1 leading-tight ${
+                    a.unlocked ? "text-holder-jackpot" : "text-slate-500"
+                  }`}
+                >
+                  {a.name}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

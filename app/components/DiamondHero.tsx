@@ -1,10 +1,16 @@
 "use client";
 
+import { useState } from "react";
+import confetti from "canvas-confetti";
+import { useReducedMotion } from "framer-motion";
 import { AnimatedNumber } from "./AnimatedNumber";
+import { useToast } from "@/lib/toast";
 
 function clamp(v: number, min: number, max: number) {
   return Math.max(min, Math.min(max, v));
 }
+
+const EGG_CLICKS = 7;
 
 function Diamond({
   jackpot,
@@ -13,13 +19,43 @@ function Diamond({
   jackpot: number;
   totalStaked: number;
 }) {
+  const toast = useToast();
+  const reduceMotion = useReducedMotion();
+  const [clicks, setClicks] = useState(0);
+
   // More staked = faster spin. Bigger jackpot = brighter glow. Both react to
   // real on-chain state instead of being purely decorative.
   const spinSeconds = clamp(12 - Math.log10(totalStaked + 1) * 1.8, 3, 12);
   const glowOpacity = clamp(0.18 + Math.log10(jackpot + 1) * 0.06, 0.18, 0.55);
 
+  const poke = () => {
+    const next = clicks + 1;
+    setClicks(next);
+    if (next === EGG_CLICKS) {
+      setClicks(0);
+      toast.push(
+        "info",
+        "🥚 You found the crack in the diamond",
+        "Nothing in here but the sound of someone still holding."
+      );
+      if (!reduceMotion) {
+        confetti({
+          particleCount: 40,
+          spread: 360,
+          startVelocity: 18,
+          scalar: 0.7,
+          origin: { y: 0.35 },
+          colors: ["#a5f3fc", "#22d3ee"],
+        });
+      }
+    }
+  };
+
   return (
-    <div className="relative w-32 h-32 md:w-40 md:h-40 mx-auto">
+    <div
+      onClick={poke}
+      className="relative w-32 h-32 md:w-40 md:h-40 mx-auto cursor-pointer select-none"
+    >
       <div
         className="absolute inset-0 rounded-full bg-holder-jackpot blur-2xl animate-pulse-glow"
         style={{ opacity: glowOpacity }}
