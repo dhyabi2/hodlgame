@@ -46,6 +46,16 @@ const config: Config = {
           "0%": { backgroundColor: "rgba(244, 63, 94, 0.35)" },
           "100%": { backgroundColor: "transparent" },
         },
+        "flash-accent": {
+          "0%": { backgroundColor: "rgba(34, 211, 238, 0.25)" },
+          "100%": { backgroundColor: "transparent" },
+        },
+        "float-up": {
+          "0%": { transform: "translateY(0)", opacity: "0" },
+          "10%": { opacity: "1" },
+          "90%": { opacity: "1" },
+          "100%": { transform: "translateY(-110vh)", opacity: "0" },
+        },
       },
       animation: {
         "spin-slow": "spin-slow 12s linear infinite",
@@ -53,6 +63,8 @@ const config: Config = {
         shake: "shake 0.4s ease-in-out",
         "slide-in": "slide-in 0.3s ease-out",
         flash: "flash 0.6s ease-out",
+        "flash-accent": "flash-accent 1s ease-out",
+        "float-up": "float-up linear infinite",
       },
     },
   },

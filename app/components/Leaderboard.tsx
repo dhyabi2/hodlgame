@@ -1,6 +1,6 @@
 "use client";
 
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useEffect, useState } from "react";
 import { AnchorProvider, Program, BN } from "@coral-xyz/anchor";
 import { PublicKey } from "@solana/web3.js";
@@ -23,6 +23,7 @@ function short(pubkey: string) {
 
 export function Leaderboard() {
   const { connection } = useConnection();
+  const wallet = useWallet();
   const [rows, setRows] = useState<StakeRow[] | null>(null);
   const [tab, setTab] = useState<"stakers" | "diamond">("stakers");
 
@@ -105,23 +106,36 @@ export function Leaderboard() {
       {rows === null ? (
         <p className="text-slate-400 text-center py-8">Loading...</p>
       ) : list.length === 0 ? (
-        <p className="text-slate-400 text-center py-8">
-          No stakers yet. Be the first.
-        </p>
+        <div className="text-center py-10 space-y-2">
+          <p className="text-4xl">🏆</p>
+          <p className="text-slate-300 font-medium">
+            This leaderboard is wide open.
+          </p>
+          <p className="text-slate-500 text-sm">
+            Stake now and claim rank #1 before anyone else does.
+          </p>
+        </div>
       ) : (
         <ol className="space-y-2">
           {list.map((row, i) => {
             const score = getHoldingScore(row.points, row.amount);
+            const isYou = wallet.publicKey?.toBase58() === row.owner;
             return (
               <li
                 key={row.owner}
-                className="flex items-center justify-between rounded-xl bg-holder-900/50 p-3"
+                className={`flex items-center justify-between rounded-xl p-3 ${
+                  isYou
+                    ? "bg-holder-accent/10 border border-holder-accent/50"
+                    : "bg-holder-900/50"
+                }`}
               >
                 <div className="flex items-center gap-3">
                   <span className="w-5 text-center text-sm text-slate-500 font-mono">
                     {i + 1}
                   </span>
-                  <span className="font-mono text-sm">{short(row.owner)}</span>
+                  <span className="font-mono text-sm">
+                    {isYou ? "👈 You" : short(row.owner)}
+                  </span>
                 </div>
                 <div className="text-right">
                   {tab === "stakers" ? (

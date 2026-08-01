@@ -15,7 +15,7 @@ import {
   getAssociatedTokenAddress,
 } from "@solana/spl-token";
 import { BN } from "@coral-xyz/anchor";
-import { useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import confetti from "canvas-confetti";
 import {
   findSwapPoolPDA,
@@ -27,6 +27,7 @@ import {
 } from "@/lib/program";
 import { useToast } from "@/lib/toast";
 import { playSwap } from "@/lib/sound";
+import { friendlyError } from "@/lib/errors";
 
 const SLIPPAGE_BPS = 100; // 1% tolerance
 const HOLD_DECIMALS = 6;
@@ -187,7 +188,7 @@ export function SwapPanel({
       );
     } catch (err) {
       console.error(err);
-      toast.push("danger", "Swap failed", (err as Error).message);
+      toast.push("danger", "Swap failed", friendlyError(err));
     } finally {
       setLoading(false);
     }
@@ -220,13 +221,15 @@ export function SwapPanel({
         </div>
       </div>
 
-      <button
+      <motion.button
         onClick={flip}
+        whileHover={reduceMotion ? undefined : { scale: 1.1, rotate: 180 }}
+        whileTap={reduceMotion ? undefined : { scale: 0.9 }}
         className="mx-auto flex items-center justify-center w-9 h-9 rounded-full border border-holder-700 bg-holder-900 hover:border-holder-accent transition text-lg"
         aria-label="Flip swap direction"
       >
         ⇅
-      </button>
+      </motion.button>
 
       <div className="space-y-2">
         <label className="text-sm text-slate-400">You receive (est.)</label>
@@ -243,15 +246,17 @@ export function SwapPanel({
         </p>
       </div>
 
-      <button
+      <motion.button
         onClick={swap}
         disabled={
           loading || amountNum <= 0 || !wallet.publicKey || quote <= 0
         }
+        whileHover={reduceMotion ? undefined : { scale: 1.02 }}
+        whileTap={reduceMotion ? undefined : { scale: 0.97 }}
         className="w-full py-3 rounded-xl font-bold bg-holder-accent text-holder-900 hover:bg-cyan-300 transition disabled:opacity-50"
       >
         {loading ? "Swapping..." : !wallet.publicKey ? "Connect wallet" : "Swap"}
-      </button>
+      </motion.button>
     </div>
   );
 }

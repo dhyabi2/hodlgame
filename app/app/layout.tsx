@@ -10,9 +10,24 @@ const spaceGrotesk = Space_Grotesk({
   variable: "--font-display",
 });
 
+const title = "Holder — Patience Pays";
+const description =
+  "Stake HOLD tokens. Diamond hands earn rebates and win the Diamond Raffle. Paper hands pay a 20% exit tax — 5% burned forever. Built on Solana.";
+
 export const metadata: Metadata = {
-  title: "Holder — Patience Pays",
-  description: "Stake tokens, tax paper hands, earn rebates on Solana.",
+  title,
+  description,
+  openGraph: {
+    title,
+    description,
+    type: "website",
+    siteName: "Holder",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title,
+    description,
+  },
 };
 
 export default function RootLayout({

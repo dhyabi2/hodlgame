@@ -1,8 +1,12 @@
 "use client";
 
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { BN } from "@coral-xyz/anchor";
-import { getHoldingScore } from "@/lib/tiers";
+import { AnchorProvider, BN, Program } from "@coral-xyz/anchor";
+import { getHoldingScore, getTierLabel } from "@/lib/tiers";
+import { PROGRAM_ID } from "@/lib/program";
+import idl from "@/lib/idl.json";
 
 export function StreakMeter({
   points,
@@ -11,8 +15,54 @@ export function StreakMeter({
   points: BN | string | number;
   amount: BN | string | number;
 }) {
+  const { connection } = useConnection();
+  const wallet = useWallet();
   const score = getHoldingScore(points, amount);
   const { tier, nextTier, avgHoldDays, progress } = score;
+  const [percentile, setPercentile] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const provider = new AnchorProvider(
+      connection,
+      {} as any,
+      AnchorProvider.defaultOptions()
+    );
+    const program = new Program<any>(idl as any, PROGRAM_ID, provider);
+
+    const fetchPercentile = async () => {
+      try {
+        const all = await (program.account as any).stakeAccount.all();
+        const mySeconds = score.avgHoldSeconds;
+        const others = all.filter(
+          (a: any) =>
+            a.account.amount.gtn(0) &&
+            !(wallet.publicKey && a.account.owner.equals(wallet.publicKey))
+        );
+        if (others.length === 0) {
+          if (!cancelled) setPercentile(null);
+          return;
+        }
+        const behind = others.filter((a: any) => {
+          const otherScore = getHoldingScore(a.account.points, a.account.amount);
+          return otherScore.avgHoldSeconds <= mySeconds;
+        }).length;
+        if (!cancelled) {
+          setPercentile(Math.round((behind / others.length) * 100));
+        }
+      } catch (err) {
+        console.error("percentile fetch error", err);
+      }
+    };
+
+    fetchPercentile();
+    const id = setInterval(fetchPercentile, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connection, wallet.publicKey, score.avgHoldSeconds]);
 
   return (
     <div className="rounded-2xl border border-holder-700 bg-holder-800/60 p-6 space-y-4">
@@ -21,14 +71,16 @@ export function StreakMeter({
           Diamond Hands Score
         </h3>
         <span className={`text-lg font-bold ${tier.color}`}>
-          {tier.emoji} {tier.name}
+          {tier.emoji} {getTierLabel(score)}
         </span>
       </div>
 
       <div>
         <div className="h-3 rounded-full bg-holder-900 overflow-hidden">
           <motion.div
-            className="h-full bg-gradient-to-r from-holder-accent to-holder-success"
+            className={`h-full bg-gradient-to-r from-holder-accent to-holder-success ${
+              !nextTier ? "animate-pulse-glow" : ""
+            }`}
             initial={{ width: 0 }}
             animate={{ width: `${progress * 100}%` }}
             transition={{ duration: 0.6, ease: "easeOut" }}
@@ -42,10 +94,16 @@ export function StreakMeter({
               {(nextTier.minSeconds / 86400).toFixed(0)}d
             </span>
           ) : (
-            <span>Max tier reached</span>
+            <span>Max tier — still climbing</span>
           )}
         </div>
       </div>
+
+      {percentile !== null && (
+        <p className="text-center text-sm text-holder-success font-medium">
+          🔥 You're holding longer than {percentile}% of stakers
+        </p>
+      )}
 
       <ShareButton tierName={tier.name} tierEmoji={tier.emoji} avgHoldDays={avgHoldDays} />
     </div>

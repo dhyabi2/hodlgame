@@ -1,11 +1,12 @@
 "use client";
 
-import { useConnection } from "@solana/wallet-adapter-react";
+import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AnchorProvider, Program, EventParser } from "@coral-xyz/anchor";
 import { PROGRAM_ID, formatAmount } from "@/lib/program";
 import { playStake, playTax, playClaim, playSwap, playRaffleWin } from "@/lib/sound";
+import { useToast } from "@/lib/toast";
 import idl from "@/lib/idl.json";
 
 interface FeedEvent {
@@ -88,7 +89,10 @@ function mapEvent(
 
 export function LiveFeed() {
   const { connection } = useConnection();
+  const wallet = useWallet();
+  const toast = useToast();
   const [events, setEvents] = useState<FeedEvent[]>([]);
+  const [flashIds, setFlashIds] = useState<Set<string>>(new Set());
   const seen = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -105,6 +109,14 @@ export function LiveFeed() {
       if (seen.current.has(ev.id)) return;
       seen.current.add(ev.id);
       setEvents((prev) => [ev, ...prev].slice(0, MAX_EVENTS));
+      setFlashIds((prev) => new Set(prev).add(ev.id));
+      setTimeout(() => {
+        setFlashIds((prev) => {
+          const next = new Set(prev);
+          next.delete(ev.id);
+          return next;
+        });
+      }, 1200);
     }
 
     (async () => {
@@ -171,11 +183,20 @@ export function LiveFeed() {
           playSwap();
         }
       }),
-      program.addEventListener("RaffleEvent", (data, _slot, signature) => {
+      program.addEventListener("RaffleEvent", (rawData, _slot, signature) => {
+        const data: any = rawData;
         const ev = mapEvent("RaffleEvent", data, signature, Date.now());
         if (ev) {
           pushEvent(ev);
-          playRaffleWin();
+          if (wallet.publicKey && data.winner.equals(wallet.publicKey)) {
+            playRaffleWin();
+          } else if (wallet.publicKey) {
+            toast.push(
+              "info",
+              "Not this round",
+              "Better luck in the next Diamond Raffle — keep holding to improve your odds."
+            );
+          }
         }
       }),
     ];
@@ -186,7 +207,7 @@ export function LiveFeed() {
         program.removeEventListener(id).catch(() => {});
       });
     };
-  }, [connection]);
+  }, [connection, wallet.publicKey, toast]);
 
   return (
     <div className="rounded-2xl border border-holder-700 bg-holder-800/60 p-6 h-full flex flex-col">
@@ -194,11 +215,20 @@ export function LiveFeed() {
       <div className="space-y-2 overflow-y-auto pr-1 flex-1 max-h-[520px]">
         <AnimatePresence initial={false}>
           {events.length === 0 ? (
-            <p className="text-slate-400 text-center py-8">
-              No events yet. Be the first diamond hand.
-            </p>
+            <div className="text-center py-10 space-y-2">
+              <p className="text-4xl">💎</p>
+              <p className="text-slate-300 font-medium">
+                The vault is quiet... for now.
+              </p>
+              <p className="text-slate-500 text-sm">
+                Be the first diamond hand — every stake, exit, and win shows up
+                here live.
+              </p>
+            </div>
           ) : (
-            events.map((ev) => <FeedRow key={ev.id} ev={ev} />)
+            events.map((ev) => (
+              <FeedRow key={ev.id} ev={ev} flash={flashIds.has(ev.id)} />
+            ))
           )}
         </AnimatePresence>
       </div>
@@ -239,7 +269,7 @@ const KIND_CONFIG = {
   },
 } as const;
 
-function FeedRow({ ev }: { ev: FeedEvent }) {
+function FeedRow({ ev, flash }: { ev: FeedEvent; flash?: boolean }) {
   const config = KIND_CONFIG[ev.kind];
 
   return (
@@ -248,7 +278,9 @@ function FeedRow({ ev }: { ev: FeedEvent }) {
       initial={{ opacity: 0, y: -12 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
-      className={`flex items-center justify-between rounded-xl bg-holder-900/50 border ${config.border} p-3`}
+      className={`flex items-center justify-between rounded-xl bg-holder-900/50 border ${config.border} p-3 ${
+        flash ? "animate-flash-accent" : ""
+      }`}
     >
       <div className="flex items-center gap-3">
         <span className="text-xl">{config.icon}</span>

@@ -60,3 +60,11 @@ export function getHoldingScore(
 
   return { tier, nextTier, avgHoldSeconds, avgHoldDays, progress };
 }
+
+/** At max tier, days keep climbing instead of the bar just sitting full forever. */
+export function getTierLabel(score: HoldingScore): string {
+  if (!score.nextTier) {
+    return `${score.tier.name} · Day ${Math.floor(score.avgHoldDays)}`;
+  }
+  return score.tier.name;
+}

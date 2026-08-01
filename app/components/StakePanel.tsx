@@ -15,7 +15,7 @@ import {
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import { BN } from "@coral-xyz/anchor";
-import { useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import confetti from "canvas-confetti";
 import {
   getProgram,
@@ -27,6 +27,7 @@ import {
 } from "@/lib/program";
 import { useToast } from "@/lib/toast";
 import { playStake, playTax, playClaim } from "@/lib/sound";
+import { friendlyError } from "@/lib/errors";
 
 export function StakePanel({
   mint,
@@ -166,7 +167,7 @@ export function StakePanel({
       toast.push("success", "💎 Diamond hands!", `Staked ${amount} HOLD.`);
     } catch (err) {
       console.error(err);
-      toast.push("danger", "Stake failed", (err as Error).message);
+      toast.push("danger", "Stake failed", friendlyError(err));
     } finally {
       setLoading(false);
     }
@@ -220,7 +221,7 @@ export function StakePanel({
       );
     } catch (err) {
       console.error(err);
-      toast.push("danger", "Unstake failed", (err as Error).message);
+      toast.push("danger", "Unstake failed", friendlyError(err));
     } finally {
       setLoading(false);
     }
@@ -258,7 +259,7 @@ export function StakePanel({
       toast.push("success", "✨ Rebate claimed!", `Collected ${pending} HOLD.`);
     } catch (err) {
       console.error(err);
-      toast.push("danger", "Claim failed", (err as Error).message);
+      toast.push("danger", "Claim failed", friendlyError(err));
     } finally {
       setLoading(false);
     }
@@ -330,9 +331,11 @@ export function StakePanel({
         )}
       </div>
 
-      <button
+      <motion.button
         onClick={execute}
         disabled={loading || !amount}
+        whileHover={reduceMotion ? undefined : { scale: 1.02 }}
+        whileTap={reduceMotion ? undefined : { scale: 0.97 }}
         className={`w-full py-3 rounded-xl font-bold transition ${
           mode === "stake"
             ? "bg-holder-accent text-holder-900 hover:bg-cyan-300"
@@ -340,15 +343,17 @@ export function StakePanel({
         } disabled:opacity-50`}
       >
         {loading ? "Processing..." : mode === "stake" ? "Stake" : "Unstake"}
-      </button>
+      </motion.button>
 
-      <button
+      <motion.button
         onClick={claim}
         disabled={loading}
+        whileHover={reduceMotion ? undefined : { scale: 1.02 }}
+        whileTap={reduceMotion ? undefined : { scale: 0.97 }}
         className="w-full py-3 rounded-xl font-bold border border-holder-success text-holder-success hover:bg-holder-success/10 transition disabled:opacity-50"
       >
         Claim Rebate
-      </button>
+      </motion.button>
     </div>
   );
 }

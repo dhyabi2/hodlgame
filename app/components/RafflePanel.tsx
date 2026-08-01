@@ -9,7 +9,7 @@ import {
   getAssociatedTokenAddress,
 } from "@solana/spl-token";
 import { AnchorProvider, Program } from "@coral-xyz/anchor";
-import { useReducedMotion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 import confetti from "canvas-confetti";
 import {
   findRafflePoolPDA,
@@ -24,6 +24,7 @@ import {
 } from "@/lib/program";
 import { useToast } from "@/lib/toast";
 import { playRaffleWin } from "@/lib/sound";
+import { friendlyError } from "@/lib/errors";
 import idl from "@/lib/idl.json";
 
 const HOLD_DECIMALS = 6;
@@ -56,10 +57,29 @@ export function RafflePanel({
   const [rafflePoolPDA] = findRafflePoolPDA(mint);
   const [vaultPDA] = findVaultStatePDA(mint);
 
+  // Tick every 15s normally, and only drop to a precise 1s tick in the final
+  // minute before a draw — a countdown re-rendering every second all day is
+  // wasted work for no visible benefit until it actually matters.
   useEffect(() => {
-    const id = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
-    return () => clearInterval(id);
-  }, []);
+    let timeoutId: ReturnType<typeof setTimeout>;
+    let cancelled = false;
+
+    const tick = () => {
+      if (cancelled) return;
+      const nowSec = Math.floor(Date.now() / 1000);
+      setNow(nowSec);
+      const target = lastDraw !== null ? lastDraw + RAFFLE_INTERVAL_SECS : null;
+      const left = target !== null ? target - nowSec : null;
+      const delay = left !== null && left > 0 && left <= 60 ? 1000 : 15000;
+      timeoutId = setTimeout(tick, delay);
+    };
+
+    tick();
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [lastDraw]);
 
   useEffect(() => {
     let cancelled = false;
@@ -177,7 +197,7 @@ export function RafflePanel({
       );
     } catch (err) {
       console.error(err);
-      toast.push("danger", "Draw failed", (err as Error).message);
+      toast.push("danger", "Draw failed", friendlyError(err));
     } finally {
       setLoading(false);
     }
@@ -222,9 +242,11 @@ export function RafflePanel({
         wallet size.
       </p>
 
-      <button
+      <motion.button
         onClick={draw}
         disabled={loading || !ready || !wallet.publicKey}
+        whileHover={reduceMotion || !ready ? undefined : { scale: 1.03 }}
+        whileTap={reduceMotion || !ready ? undefined : { scale: 0.97 }}
         className="w-full py-3 rounded-xl font-bold bg-holder-jackpot text-holder-900 hover:bg-amber-300 transition disabled:opacity-50"
       >
         {loading
@@ -232,7 +254,7 @@ export function RafflePanel({
           : !wallet.publicKey
           ? "Connect wallet"
           : "Draw Raffle"}
-      </button>
+      </motion.button>
     </div>
   );
 }

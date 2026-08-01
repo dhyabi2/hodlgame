@@ -2,13 +2,32 @@
 
 import { AnimatedNumber } from "./AnimatedNumber";
 
-function Diamond() {
+function clamp(v: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, v));
+}
+
+function Diamond({
+  jackpot,
+  totalStaked,
+}: {
+  jackpot: number;
+  totalStaked: number;
+}) {
+  // More staked = faster spin. Bigger jackpot = brighter glow. Both react to
+  // real on-chain state instead of being purely decorative.
+  const spinSeconds = clamp(12 - Math.log10(totalStaked + 1) * 1.8, 3, 12);
+  const glowOpacity = clamp(0.18 + Math.log10(jackpot + 1) * 0.06, 0.18, 0.55);
+
   return (
     <div className="relative w-32 h-32 md:w-40 md:h-40 mx-auto">
-      <div className="absolute inset-0 rounded-full bg-holder-accent/20 blur-2xl animate-pulse-glow" />
+      <div
+        className="absolute inset-0 rounded-full bg-holder-jackpot blur-2xl animate-pulse-glow"
+        style={{ opacity: glowOpacity }}
+      />
       <svg
         viewBox="0 0 100 100"
         className="relative w-full h-full glow-accent animate-spin-slow"
+        style={{ animationDuration: `${spinSeconds}s` }}
       >
         <polygon points="50,5 90,35 50,95 10,35" fill="url(#diamondBody)" />
         <polygon points="50,5 90,35 50,45" fill="#67e8f9" opacity="0.85" />
@@ -27,38 +46,59 @@ function Diamond() {
   );
 }
 
+function StatSkeleton() {
+  return (
+    <div className="rounded-xl bg-holder-900/60 border border-holder-700 p-4 animate-pulse">
+      <div className="h-3 w-24 bg-holder-700/60 rounded" />
+      <div className="h-7 w-32 bg-holder-700/60 rounded mt-2" />
+      <div className="h-3 w-36 bg-holder-700/40 rounded mt-2" />
+    </div>
+  );
+}
+
 export function DiamondHero({
   jackpot,
   totalStaked,
+  loading = false,
 }: {
   jackpot: number;
   totalStaked: number;
+  loading?: boolean;
 }) {
   return (
     <div className="rounded-2xl border border-holder-700 bg-gradient-to-b from-holder-800/80 to-holder-900/40 p-8 text-center space-y-6">
-      <Diamond />
+      <Diamond jackpot={jackpot} totalStaked={totalStaked} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg mx-auto">
-        <div className="rounded-xl bg-holder-900/60 border border-holder-jackpot/30 p-4">
-          <p className="text-xs uppercase tracking-wider text-holder-jackpot/80">
-            Jackpot Vault
-          </p>
-          <p className="text-2xl md:text-3xl font-bold text-holder-jackpot mt-1">
-            <AnimatedNumber value={jackpot} decimals={2} /> HOLD
-          </p>
-          <p className="text-xs text-slate-500 mt-1">
-            Funded entirely by paper-hands tax
-          </p>
-        </div>
-        <div className="rounded-xl bg-holder-900/60 border border-holder-700 p-4">
-          <p className="text-xs uppercase tracking-wider text-slate-400">
-            Total Staked
-          </p>
-          <p className="text-2xl md:text-3xl font-bold mt-1">
-            <AnimatedNumber value={totalStaked} decimals={2} /> HOLD
-          </p>
-          <p className="text-xs text-slate-500 mt-1">Diamond hands only</p>
-        </div>
+        {loading ? (
+          <>
+            <StatSkeleton />
+            <StatSkeleton />
+          </>
+        ) : (
+          <>
+            <div className="rounded-xl bg-holder-900/60 border border-holder-jackpot/30 p-4">
+              <p className="text-xs uppercase tracking-wider text-holder-jackpot/80">
+                Jackpot Vault
+              </p>
+              <p className="text-2xl md:text-3xl font-bold text-holder-jackpot mt-1">
+                <AnimatedNumber value={jackpot} decimals={2} /> HOLD
+              </p>
+              <p className="text-xs text-slate-500 mt-1">
+                Funded entirely by paper-hands tax
+              </p>
+            </div>
+            <div className="rounded-xl bg-holder-900/60 border border-holder-700 p-4">
+              <p className="text-xs uppercase tracking-wider text-slate-400">
+                Total Staked
+              </p>
+              <p className="text-2xl md:text-3xl font-bold mt-1">
+                <AnimatedNumber value={totalStaked} decimals={2} /> HOLD
+              </p>
+              <p className="text-xs text-slate-500 mt-1">Diamond hands only</p>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
