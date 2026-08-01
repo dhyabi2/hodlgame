@@ -1,6 +1,7 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::keccak;
 use anchor_lang::system_program;
-use anchor_spl::associated_token::AssociatedToken;
+use anchor_spl::associated_token::{self, AssociatedToken};
 use anchor_spl::token::{self, Burn, Mint, Token, TokenAccount, Transfer};
 
 declare_id!("9ggxpWrwYXH7sygoqQs2N5qCva38vVkJvr5ZzwPijPUu");
@@ -15,6 +16,12 @@ pub const TAX_BURN_SHARE_BPS: u64 = 2_500;
 /// 1% swap fee, baked into the constant-product invariant (stays in the pool).
 pub const SWAP_FEE_BPS: u64 = 100;
 pub const BPS_DENOMINATOR: u64 = 10_000;
+/// Minimum time between raffle draws.
+pub const RAFFLE_INTERVAL_SECS: i64 = 24 * 60 * 60;
+/// Winner takes 10% of the rebate vault's current balance.
+pub const RAFFLE_PRIZE_BPS: u64 = 1_000;
+/// Bound on entrants per draw to keep compute usage predictable.
+pub const MAX_RAFFLE_ENTRANTS: usize = 50;
 
 #[program]
 pub mod holder {
@@ -408,6 +415,132 @@ pub mod holder {
             hold_amount: hold_in,
             sol_to_hold: false,
             timestamp: Clock::get()?.unix_timestamp,
+        });
+
+        Ok(())
+    }
+
+    /// Authority-only: create the Diamond Raffle, ready to draw after one interval.
+    pub fn initialize_raffle(ctx: Context<InitializeRaffle>) -> Result<()> {
+        let raffle = &mut ctx.accounts.raffle_pool;
+        raffle.mint = ctx.accounts.mint.key();
+        raffle.last_draw_time = Clock::get()?.unix_timestamp;
+        raffle.round = 0;
+        raffle.bump = ctx.bumps.raffle_pool;
+        Ok(())
+    }
+
+    /// Permissionless: draw the Diamond Raffle. Entrants are passed as
+    /// remaining_accounts, pairs of (stake_account, owner's HOLD token
+    /// account) — the client picks the top-points stakers (capped at
+    /// MAX_RAFFLE_ENTRANTS) so compute usage stays bounded. Odds are
+    /// weighted by each entrant's `points` (time-weighted holding), so
+    /// patience — not just wallet size — improves your chance of winning.
+    ///
+    /// Randomness note: Solana has no native secure RNG. This uses a
+    /// keccak hash of the current slot/timestamp/round as a pseudo-random
+    /// seed — fine for a devnet game with no real value at stake, but it
+    /// is influenceable by whoever controls block production and should
+    /// NOT be trusted for anything with real money without swapping in a
+    /// VRF oracle (e.g. Switchboard or ORAO).
+    pub fn draw_raffle<'info>(
+        ctx: Context<'_, '_, 'info, 'info, DrawRaffle<'info>>,
+    ) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        {
+            let raffle = &ctx.accounts.raffle_pool;
+            require!(
+                now - raffle.last_draw_time >= RAFFLE_INTERVAL_SECS,
+                HolderError::RaffleNotReady
+            );
+        }
+
+        let remaining = ctx.remaining_accounts;
+        require!(
+            !remaining.is_empty()
+                && remaining.len() % 2 == 0
+                && remaining.len() / 2 <= MAX_RAFFLE_ENTRANTS,
+            HolderError::InvalidRaffleEntrants
+        );
+
+        let mint_key = ctx.accounts.mint.key();
+        let mut total_weight: u128 = 0;
+        let mut entrants: Vec<(u128, usize, Pubkey)> = Vec::with_capacity(remaining.len() / 2);
+
+        let mut i = 0;
+        while i < remaining.len() {
+            let stake_ai = &remaining[i];
+            let token_ai = &remaining[i + 1];
+            let stake_account: Account<StakeAccount> = Account::try_from(stake_ai)?;
+            require!(stake_account.amount > 0, HolderError::InvalidRaffleEntrants);
+            let expected_ata =
+                associated_token::get_associated_token_address(&stake_account.owner, &mint_key);
+            require_keys_eq!(
+                expected_ata,
+                token_ai.key(),
+                HolderError::InvalidRaffleEntrants
+            );
+            let weight = stake_account.points.max(1);
+            total_weight = total_weight.checked_add(weight).unwrap();
+            entrants.push((weight, i + 1, stake_account.owner));
+            i += 2;
+        }
+        require!(total_weight > 0, HolderError::InvalidRaffleEntrants);
+
+        let round = ctx.accounts.raffle_pool.round;
+        let seed = keccak::hashv(&[
+            &Clock::get()?.slot.to_le_bytes(),
+            &now.to_le_bytes(),
+            &round.to_le_bytes(),
+        ]);
+        let rand_val =
+            u128::from_le_bytes(seed.to_bytes()[0..16].try_into().unwrap()) % total_weight;
+
+        let mut acc: u128 = 0;
+        let mut winner_token_idx = entrants[0].1;
+        let mut winner_owner = entrants[0].2;
+        for (weight, token_idx, owner) in entrants.iter() {
+            acc = acc.checked_add(*weight).unwrap();
+            if rand_val < acc {
+                winner_token_idx = *token_idx;
+                winner_owner = *owner;
+                break;
+            }
+        }
+        let winner_token_ai = &remaining[winner_token_idx];
+
+        let prize = (ctx.accounts.vault_token_account.amount as u128)
+            .checked_mul(RAFFLE_PRIZE_BPS as u128)
+            .unwrap()
+            .checked_div(BPS_DENOMINATOR as u128)
+            .unwrap() as u64;
+        require!(prize > 0, HolderError::InsufficientLiquidity);
+
+        let vault_seeds = &[b"vault_state".as_ref(), mint_key.as_ref(), &[ctx.accounts.vault_state.bump]];
+        let vault_signer = &[&vault_seeds[..]];
+        let cpi_accounts = Transfer {
+            from: ctx.accounts.vault_token_account.to_account_info(),
+            to: winner_token_ai.clone(),
+            authority: ctx.accounts.vault_state.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            cpi_accounts,
+            vault_signer,
+        );
+        token::transfer(cpi_ctx, prize)?;
+
+        let entrant_count = entrants.len() as u32;
+        let raffle = &mut ctx.accounts.raffle_pool;
+        raffle.last_draw_time = now;
+        raffle.round = raffle.round.checked_add(1).unwrap();
+
+        emit!(RaffleEvent {
+            winner: winner_owner,
+            prize,
+            round,
+            participants: entrant_count,
+            timestamp: now,
         });
 
         Ok(())
@@ -820,6 +953,61 @@ pub struct SwapHoldForSol<'info> {
     pub token_program: Program<'info, Token>,
 }
 
+#[derive(Accounts)]
+pub struct InitializeRaffle<'info> {
+    #[account(
+        seeds = [b"vault_state", mint.key().as_ref()],
+        bump = vault_state.bump,
+        has_one = authority,
+        has_one = mint,
+    )]
+    pub vault_state: Box<Account<'info, VaultState>>,
+
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + RafflePool::SIZE,
+        seeds = [b"raffle_pool", mint.key().as_ref()],
+        bump
+    )]
+    pub raffle_pool: Box<Account<'info, RafflePool>>,
+
+    pub mint: Box<Account<'info, Mint>>,
+
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct DrawRaffle<'info> {
+    #[account(
+        seeds = [b"vault_state", mint.key().as_ref()],
+        bump = vault_state.bump,
+        has_one = mint,
+        has_one = vault_token_account,
+    )]
+    pub vault_state: Box<Account<'info, VaultState>>,
+
+    #[account(
+        mut,
+        seeds = [b"raffle_pool", mint.key().as_ref()],
+        bump = raffle_pool.bump,
+        has_one = mint,
+    )]
+    pub raffle_pool: Box<Account<'info, RafflePool>>,
+
+    pub mint: Box<Account<'info, Mint>>,
+
+    #[account(mut)]
+    pub vault_token_account: Box<Account<'info, TokenAccount>>,
+
+    pub caller: Signer<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
 #[account]
 pub struct VaultState {
     pub authority: Pubkey,
@@ -864,6 +1052,18 @@ impl SwapPool {
     pub const SIZE: usize = 32 + 32 + 1;
 }
 
+#[account]
+pub struct RafflePool {
+    pub mint: Pubkey,
+    pub last_draw_time: i64,
+    pub round: u64,
+    pub bump: u8,
+}
+
+impl RafflePool {
+    pub const SIZE: usize = 32 + 8 + 8 + 1;
+}
+
 #[event]
 pub struct StakeEvent {
     pub user: Pubkey,
@@ -898,6 +1098,15 @@ pub struct SwapEvent {
     pub timestamp: i64,
 }
 
+#[event]
+pub struct RaffleEvent {
+    pub winner: Pubkey,
+    pub prize: u64,
+    pub round: u64,
+    pub participants: u32,
+    pub timestamp: i64,
+}
+
 #[error_code]
 pub enum HolderError {
     #[msg("Amount must be greater than zero")]
@@ -910,4 +1119,8 @@ pub enum HolderError {
     SlippageExceeded,
     #[msg("Insufficient pool liquidity")]
     InsufficientLiquidity,
+    #[msg("Raffle is not ready to draw yet")]
+    RaffleNotReady,
+    #[msg("Invalid raffle entrant list")]
+    InvalidRaffleEntrants,
 }

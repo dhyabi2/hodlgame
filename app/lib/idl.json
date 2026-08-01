@@ -833,6 +833,162 @@
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "initializeRaffle",
+      "docs": [
+        "Authority-only: create the Diamond Raffle, ready to draw after one interval."
+      ],
+      "accounts": [
+        {
+          "name": "vaultState",
+          "isMut": false,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "vault_state"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "account": "Mint",
+                "path": "mint"
+              }
+            ]
+          },
+          "relations": [
+            "authority",
+            "mint"
+          ]
+        },
+        {
+          "name": "rafflePool",
+          "isMut": true,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "raffle_pool"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "account": "Mint",
+                "path": "mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "authority",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "drawRaffle",
+      "docs": [
+        "Permissionless: draw the Diamond Raffle. Entrants are passed as",
+        "remaining_accounts, pairs of (stake_account, owner's HOLD token",
+        "account) — the client picks the top-points stakers (capped at",
+        "MAX_RAFFLE_ENTRANTS) so compute usage stays bounded. Odds are",
+        "weighted by each entrant's `points` (time-weighted holding), so",
+        "patience — not just wallet size — improves your chance of winning.",
+        "",
+        "Randomness note: Solana has no native secure RNG. This uses a",
+        "keccak hash of the current slot/timestamp/round as a pseudo-random",
+        "seed — fine for a devnet game with no real value at stake, but it",
+        "is influenceable by whoever controls block production and should",
+        "NOT be trusted for anything with real money without swapping in a",
+        "VRF oracle (e.g. Switchboard or ORAO)."
+      ],
+      "accounts": [
+        {
+          "name": "vaultState",
+          "isMut": false,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "vault_state"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "account": "Mint",
+                "path": "mint"
+              }
+            ]
+          },
+          "relations": [
+            "mint",
+            "vault_token_account"
+          ]
+        },
+        {
+          "name": "rafflePool",
+          "isMut": true,
+          "isSigner": false,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "type": "string",
+                "value": "raffle_pool"
+              },
+              {
+                "kind": "account",
+                "type": "publicKey",
+                "account": "Mint",
+                "path": "mint"
+              }
+            ]
+          },
+          "relations": [
+            "mint"
+          ]
+        },
+        {
+          "name": "mint",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "vaultTokenAccount",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "caller",
+          "isMut": false,
+          "isSigner": true
+        },
+        {
+          "name": "tokenProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": []
     }
   ],
   "accounts": [
@@ -944,6 +1100,30 @@
           {
             "name": "holdVault",
             "type": "publicKey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "RafflePool",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "publicKey"
+          },
+          {
+            "name": "lastDrawTime",
+            "type": "i64"
+          },
+          {
+            "name": "round",
+            "type": "u64"
           },
           {
             "name": "bump",
@@ -1063,6 +1243,36 @@
           "index": false
         }
       ]
+    },
+    {
+      "name": "RaffleEvent",
+      "fields": [
+        {
+          "name": "winner",
+          "type": "publicKey",
+          "index": false
+        },
+        {
+          "name": "prize",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "round",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "participants",
+          "type": "u32",
+          "index": false
+        },
+        {
+          "name": "timestamp",
+          "type": "i64",
+          "index": false
+        }
+      ]
     }
   ],
   "errors": [
@@ -1090,6 +1300,16 @@
       "code": 6004,
       "name": "InsufficientLiquidity",
       "msg": "Insufficient pool liquidity"
+    },
+    {
+      "code": 6005,
+      "name": "RaffleNotReady",
+      "msg": "Raffle is not ready to draw yet"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidRaffleEntrants",
+      "msg": "Invalid raffle entrant list"
     }
   ],
   "metadata": {

@@ -89,6 +89,15 @@ export function playClaim() {
   });
 }
 
+/** Big triumphant fanfare — raffle win. */
+export function playRaffleWin() {
+  play((audioCtx, now) => {
+    [392, 523, 659, 784, 1047, 1319].forEach((freq, i) => {
+      tone(freq, now + i * 0.09, 0.3, "triangle", 0.16, audioCtx);
+    });
+  });
+}
+
 /** Quick whoosh — swap executed. */
 export function playSwap() {
   play((audioCtx, now) => {

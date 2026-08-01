@@ -8,6 +8,7 @@ import { PublicKey } from "@solana/web3.js";
 import { AnchorProvider, BN, Program } from "@coral-xyz/anchor";
 import { StakePanel } from "@/components/StakePanel";
 import { SwapPanel } from "@/components/SwapPanel";
+import { RafflePanel } from "@/components/RafflePanel";
 import { LiveFeed } from "@/components/LiveFeed";
 import { Leaderboard } from "@/components/Leaderboard";
 import { DiamondHero } from "@/components/DiamondHero";
@@ -118,6 +119,8 @@ export default function Home() {
         </header>
 
         <DiamondHero jackpot={toUnits(jackpot)} totalStaked={toUnits(totalStaked)} />
+
+        <RafflePanel mint={MINT} onUpdate={bumpRefresh} />
 
         {!wallet.publicKey ? (
           <div className="rounded-2xl border border-holder-700 bg-holder-800/50 p-12 text-center">

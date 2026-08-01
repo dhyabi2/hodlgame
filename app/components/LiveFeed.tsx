@@ -5,18 +5,19 @@ import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { AnchorProvider, Program, EventParser } from "@coral-xyz/anchor";
 import { PROGRAM_ID, formatAmount } from "@/lib/program";
-import { playStake, playTax, playClaim, playSwap } from "@/lib/sound";
+import { playStake, playTax, playClaim, playSwap, playRaffleWin } from "@/lib/sound";
 import idl from "@/lib/idl.json";
 
 interface FeedEvent {
   id: string;
-  kind: "stake" | "unstake" | "claim" | "swap";
+  kind: "stake" | "unstake" | "claim" | "swap" | "raffle";
   user: string;
   amount: string;
   tax?: string;
   burn?: string;
   swapIn?: string;
   swapOut?: string;
+  round?: number;
   time: number;
 }
 
@@ -69,6 +70,16 @@ function mapEvent(
       amount: data.solToHold ? holdStr : solStr,
       swapIn: data.solToHold ? `${solStr} SOL` : `${holdStr} HOLD`,
       swapOut: data.solToHold ? `${holdStr} HOLD` : `${solStr} SOL`,
+      time,
+    };
+  }
+  if (name === "RaffleEvent") {
+    return {
+      id,
+      kind: "raffle",
+      user: data.winner.toBase58(),
+      amount: formatAmount(data.prize),
+      round: Number(data.round),
       time,
     };
   }
@@ -160,6 +171,13 @@ export function LiveFeed() {
           playSwap();
         }
       }),
+      program.addEventListener("RaffleEvent", (data, _slot, signature) => {
+        const ev = mapEvent("RaffleEvent", data, signature, Date.now());
+        if (ev) {
+          pushEvent(ev);
+          playRaffleWin();
+        }
+      }),
     ];
 
     return () => {
@@ -212,6 +230,12 @@ const KIND_CONFIG = {
     label: "Swapped",
     color: "text-holder-accent",
     border: "border-holder-accent/30",
+  },
+  raffle: {
+    icon: "🎉",
+    label: "Won the Diamond Raffle",
+    color: "text-holder-jackpot",
+    border: "border-holder-jackpot/50",
   },
 } as const;
 

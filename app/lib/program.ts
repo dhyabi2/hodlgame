@@ -71,6 +71,17 @@ export function findSwapPoolHoldVault(
   return getAssociatedTokenAddress(mint, swapPool, true);
 }
 
+export function findRafflePoolPDA(mint: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("raffle_pool"), mint.toBuffer()],
+    PROGRAM_ID
+  );
+}
+
+export const RAFFLE_INTERVAL_SECS = 24 * 60 * 60;
+export const RAFFLE_PRIZE_BPS = 1000;
+export const MAX_RAFFLE_ENTRANTS = 50;
+
 const SWAP_FEE_BPS = 100;
 const BPS_DENOMINATOR = 10000;
 
