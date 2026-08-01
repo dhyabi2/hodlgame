@@ -218,7 +218,8 @@
     {
       "name": "unstake",
       "docs": [
-        "Unstake tokens. 20% is taxed to the vault, 80% returns to the user."
+        "Unstake tokens. 20% is taxed on exit: 5% of the amount is burned",
+        "forever, 15% funds the rebate vault, 80% returns to the user."
       ],
       "accounts": [
         {
@@ -993,6 +994,11 @@
         },
         {
           "name": "tax",
+          "type": "u64",
+          "index": false
+        },
+        {
+          "name": "burn",
           "type": "u64",
           "index": false
         },

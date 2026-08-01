@@ -1,6 +1,8 @@
 # Holder — Solana Game
 
-A devnet MVP of the Holder game: stake tokens, pay a 20% tax on unstake, and earn rebates proportional to your stake × time.
+A devnet MVP of the Holder game: stake tokens, pay a 20% tax on unstake (5% burned forever, 15% funds the rebate vault), and earn rebates proportional to your stake × time. Also includes an on-chain SOL⇄HOLD swap pool.
+
+Live: https://app-theta-eight-74.vercel.app
 
 ## Architecture
 
@@ -49,9 +51,12 @@ npm run dev
 
 - `initialize` — create vault, stake vault, and token accounts.
 - `stake(amount)` — deposit tokens into the stake vault, no tax.
-- `unstake(amount)` — withdraw tokens; 20% tax to rebate vault, 80% to user.
+- `unstake(amount)` — withdraw tokens; 20% tax on exit (5% of the amount burned forever, 15% to the rebate vault), 80% to user.
 - `claim_rebate()` — claim accrued rebates from the vault.
 - `sync_rewards()` — permissionless crank to distribute new vault inflows.
+- `initialize_pool(sol_amount, hold_amount)` — authority-only, seeds the SOL/HOLD swap pool.
+- `add_liquidity(sol_amount, hold_amount)` — authority-only, tops up pool liquidity anytime (no redeploy needed — see `anchor/migrations/add_liquidity.ts`).
+- `swap_sol_for_hold(sol_in, min_hold_out)` / `swap_hold_for_sol(hold_in, min_sol_out)` — anyone, constant-product swap with a 1% fee retained in the pool.
 
 ## Risks & next steps
 

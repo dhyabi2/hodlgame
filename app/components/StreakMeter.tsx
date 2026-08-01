@@ -46,6 +46,38 @@ export function StreakMeter({
           )}
         </div>
       </div>
+
+      <ShareButton tierName={tier.name} tierEmoji={tier.emoji} avgHoldDays={avgHoldDays} />
     </div>
+  );
+}
+
+function ShareButton({
+  tierName,
+  tierEmoji,
+  avgHoldDays,
+}: {
+  tierName: string;
+  tierEmoji: string;
+  avgHoldDays: number;
+}) {
+  const share = () => {
+    const url = typeof window !== "undefined" ? window.location.origin : "";
+    const text = `${tierEmoji} I'm a ${tierName} hand on Holder — ${avgHoldDays.toFixed(
+      1
+    )} days average hold. Paper hands pay the tax, diamond hands collect it. 💎🙌`;
+    const intent = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
+      text
+    )}&url=${encodeURIComponent(url)}`;
+    window.open(intent, "_blank", "noopener,noreferrer");
+  };
+
+  return (
+    <button
+      onClick={share}
+      className="w-full py-2 rounded-xl text-sm font-medium border border-holder-700 text-slate-300 hover:border-holder-accent hover:text-holder-accent transition"
+    >
+      𝕏 Share your streak
+    </button>
   );
 }

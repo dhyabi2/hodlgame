@@ -14,6 +14,7 @@ interface FeedEvent {
   user: string;
   amount: string;
   tax?: string;
+  burn?: string;
   swapIn?: string;
   swapOut?: string;
   time: number;
@@ -45,6 +46,7 @@ function mapEvent(
       user: data.user.toBase58(),
       amount: formatAmount(data.amount),
       tax: formatAmount(data.tax),
+      burn: formatAmount(data.burn),
       time,
     };
   }
@@ -246,6 +248,11 @@ function FeedRow({ ev }: { ev: FeedEvent }) {
             {ev.tax && (
               <span className="text-holder-danger text-xs ml-2">
                 -{ev.tax} tax
+              </span>
+            )}
+            {ev.burn && parseFloat(ev.burn) > 0 && (
+              <span className="text-orange-400 text-xs ml-2">
+                🔥 {ev.burn} burned
               </span>
             )}
           </p>

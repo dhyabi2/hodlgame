@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
 use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, Burn, Mint, Token, TokenAccount, Transfer};
 
 declare_id!("9ggxpWrwYXH7sygoqQs2N5qCva38vVkJvr5ZzwPijPUu");
 
@@ -9,6 +9,9 @@ declare_id!("9ggxpWrwYXH7sygoqQs2N5qCva38vVkJvr5ZzwPijPUu");
 pub const PRECISION: u128 = 1_000_000_000_000;
 /// 20% tax on unstake.
 pub const TAX_BPS: u64 = 2_000;
+/// Of the unstake tax, 25% (5% of the unstake amount) is burned forever;
+/// the remaining 75% (15% of the amount) still funds the rebate vault.
+pub const TAX_BURN_SHARE_BPS: u64 = 2_500;
 /// 1% swap fee, baked into the constant-product invariant (stays in the pool).
 pub const SWAP_FEE_BPS: u64 = 100;
 pub const BPS_DENOMINATOR: u64 = 10_000;
@@ -80,7 +83,8 @@ pub mod holder {
         Ok(())
     }
 
-    /// Unstake tokens. 20% is taxed to the vault, 80% returns to the user.
+    /// Unstake tokens. 20% is taxed on exit: 5% of the amount is burned
+    /// forever, 15% funds the rebate vault, 80% returns to the user.
     pub fn unstake(ctx: Context<Unstake>, amount: u64) -> Result<()> {
         require!(amount > 0, HolderError::ZeroAmount);
 
@@ -98,6 +102,12 @@ pub mod holder {
             .unwrap()
             .checked_div(BPS_DENOMINATOR)
             .unwrap();
+        let burn_amount = tax
+            .checked_mul(TAX_BURN_SHARE_BPS)
+            .unwrap()
+            .checked_div(BPS_DENOMINATOR)
+            .unwrap();
+        let rebate_amount = tax.checked_sub(burn_amount).unwrap();
         let to_user = amount.checked_sub(tax).unwrap();
 
         let mint_key = ctx.accounts.mint.key();
@@ -108,8 +118,23 @@ pub mod holder {
         ];
         let stake_vault_signer = &[&stake_vault_seeds[..]];
 
-        // Taxed portion goes to the protocol vault.
-        if tax > 0 {
+        // A slice of the tax is burned forever — permanent deflation.
+        if burn_amount > 0 {
+            let cpi_accounts = Burn {
+                mint: ctx.accounts.mint.to_account_info(),
+                from: ctx.accounts.stake_token_account.to_account_info(),
+                authority: ctx.accounts.stake_vault.to_account_info(),
+            };
+            let cpi_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                cpi_accounts,
+                stake_vault_signer,
+            );
+            token::burn(cpi_ctx, burn_amount)?;
+        }
+
+        // The rest of the tax goes to the protocol vault.
+        if rebate_amount > 0 {
             let cpi_accounts = Transfer {
                 from: ctx.accounts.stake_token_account.to_account_info(),
                 to: ctx.accounts.vault_token_account.to_account_info(),
@@ -120,7 +145,7 @@ pub mod holder {
                 cpi_accounts,
                 stake_vault_signer,
             );
-            token::transfer(cpi_ctx, tax)?;
+            token::transfer(cpi_ctx, rebate_amount)?;
         }
 
         // Remainder returns to the user.
@@ -153,6 +178,7 @@ pub mod holder {
             user: ctx.accounts.user.key(),
             amount,
             tax,
+            burn: burn_amount,
             total_staked: stake_account.amount,
             timestamp: now,
         });
@@ -851,6 +877,7 @@ pub struct UnstakeEvent {
     pub user: Pubkey,
     pub amount: u64,
     pub tax: u64,
+    pub burn: u64,
     pub total_staked: u64,
     pub timestamp: i64,
 }

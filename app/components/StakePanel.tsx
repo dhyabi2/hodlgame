@@ -202,8 +202,11 @@ export function StakePanel({
           rent: SYSVAR_RENT_PUBKEY,
         } as any)
         .rpc();
-      const taxAmount = formatAmount(
-        new BN(parseFloat(amount) * 1e6 * 0.2)
+      const rebateAmount = formatAmount(
+        new BN(parseFloat(amount) * 1e6 * 0.15)
+      );
+      const burnAmount = formatAmount(
+        new BN(parseFloat(amount) * 1e6 * 0.05)
       );
       setAmount("");
       await refresh();
@@ -213,7 +216,7 @@ export function StakePanel({
       toast.push(
         "danger",
         "🧻 Paper hands!",
-        `Paid ${taxAmount} HOLD tax into the jackpot vault.`
+        `Paid ${rebateAmount} HOLD to the jackpot vault, 🔥 ${burnAmount} HOLD burned forever.`
       );
     } catch (err) {
       console.error(err);
@@ -319,8 +322,10 @@ export function StakePanel({
         />
         {mode === "unstake" && amount && (
           <p className="text-sm text-holder-danger">
-            You will receive {formatAmount(new BN(parseFloat(amount) * 1e6 * 0.8))} HOLD
-            (20% tax = {formatAmount(new BN(parseFloat(amount) * 1e6 * 0.2))} HOLD)
+            You will receive {formatAmount(new BN(parseFloat(amount) * 1e6 * 0.8))} HOLD.
+            Of the 20% tax: 15% ({formatAmount(new BN(parseFloat(amount) * 1e6 * 0.15))} HOLD)
+            funds the jackpot vault, 5% ({formatAmount(new BN(parseFloat(amount) * 1e6 * 0.05))} HOLD)
+            is 🔥 burned forever.
           </p>
         )}
       </div>
