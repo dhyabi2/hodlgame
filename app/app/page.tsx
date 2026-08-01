@@ -2,7 +2,7 @@
 
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getAccount, getAssociatedTokenAddress } from "@solana/spl-token";
 import { PublicKey } from "@solana/web3.js";
 import { AnchorProvider, BN, Program } from "@coral-xyz/anchor";
@@ -20,6 +20,8 @@ import { HowItWorks } from "@/components/HowItWorks";
 import { PersonalStats } from "@/components/PersonalStats";
 import { AmbientParticles } from "@/components/AmbientParticles";
 import { DailyQuests } from "@/components/DailyQuests";
+import { TierAura } from "@/components/TierAura";
+import { LoreModal } from "@/components/LoreModal";
 import {
   findVaultStatePDA,
   findVaultTokenAccount,
@@ -28,6 +30,7 @@ import {
 } from "@/lib/program";
 import { getHoldingScore } from "@/lib/tiers";
 import { useToast } from "@/lib/toast";
+import { checkAway, describeAway } from "@/lib/awaySummary";
 import idl from "@/lib/idl.json";
 import { motion, useReducedMotion } from "framer-motion";
 import confetti from "canvas-confetti";
@@ -83,6 +86,7 @@ export default function Home() {
   const [statsLoaded, setStatsLoaded] = useState(false);
 
   const bumpRefresh = useCallback(() => setRefreshTick((t) => t + 1), []);
+  const awayChecked = useRef(false);
 
   // Milestone toasts — fire once per wallet the first time each condition is true.
   useEffect(() => {
@@ -118,9 +122,12 @@ export default function Home() {
 
     const fetchPublicData = async () => {
       try {
+        let jackpotNum = 0;
+        let stakedNum = 0;
         const vaultAta = await findVaultTokenAccount(MINT, vaultPDA);
         try {
           const vaultAcc = await getAccount(connection, vaultAta);
+          jackpotNum = Number(vaultAcc.amount) / 1e6;
           setJackpot(formatAmount(Number(vaultAcc.amount)));
         } catch {
           setJackpot("0");
@@ -130,7 +137,17 @@ export default function Home() {
           vaultPDA
         );
         if (vault) {
+          stakedNum = Number(vault.totalStaked) / 1e6;
           setTotalStaked(formatAmount(vault.totalStaked));
+        }
+
+        // Once per session, on the first real numbers: was the user away?
+        if (!awayChecked.current) {
+          awayChecked.current = true;
+          const report = checkAway(jackpotNum, stakedNum);
+          if (report) {
+            toast.push("info", "👋 While you were away", describeAway(report));
+          }
         }
       } catch (err) {
         console.error(err);
@@ -169,6 +186,7 @@ export default function Home() {
   return (
     <main className="min-h-screen p-6 md:p-12 relative overflow-hidden">
       <AmbientParticles />
+      <TierAura position={position} />
       <SplashIntro />
       <motion.div
         className="max-w-6xl mx-auto space-y-8 relative z-10"
@@ -189,6 +207,7 @@ export default function Home() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <LoreModal />
             <SoundToggle />
             <WalletMultiButton className="!bg-holder-accent !text-holder-900 !font-bold hover:!bg-cyan-300" />
           </div>

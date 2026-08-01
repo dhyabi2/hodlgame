@@ -1,7 +1,7 @@
 "use client";
 
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PublicKey } from "@solana/web3.js";
 import {
   TOKEN_PROGRAM_ID,
@@ -29,6 +29,7 @@ import { markActedToday } from "@/lib/daily";
 import idl from "@/lib/idl.json";
 
 const HOLD_DECIMALS = 6;
+const NOTIFY_KEY = "holder:notifyRaffle";
 
 function formatCountdown(secs: number): string {
   const h = Math.floor(secs / 3600);
@@ -54,6 +55,17 @@ export function RafflePanel({
   const [jackpot, setJackpot] = useState(0);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const [loading, setLoading] = useState(false);
+  const [notifyOn, setNotifyOn] = useState(false);
+  const notifiedRound = useRef<number | null>(null);
+
+  useEffect(() => {
+    setNotifyOn(
+      typeof window !== "undefined" &&
+        window.localStorage.getItem(NOTIFY_KEY) === "1" &&
+        typeof Notification !== "undefined" &&
+        Notification.permission === "granted"
+    );
+  }, []);
 
   const [rafflePoolPDA] = findRafflePoolPDA(mint);
   const [vaultPDA] = findVaultStatePDA(mint);
@@ -133,6 +145,48 @@ export function RafflePanel({
       playTick();
     }
   }, [secondsLeft]);
+
+  // Opt-in browser notification when the draw becomes ready — at most once per
+  // round, and only while this tab exists (no service worker / push backend,
+  // so a closed tab can't be notified; the toggle copy is honest about that).
+  useEffect(() => {
+    if (!notifyOn || !ready || round === null) return;
+    if (notifiedRound.current === round) return;
+    notifiedRound.current = round;
+    try {
+      new Notification("💎 Diamond Raffle is ready", {
+        body: `Round #${round} can be drawn — ${prizeEstimate.toFixed(
+          2
+        )} HOLD on the line.`,
+      });
+    } catch {
+      /* some browsers (mobile Chrome) require a service worker — degrade silently */
+    }
+  }, [notifyOn, ready, round, prizeEstimate]);
+
+  const toggleNotify = async () => {
+    if (notifyOn) {
+      window.localStorage.setItem(NOTIFY_KEY, "0");
+      setNotifyOn(false);
+      return;
+    }
+    if (typeof Notification === "undefined") {
+      toast.push("danger", "Not supported", "This browser doesn't support notifications.");
+      return;
+    }
+    const perm = await Notification.requestPermission();
+    if (perm === "granted") {
+      window.localStorage.setItem(NOTIFY_KEY, "1");
+      setNotifyOn(true);
+      toast.push(
+        "success",
+        "🔔 You'll be pinged",
+        "When the raffle is ready to draw (while a Holder tab is open)."
+      );
+    } else {
+      toast.push("info", "No permission", "Notifications stay off.");
+    }
+  };
 
   const draw = async () => {
     if (!wallet.publicKey || !ready) return;
@@ -219,9 +273,27 @@ export function RafflePanel({
     <div className="rounded-2xl border border-holder-jackpot/40 bg-gradient-to-b from-holder-800/60 to-holder-900/40 p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">💎 Diamond Raffle</h2>
-        {round !== null && (
-          <span className="text-xs text-slate-500">Round #{round}</span>
-        )}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggleNotify}
+            title={
+              notifyOn
+                ? "Notifications on — click to turn off"
+                : "Notify me when the draw is ready (while a tab is open)"
+            }
+            aria-label="Toggle raffle notifications"
+            className={`text-sm w-8 h-8 rounded-lg border flex items-center justify-center transition ${
+              notifyOn
+                ? "border-holder-jackpot/60 bg-holder-jackpot/10"
+                : "border-holder-700 text-slate-500 hover:border-holder-accent"
+            }`}
+          >
+            {notifyOn ? "🔔" : "🔕"}
+          </button>
+          {round !== null && (
+            <span className="text-xs text-slate-500">Round #{round}</span>
+          )}
+        </div>
       </div>
 
       <div className="rounded-xl bg-holder-900/50 p-4 text-center">

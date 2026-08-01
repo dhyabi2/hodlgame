@@ -2,7 +2,13 @@
 
 import { useState } from "react";
 import confetti from "canvas-confetti";
-import { useReducedMotion } from "framer-motion";
+import {
+  motion,
+  useMotionValue,
+  useReducedMotion,
+  useSpring,
+  useTransform,
+} from "framer-motion";
 import { AnimatedNumber } from "./AnimatedNumber";
 import { useToast } from "@/lib/toast";
 
@@ -22,6 +28,30 @@ function Diamond({
   const toast = useToast();
   const reduceMotion = useReducedMotion();
   const [clicks, setClicks] = useState(0);
+
+  // Cursor-follow tilt: the diamond leans toward the pointer like a physical
+  // object. Springed so it settles instead of snapping.
+  const mx = useMotionValue(0);
+  const my = useMotionValue(0);
+  const rotateX = useSpring(useTransform(my, [-0.5, 0.5], [14, -14]), {
+    stiffness: 150,
+    damping: 18,
+  });
+  const rotateY = useSpring(useTransform(mx, [-0.5, 0.5], [-14, 14]), {
+    stiffness: 150,
+    damping: 18,
+  });
+
+  const onMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (reduceMotion) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    mx.set((e.clientX - rect.left) / rect.width - 0.5);
+    my.set((e.clientY - rect.top) / rect.height - 0.5);
+  };
+  const onLeave = () => {
+    mx.set(0);
+    my.set(0);
+  };
 
   // More staked = faster spin. Bigger jackpot = brighter glow. Both react to
   // real on-chain state instead of being purely decorative.
@@ -52,8 +82,15 @@ function Diamond({
   };
 
   return (
-    <div
+    <motion.div
       onClick={poke}
+      onMouseMove={onMove}
+      onMouseLeave={onLeave}
+      style={
+        reduceMotion
+          ? undefined
+          : { rotateX, rotateY, transformPerspective: 500 }
+      }
       className="relative w-32 h-32 md:w-40 md:h-40 mx-auto cursor-pointer select-none"
     >
       <div
@@ -78,7 +115,7 @@ function Diamond({
           </linearGradient>
         </defs>
       </svg>
-    </div>
+    </motion.div>
   );
 }
 

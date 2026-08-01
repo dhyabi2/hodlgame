@@ -187,3 +187,77 @@ export function playTick() {
     tone(1200, now, 0.035, "square", 0.05, audioCtx);
   });
 }
+
+// ---------------------------------------------------------------------------
+// Ambient bed — a quiet synthesized vault hum. Off by default (ambient audio
+// uninvited is hostile); preference persisted; routed through the master gain
+// so the volume slider governs it too.
+// ---------------------------------------------------------------------------
+
+const AMBIENT_KEY = "holder:ambient";
+
+let ambientNodes: { stop: () => void } | null = null;
+
+export function isAmbientOn(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(AMBIENT_KEY) === "1";
+}
+
+export function setAmbientPref(on: boolean) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(AMBIENT_KEY, on ? "1" : "0");
+}
+
+export function startAmbient() {
+  if (ambientNodes || isMuted()) return;
+  const audioCtx = getContext();
+  if (!audioCtx) return;
+
+  const bedGain = audioCtx.createGain();
+  bedGain.gain.value = 0;
+  bedGain.connect(destination(audioCtx));
+
+  // Two slightly detuned low sines beat gently against each other; a slow LFO
+  // breathes the level so it never reads as a flat test tone.
+  const oscA = audioCtx.createOscillator();
+  oscA.type = "sine";
+  oscA.frequency.value = 55;
+  const oscB = audioCtx.createOscillator();
+  oscB.type = "sine";
+  oscB.frequency.value = 55.7;
+
+  const lfo = audioCtx.createOscillator();
+  lfo.frequency.value = 0.07;
+  const lfoGain = audioCtx.createGain();
+  lfoGain.gain.value = 0.012;
+  lfo.connect(lfoGain);
+  lfoGain.connect(bedGain.gain);
+
+  oscA.connect(bedGain);
+  oscB.connect(bedGain);
+
+  const now = audioCtx.currentTime;
+  bedGain.gain.linearRampToValueAtTime(0.035, now + 3);
+
+  oscA.start(now);
+  oscB.start(now);
+  lfo.start(now);
+
+  ambientNodes = {
+    stop: () => {
+      const t = audioCtx.currentTime;
+      bedGain.gain.cancelScheduledValues(t);
+      bedGain.gain.setValueAtTime(bedGain.gain.value, t);
+      bedGain.gain.linearRampToValueAtTime(0.0001, t + 1);
+      oscA.stop(t + 1.2);
+      oscB.stop(t + 1.2);
+      lfo.stop(t + 1.2);
+    },
+  };
+}
+
+export function stopAmbient() {
+  if (!ambientNodes) return;
+  ambientNodes.stop();
+  ambientNodes = null;
+}

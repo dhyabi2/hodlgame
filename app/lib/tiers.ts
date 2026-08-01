@@ -5,16 +5,18 @@ export interface Tier {
   emoji: string;
   color: string;
   glow: string;
+  /** Raw hex for runtime theming (Tailwind classes can't be built dynamically). */
+  hex: string;
   minSeconds: number;
 }
 
 export const TIERS: Tier[] = [
-  { name: "Paper", emoji: "🧻", color: "text-slate-400", glow: "glow-danger", minSeconds: 0 },
-  { name: "Bronze", emoji: "🥉", color: "text-amber-600", glow: "glow-jackpot", minSeconds: 60 * 60 * 24 },
-  { name: "Silver", emoji: "🥈", color: "text-slate-300", glow: "glow-accent", minSeconds: 60 * 60 * 24 * 3 },
-  { name: "Gold", emoji: "🥇", color: "text-holder-jackpot", glow: "glow-jackpot", minSeconds: 60 * 60 * 24 * 7 },
-  { name: "Diamond", emoji: "💎", color: "text-holder-accent", glow: "glow-accent", minSeconds: 60 * 60 * 24 * 14 },
-  { name: "Adamantium", emoji: "⚡", color: "text-holder-success", glow: "glow-accent", minSeconds: 60 * 60 * 24 * 30 },
+  { name: "Paper", emoji: "🧻", color: "text-slate-400", glow: "glow-danger", hex: "#94a3b8", minSeconds: 0 },
+  { name: "Bronze", emoji: "🥉", color: "text-amber-600", glow: "glow-jackpot", hex: "#d97706", minSeconds: 60 * 60 * 24 },
+  { name: "Silver", emoji: "🥈", color: "text-slate-300", glow: "glow-accent", hex: "#cbd5e1", minSeconds: 60 * 60 * 24 * 3 },
+  { name: "Gold", emoji: "🥇", color: "text-holder-jackpot", glow: "glow-jackpot", hex: "#fbbf24", minSeconds: 60 * 60 * 24 * 7 },
+  { name: "Diamond", emoji: "💎", color: "text-holder-accent", glow: "glow-accent", hex: "#22d3ee", minSeconds: 60 * 60 * 24 * 14 },
+  { name: "Adamantium", emoji: "⚡", color: "text-holder-success", glow: "glow-accent", hex: "#34d399", minSeconds: 60 * 60 * 24 * 30 },
 ];
 
 export interface HoldingScore {
