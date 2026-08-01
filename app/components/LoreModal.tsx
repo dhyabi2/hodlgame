@@ -70,7 +70,7 @@ export function LoreModal() {
               exit={{ opacity: 0, y: 24, scale: 0.96 }}
               transition={{ duration: 0.25 }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-lg max-h-[80vh] overflow-y-auto rounded-2xl border border-holder-700 bg-holder-800 p-6 space-y-4"
+              className="w-full max-w-lg max-h-[80vh] overflow-y-auto panel p-6 space-y-4"
             >
               <div className="flex items-center justify-between">
                 <div className="flex bg-holder-900 rounded-lg p-1">

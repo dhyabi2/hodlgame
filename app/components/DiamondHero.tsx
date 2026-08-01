@@ -139,7 +139,7 @@ export function DiamondHero({
   loading?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-holder-700 bg-gradient-to-b from-holder-800/80 to-holder-900/40 p-8 text-center space-y-6">
+    <div className="panel panel-hero p-8 text-center space-y-6">
       <Diamond jackpot={jackpot} totalStaked={totalStaked} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg mx-auto">
@@ -154,7 +154,7 @@ export function DiamondHero({
               <p className="text-xs uppercase tracking-wider text-holder-jackpot/80">
                 Jackpot Vault
               </p>
-              <p className="text-2xl md:text-3xl font-bold text-holder-jackpot mt-1">
+              <p className="text-2xl md:text-3xl font-bold stat-number text-holder-jackpot mt-1">
                 <AnimatedNumber value={jackpot} decimals={2} /> HOLD
               </p>
               <p className="text-xs text-slate-500 mt-1">
@@ -165,7 +165,7 @@ export function DiamondHero({
               <p className="text-xs uppercase tracking-wider text-slate-400">
                 Total Staked
               </p>
-              <p className="text-2xl md:text-3xl font-bold mt-1">
+              <p className="text-2xl md:text-3xl font-bold stat-number mt-1">
                 <AnimatedNumber value={totalStaked} decimals={2} /> HOLD
               </p>
               <p className="text-xs text-slate-500 mt-1">Diamond hands only</p>

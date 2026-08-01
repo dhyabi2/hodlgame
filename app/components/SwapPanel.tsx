@@ -198,7 +198,7 @@ export function SwapPanel({
   };
 
   return (
-    <div className="rounded-2xl border border-holder-700 bg-holder-800/60 p-6 space-y-6">
+    <div className="panel p-6 space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Get HOLD</h2>
         {price !== null && (
@@ -256,7 +256,7 @@ export function SwapPanel({
         }
         whileHover={reduceMotion ? undefined : { scale: 1.02 }}
         whileTap={reduceMotion ? undefined : { scale: 0.97 }}
-        className="w-full py-3 rounded-xl font-bold bg-holder-accent text-holder-900 hover:bg-cyan-300 transition disabled:opacity-50"
+        className="w-full py-3 rounded-xl font-bold bg-holder-accent text-holder-900 hover:bg-cyan-300 shadow-glow-accent transition disabled:opacity-50"
       >
         {loading ? "Swapping..." : !wallet.publicKey ? "Connect wallet" : "Swap"}
       </motion.button>

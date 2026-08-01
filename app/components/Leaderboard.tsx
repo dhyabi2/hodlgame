@@ -105,7 +105,7 @@ export function Leaderboard() {
   }, [rows, tab]);
 
   return (
-    <div className="rounded-2xl border border-holder-700 bg-holder-800/60 p-6">
+    <div className="panel p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-bold">Leaderboard</h2>
         <div className="flex bg-holder-900 rounded-lg p-1">

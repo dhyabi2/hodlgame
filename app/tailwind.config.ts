@@ -12,15 +12,25 @@ const config: Config = {
         display: ["var(--font-display)"],
       },
       colors: {
+        // Retuned away from stock Tailwind slate to a custom obsidian scale
+        // with a violet-blue cast. Same token keys, so the whole app upgrades
+        // from this one block.
         holder: {
-          900: "#0f172a",
-          800: "#1e293b",
-          700: "#334155",
+          950: "#06070e",
+          900: "#0b0d19",
+          800: "#151829",
+          700: "#2a2f4e",
           accent: "#22d3ee",
           danger: "#f43f5e",
           success: "#34d399",
-          jackpot: "#fbbf24",
+          jackpot: "#f6c34a",
         },
+      },
+      boxShadow: {
+        "glow-accent": "0 0 24px -6px rgba(34, 211, 238, 0.55)",
+        "glow-gold": "0 0 24px -6px rgba(246, 195, 74, 0.55)",
+        panel:
+          "inset 0 1px 0 rgba(255,255,255,0.06), 0 16px 40px -20px rgba(0,0,0,0.8)",
       },
       keyframes: {
         "spin-slow": {
@@ -56,6 +66,10 @@ const config: Config = {
           "90%": { opacity: "1" },
           "100%": { transform: "translateY(-110vh)", opacity: "0" },
         },
+        shimmer: {
+          "0%": { backgroundPosition: "-200% 0" },
+          "100%": { backgroundPosition: "200% 0" },
+        },
       },
       animation: {
         "spin-slow": "spin-slow 12s linear infinite",
@@ -65,6 +79,7 @@ const config: Config = {
         flash: "flash 0.6s ease-out",
         "flash-accent": "flash-accent 1s ease-out",
         "float-up": "float-up linear infinite",
+        shimmer: "shimmer 6s linear infinite",
       },
     },
   },

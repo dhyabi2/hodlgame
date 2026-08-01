@@ -65,7 +65,7 @@ export function StreakMeter({
   }, [connection, wallet.publicKey, score.avgHoldSeconds]);
 
   return (
-    <div className="rounded-2xl border border-holder-700 bg-holder-800/60 p-6 space-y-4">
+    <div className="panel p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm uppercase tracking-wider text-slate-400">
           Diamond Hands Score

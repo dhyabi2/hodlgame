@@ -122,7 +122,7 @@ export function PersonalStats({
   const unlockedCount = achievements.filter((a) => a.unlocked).length;
 
   return (
-    <div className="rounded-2xl border border-holder-700 bg-holder-800/60 p-6">
+    <div className="panel p-6">
       <h3 className="text-sm uppercase tracking-wider text-slate-400 mb-3">
         Your History
       </h3>

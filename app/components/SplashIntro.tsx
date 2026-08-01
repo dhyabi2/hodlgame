@@ -95,7 +95,7 @@ export function SplashIntro() {
             transition={{ delay: reduceMotion ? 0 : 1.2, duration: 0.5 }}
             className="space-y-2"
           >
-            <h1 className="font-display text-4xl md:text-5xl font-bold bg-gradient-to-r from-holder-accent to-emerald-400 bg-clip-text text-transparent">
+            <h1 className="font-display text-4xl md:text-5xl font-bold metallic-text">
               HOLDER
             </h1>
             <p className="text-slate-400 max-w-xs mx-auto">

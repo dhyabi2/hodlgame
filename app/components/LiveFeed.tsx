@@ -244,7 +244,7 @@ export function LiveFeed() {
   }, [connection, wallet.publicKey, toast]);
 
   return (
-    <div className="rounded-2xl border border-holder-700 bg-holder-800/60 p-6 h-full flex flex-col">
+    <div className="panel p-6 h-full flex flex-col">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-2xl font-bold">
           {chronicle ? "The Chronicle" : "Live Feed"}

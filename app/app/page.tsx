@@ -199,7 +199,7 @@ export default function Home() {
           className="flex flex-col md:flex-row md:items-center justify-between gap-4"
         >
           <div>
-            <h1 className="font-display text-4xl md:text-5xl font-bold bg-gradient-to-r from-holder-accent to-emerald-400 bg-clip-text text-transparent">
+            <h1 className="font-display text-4xl md:text-5xl font-bold metallic-text">
               💎 HOLDER
             </h1>
             <p className="text-slate-400 mt-1">
@@ -231,7 +231,7 @@ export default function Home() {
 
         <motion.div variants={reduceMotion ? undefined : itemVariants}>
           {!wallet.publicKey ? (
-            <div className="rounded-2xl border border-holder-700 bg-holder-800/50 p-12 text-center">
+            <div className="panel p-12 text-center">
               <p className="text-xl text-slate-300">
                 Connect your wallet to swap for HOLD and join the holding game.
               </p>

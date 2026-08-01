@@ -276,7 +276,7 @@ export function StakePanel({
 
   return (
     <div
-      className={`rounded-2xl border border-holder-700 bg-holder-800/60 p-6 space-y-6 ${
+      className={`panel p-6 space-y-6 ${
         shake ? "animate-shake" : ""
       }`}
     >
@@ -309,11 +309,11 @@ export function StakePanel({
       <div className="grid grid-cols-2 gap-4">
         <div className="rounded-xl bg-holder-900/50 p-4">
           <p className="text-xs text-slate-400 uppercase">Staked</p>
-          <p className="text-xl font-bold">{staked} HOLD</p>
+          <p className="text-xl font-bold stat-number">{staked} HOLD</p>
         </div>
         <div className="rounded-xl bg-holder-900/50 p-4">
           <p className="text-xs text-slate-400 uppercase">Pending Rebate</p>
-          <p className="text-xl font-bold text-holder-success">{pending} HOLD</p>
+          <p className="text-xl font-bold stat-number text-holder-success">{pending} HOLD</p>
         </div>
       </div>
 
@@ -345,7 +345,7 @@ export function StakePanel({
         whileTap={reduceMotion ? undefined : { scale: 0.97 }}
         className={`w-full py-3 rounded-xl font-bold transition ${
           mode === "stake"
-            ? "bg-holder-accent text-holder-900 hover:bg-cyan-300"
+            ? "bg-holder-accent text-holder-900 hover:bg-cyan-300 shadow-glow-accent"
             : "bg-holder-danger text-white hover:bg-rose-500"
         } disabled:opacity-50`}
       >

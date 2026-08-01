@@ -15,7 +15,7 @@ const description =
   "Stake HOLD tokens. Diamond hands earn rebates and win the Diamond Raffle. Paper hands pay a 20% exit tax — 5% burned forever. Built on Solana.";
 
 export const viewport = {
-  themeColor: "#0f172a",
+  themeColor: "#0b0d19",
 };
 
 export const metadata: Metadata = {

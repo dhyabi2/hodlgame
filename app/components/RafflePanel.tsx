@@ -270,7 +270,7 @@ export function RafflePanel({
   };
 
   return (
-    <div className="rounded-2xl border border-holder-jackpot/40 bg-gradient-to-b from-holder-800/60 to-holder-900/40 p-6 space-y-4">
+    <div className="panel panel-gold p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">💎 Diamond Raffle</h2>
         <div className="flex items-center gap-2">
@@ -300,7 +300,7 @@ export function RafflePanel({
         <p className="text-xs text-slate-400 uppercase tracking-wider">
           Prize pool
         </p>
-        <p className="text-2xl font-bold text-holder-jackpot mt-1">
+        <p className="text-2xl font-bold stat-number text-holder-jackpot mt-1">
           {prizeEstimate.toFixed(2)} HOLD
         </p>
         <p className="text-xs text-slate-500 mt-1">10% of the jackpot vault</p>
@@ -331,7 +331,7 @@ export function RafflePanel({
         disabled={loading || !ready || !wallet.publicKey}
         whileHover={reduceMotion || !ready ? undefined : { scale: 1.03 }}
         whileTap={reduceMotion || !ready ? undefined : { scale: 0.97 }}
-        className="w-full py-3 rounded-xl font-bold bg-holder-jackpot text-holder-900 hover:bg-amber-300 transition disabled:opacity-50"
+        className="w-full py-3 rounded-xl font-bold bg-holder-jackpot text-holder-900 hover:bg-amber-300 shadow-glow-gold transition disabled:opacity-50"
       >
         {loading
           ? "Drawing..."
