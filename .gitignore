@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Anchor build artifacts (includes generated program keypairs)
+anchor/target/
+anchor/.anchor/
+
+# Next.js build output
+app/.next/
+app/out/
+
+# Vercel
+app/.vercel/
+
+# Environment / local config
+app/.env.local
+.env
+.env.local
+
+# Claude Code local session state
+.claude/
+
+# OS
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
