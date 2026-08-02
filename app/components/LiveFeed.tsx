@@ -252,7 +252,7 @@ export function LiveFeed() {
         <button
           onClick={() => setChronicle((c) => !c)}
           title="Toggle narrated view"
-          className="text-xs px-3 py-1 rounded-lg border border-holder-700 text-slate-400 hover:border-holder-accent hover:text-holder-accent transition"
+          className="text-xs px-3 py-1 rounded-lg border border-holder-700 text-ink-300 hover:border-holder-accent hover:text-holder-accent transition"
         >
           {chronicle ? "📊 Raw" : "📜 Narrate"}
         </button>
@@ -262,10 +262,10 @@ export function LiveFeed() {
           {events.length === 0 ? (
             <div className="text-center py-10 space-y-2">
               <p className="text-4xl">💎</p>
-              <p className="text-slate-300 font-medium">
+              <p className="text-ink-200 font-medium">
                 The vault is quiet... for now.
               </p>
-              <p className="text-slate-500 text-sm">
+              <p className="text-ink-400 text-sm">
                 Be the first diamond hand — every stake, exit, and win shows up
                 here live.
               </p>
@@ -349,8 +349,8 @@ function FeedRow({
       >
         <span className="text-xl leading-none mt-0.5">{config.icon}</span>
         <div>
-          <p className="text-sm text-slate-300 leading-snug italic">{line}</p>
-          <p className="text-xs text-slate-600 mt-1">
+          <p className="text-sm text-ink-200 leading-snug italic">{line}</p>
+          <p className="text-xs text-ink-500 mt-1">
             {new Date(ev.time).toLocaleTimeString()}
           </p>
         </div>
@@ -374,7 +374,7 @@ function FeedRow({
           <p className={`font-medium text-sm ${config.color}`}>
             {config.label}
           </p>
-          <p className="text-xs text-slate-500 font-mono">
+          <p className="text-xs text-ink-400 font-mono">
             {ev.user.slice(0, 4)}...{ev.user.slice(-4)}
           </p>
         </div>
@@ -399,7 +399,7 @@ function FeedRow({
             )}
           </p>
         )}
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-ink-400">
           {new Date(ev.time).toLocaleTimeString()}
         </p>
       </div>

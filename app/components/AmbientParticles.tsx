@@ -2,12 +2,16 @@
 
 import { useReducedMotion } from "framer-motion";
 
+/** The brand trichrome — mostly cyan, occasional violet and gold motes. */
+const MOTE_COLORS = ["#22d3ee", "#22d3ee", "#8b7bf7", "#f6c34a"];
+
 const PARTICLES = Array.from({ length: 16 }, (_, i) => ({
   left: `${(i * 37) % 100}%`,
   size: 2 + ((i * 7) % 4),
   duration: 14 + ((i * 5) % 12),
   delay: -(i * 1.7),
   opacity: 0.15 + ((i * 3) % 4) * 0.05,
+  color: MOTE_COLORS[i % MOTE_COLORS.length],
 }));
 
 /**
@@ -27,8 +31,9 @@ export function AmbientParticles() {
       {PARTICLES.map((p, i) => (
         <span
           key={i}
-          className="absolute rounded-full bg-holder-accent animate-float-up"
+          className="absolute rounded-full animate-float-up"
           style={{
+            backgroundColor: p.color,
             left: p.left,
             width: p.size,
             height: p.size,

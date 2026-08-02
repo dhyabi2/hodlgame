@@ -48,7 +48,7 @@ export function DailyQuests({
   return (
     <div className="panel p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm uppercase tracking-wider text-slate-400">
+        <h3 className="text-sm uppercase tracking-wider text-ink-300">
           Today at the Vault
         </h3>
         <span
@@ -78,18 +78,18 @@ export function DailyQuests({
             <div>
               <p
                 className={`text-sm font-medium ${
-                  q.done ? "text-holder-success" : "text-slate-300"
+                  q.done ? "text-holder-success" : "text-ink-200"
                 }`}
               >
                 {q.label}
               </p>
-              <p className="text-xs text-slate-500 mt-0.5">{q.hint}</p>
+              <p className="text-xs text-ink-400 mt-0.5">{q.hint}</p>
             </div>
           </motion.div>
         ))}
       </div>
 
-      <p className="text-center text-xs text-slate-500">
+      <p className="text-center text-xs text-ink-400">
         {allDone
           ? "🏆 All done today — come back tomorrow to extend your streak."
           : `${doneCount}/${quests.length} complete · streak resets if you miss a day`}

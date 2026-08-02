@@ -202,21 +202,21 @@ export function SwapPanel({
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">Get HOLD</h2>
         {price !== null && (
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-ink-300">
             1 {inSymbol} ≈ {price.toFixed(inSymbol === "SOL" ? 2 : 8)} {outSymbol}
           </p>
         )}
       </div>
 
       <div className="space-y-2">
-        <label className="text-sm text-slate-400">You pay</label>
+        <label className="text-sm text-ink-300">You pay</label>
         <div className="flex gap-2">
           <input
             type="number"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="0.00"
-            className="flex-1 rounded-xl bg-holder-900 border border-holder-700 px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-holder-accent"
+            className="flex-1 rounded-xl bg-holder-900 border border-holder-700 px-4 py-3 text-white placeholder-ink-400 focus:outline-none focus:border-holder-accent"
           />
           <span className="flex items-center px-3 rounded-xl bg-holder-900 border border-holder-700 text-sm font-medium">
             {inSymbol}
@@ -235,16 +235,16 @@ export function SwapPanel({
       </motion.button>
 
       <div className="space-y-2">
-        <label className="text-sm text-slate-400">You receive (est.)</label>
+        <label className="text-sm text-ink-300">You receive (est.)</label>
         <div className="flex gap-2">
-          <div className="flex-1 rounded-xl bg-holder-900/50 border border-holder-700 px-4 py-3 text-slate-300">
+          <div className="flex-1 rounded-xl bg-holder-900/50 border border-holder-700 px-4 py-3 text-ink-200">
             {quote > 0 ? quote.toFixed(6) : "0.00"}
           </div>
           <span className="flex items-center px-3 rounded-xl bg-holder-900 border border-holder-700 text-sm font-medium">
             {outSymbol}
           </span>
         </div>
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-ink-400">
           1% swap fee · 1% slippage tolerance
         </p>
       </div>
@@ -256,7 +256,7 @@ export function SwapPanel({
         }
         whileHover={reduceMotion ? undefined : { scale: 1.02 }}
         whileTap={reduceMotion ? undefined : { scale: 0.97 }}
-        className="w-full py-3 rounded-xl font-bold bg-holder-accent text-holder-900 hover:bg-cyan-300 shadow-glow-accent transition disabled:opacity-50"
+        className="w-full py-3 rounded-xl font-bold bg-holder-accent text-holder-900 hover:bg-holder-accentBright shadow-glow-accent transition disabled:opacity-50"
       >
         {loading ? "Swapping..." : !wallet.publicKey ? "Connect wallet" : "Swap"}
       </motion.button>

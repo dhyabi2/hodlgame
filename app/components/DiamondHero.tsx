@@ -157,18 +157,18 @@ export function DiamondHero({
               <p className="text-2xl md:text-3xl font-bold stat-number text-holder-jackpot mt-1">
                 <AnimatedNumber value={jackpot} decimals={2} /> HOLD
               </p>
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-xs text-ink-400 mt-1">
                 Funded entirely by paper-hands tax
               </p>
             </div>
             <div className="rounded-xl bg-holder-900/60 border border-holder-700 p-4">
-              <p className="text-xs uppercase tracking-wider text-slate-400">
+              <p className="text-xs uppercase tracking-wider text-ink-300">
                 Total Staked
               </p>
               <p className="text-2xl md:text-3xl font-bold stat-number mt-1">
                 <AnimatedNumber value={totalStaked} decimals={2} /> HOLD
               </p>
-              <p className="text-xs text-slate-500 mt-1">Diamond hands only</p>
+              <p className="text-xs text-ink-400 mt-1">Diamond hands only</p>
             </div>
           </>
         )}

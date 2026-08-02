@@ -12,7 +12,7 @@ body {
      and an obsidian base — the room has a light source now. */
   background:
     radial-gradient(1400px 700px at 50% -200px, rgba(34, 211, 238, 0.07), transparent 60%),
-    radial-gradient(1000px 500px at 80% 110%, rgba(99, 68, 245, 0.06), transparent 60%),
+    radial-gradient(1000px 500px at 80% 110%, rgba(139, 123, 247, 0.06), transparent 60%),
     linear-gradient(to bottom, #0b0d19, #06070e) fixed;
 }
 

@@ -26,7 +26,8 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 const KIND_STYLES: Record<ToastKind, string> = {
   success: "border-holder-success/60 bg-holder-success/10 text-holder-success",
   danger: "border-holder-danger/60 bg-holder-danger/10 text-holder-danger",
-  info: "border-holder-accent/60 bg-holder-accent/10 text-holder-accent",
+  // Violet, not brand cyan — system information shouldn't wear the brand color.
+  info: "border-holder-violet/60 bg-holder-violet/10 text-holder-violet",
 };
 
 const KIND_ICON: Record<ToastKind, string> = {
@@ -67,7 +68,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               {t.title}
             </p>
             {t.detail && (
-              <p className="text-sm text-slate-300 mt-1">{t.detail}</p>
+              <p className="text-sm text-ink-200 mt-1">{t.detail}</p>
             )}
           </div>
         ))}

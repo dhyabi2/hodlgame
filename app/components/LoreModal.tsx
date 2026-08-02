@@ -79,7 +79,7 @@ export function LoreModal() {
                     className={`px-4 py-1 rounded-md text-sm font-medium transition ${
                       tab === "lore"
                         ? "bg-holder-accent text-holder-900"
-                        : "text-slate-400 hover:text-white"
+                        : "text-ink-300 hover:text-white"
                     }`}
                   >
                     The Legend
@@ -89,7 +89,7 @@ export function LoreModal() {
                     className={`px-4 py-1 rounded-md text-sm font-medium transition ${
                       tab === "faq"
                         ? "bg-holder-accent text-holder-900"
-                        : "text-slate-400 hover:text-white"
+                        : "text-ink-300 hover:text-white"
                     }`}
                   >
                     FAQ
@@ -98,14 +98,14 @@ export function LoreModal() {
                 <button
                   onClick={() => setOpen(false)}
                   aria-label="Close"
-                  className="text-slate-500 hover:text-white text-xl leading-none"
+                  className="text-ink-400 hover:text-white text-xl leading-none"
                 >
                   ✕
                 </button>
               </div>
 
               {tab === "lore" ? (
-                <div className="space-y-3 text-sm text-slate-300 leading-relaxed">
+                <div className="space-y-3 text-sm text-ink-200 leading-relaxed">
                   <p className="text-lg font-display font-bold text-holder-accent">
                     The Vault remembers.
                   </p>
@@ -135,10 +135,10 @@ export function LoreModal() {
                 <div className="space-y-4">
                   {FAQ.map((item) => (
                     <div key={item.q}>
-                      <p className="text-sm font-bold text-slate-200">
+                      <p className="text-sm font-bold text-ink-100">
                         {item.q}
                       </p>
-                      <p className="text-sm text-slate-400 mt-1 leading-relaxed">
+                      <p className="text-sm text-ink-300 mt-1 leading-relaxed">
                         {item.a}
                       </p>
                     </div>

@@ -123,13 +123,13 @@ export function PersonalStats({
 
   return (
     <div className="panel p-6">
-      <h3 className="text-sm uppercase tracking-wider text-slate-400 mb-3">
+      <h3 className="text-sm uppercase tracking-wider text-ink-300 mb-3">
         Your History
       </h3>
       {stats === null ? (
-        <p className="text-sm text-slate-500">Loading...</p>
+        <p className="text-sm text-ink-400">Loading...</p>
       ) : !hasActivity ? (
-        <p className="text-sm text-slate-500">
+        <p className="text-sm text-ink-400">
           No activity yet in your recent history. Stake to start your story.
         </p>
       ) : (
@@ -145,17 +145,17 @@ export function PersonalStats({
           )}
         </div>
       )}
-      <p className="text-xs text-slate-600 mt-3">
+      <p className="text-xs text-ink-500 mt-3">
         Based on your last {HISTORY_LIMIT} transactions.
       </p>
 
       {stats !== null && (
         <div className="mt-5 pt-5 border-t border-holder-700">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm uppercase tracking-wider text-slate-400">
+            <h3 className="text-sm uppercase tracking-wider text-ink-300">
               Achievements
             </h3>
-            <span className="text-xs text-slate-500">
+            <span className="text-xs text-ink-400">
               {unlockedCount}/{achievements.length}
             </span>
           </div>
@@ -173,7 +173,7 @@ export function PersonalStats({
                 <p className="text-xl leading-none">{a.emoji}</p>
                 <p
                   className={`text-[10px] mt-1 leading-tight ${
-                    a.unlocked ? "text-holder-jackpot" : "text-slate-500"
+                    a.unlocked ? "text-holder-jackpot" : "text-ink-400"
                   }`}
                 >
                   {a.name}
@@ -198,7 +198,7 @@ function Stat({
 }) {
   return (
     <div className="rounded-xl bg-holder-900/50 p-3">
-      <p className="text-xs text-slate-500 uppercase tracking-wide">{label}</p>
+      <p className="text-xs text-ink-400 uppercase tracking-wide">{label}</p>
       <p className={`font-bold mt-0.5 ${accent ?? ""}`}>{value}</p>
     </div>
   );

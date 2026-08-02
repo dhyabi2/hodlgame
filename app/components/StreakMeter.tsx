@@ -67,7 +67,7 @@ export function StreakMeter({
   return (
     <div className="panel p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm uppercase tracking-wider text-slate-400">
+        <h3 className="text-sm uppercase tracking-wider text-ink-300">
           Diamond Hands Score
         </h3>
         <span className={`text-lg font-bold ${tier.color}`}>
@@ -78,7 +78,7 @@ export function StreakMeter({
       <div>
         <div className="h-3 rounded-full bg-holder-900 overflow-hidden">
           <motion.div
-            className={`h-full bg-gradient-to-r from-holder-accent to-holder-success ${
+            className={`h-full bg-gradient-to-r from-holder-accent to-holder-violet ${
               !nextTier ? "animate-pulse-glow" : ""
             }`}
             initial={{ width: 0 }}
@@ -86,7 +86,7 @@ export function StreakMeter({
             transition={{ duration: 0.6, ease: "easeOut" }}
           />
         </div>
-        <div className="flex justify-between text-xs text-slate-500 mt-1">
+        <div className="flex justify-between text-xs text-ink-400 mt-1">
           <span>{avgHoldDays.toFixed(2)} days avg. hold</span>
           {nextTier ? (
             <span>
@@ -133,7 +133,7 @@ function ShareButton({
   return (
     <button
       onClick={share}
-      className="w-full py-2 rounded-xl text-sm font-medium border border-holder-700 text-slate-300 hover:border-holder-accent hover:text-holder-accent transition"
+      className="w-full py-2 rounded-xl text-sm font-medium border border-holder-700 text-ink-200 hover:border-holder-accent hover:text-holder-accent transition"
     >
       𝕏 Share your streak
     </button>

@@ -288,7 +288,7 @@ export function StakePanel({
             className={`px-4 py-1 rounded-md text-sm font-medium transition ${
               mode === "stake"
                 ? "bg-holder-accent text-holder-900"
-                : "text-slate-400 hover:text-white"
+                : "text-ink-300 hover:text-white"
             }`}
           >
             Stake
@@ -298,7 +298,7 @@ export function StakePanel({
             className={`px-4 py-1 rounded-md text-sm font-medium transition ${
               mode === "unstake"
                 ? "bg-holder-danger text-white"
-                : "text-slate-400 hover:text-white"
+                : "text-ink-300 hover:text-white"
             }`}
           >
             Unstake
@@ -308,17 +308,17 @@ export function StakePanel({
 
       <div className="grid grid-cols-2 gap-4">
         <div className="rounded-xl bg-holder-900/50 p-4">
-          <p className="text-xs text-slate-400 uppercase">Staked</p>
+          <p className="text-xs text-ink-300 uppercase">Staked</p>
           <p className="text-xl font-bold stat-number">{staked} HOLD</p>
         </div>
         <div className="rounded-xl bg-holder-900/50 p-4">
-          <p className="text-xs text-slate-400 uppercase">Pending Rebate</p>
+          <p className="text-xs text-ink-300 uppercase">Pending Rebate</p>
           <p className="text-xl font-bold stat-number text-holder-success">{pending} HOLD</p>
         </div>
       </div>
 
       <div className="space-y-2">
-        <label className="text-sm text-slate-400">
+        <label className="text-sm text-ink-300">
           {mode === "stake" ? "Amount to stake" : "Amount to unstake"}
         </label>
         <input
@@ -326,7 +326,7 @@ export function StakePanel({
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           placeholder="0.00"
-          className="w-full rounded-xl bg-holder-900 border border-holder-700 px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-holder-accent"
+          className="w-full rounded-xl bg-holder-900 border border-holder-700 px-4 py-3 text-white placeholder-ink-400 focus:outline-none focus:border-holder-accent"
         />
         {mode === "unstake" && amount && (
           <p className="text-sm text-holder-danger">
@@ -345,8 +345,8 @@ export function StakePanel({
         whileTap={reduceMotion ? undefined : { scale: 0.97 }}
         className={`w-full py-3 rounded-xl font-bold transition ${
           mode === "stake"
-            ? "bg-holder-accent text-holder-900 hover:bg-cyan-300 shadow-glow-accent"
-            : "bg-holder-danger text-white hover:bg-rose-500"
+            ? "bg-holder-accent text-holder-900 hover:bg-holder-accentBright shadow-glow-accent"
+            : "bg-holder-danger text-white hover:bg-holder-dangerBright"
         } disabled:opacity-50`}
       >
         {loading ? "Processing..." : mode === "stake" ? "Stake" : "Unstake"}

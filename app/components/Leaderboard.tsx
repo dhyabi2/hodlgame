@@ -114,7 +114,7 @@ export function Leaderboard() {
             className={`px-3 py-1 rounded-md text-xs font-medium transition ${
               tab === "stakers"
                 ? "bg-holder-accent text-holder-900"
-                : "text-slate-400 hover:text-white"
+                : "text-ink-300 hover:text-white"
             }`}
           >
             Top Stakers
@@ -124,7 +124,7 @@ export function Leaderboard() {
             className={`px-3 py-1 rounded-md text-xs font-medium transition ${
               tab === "diamond"
                 ? "bg-holder-success text-holder-900"
-                : "text-slate-400 hover:text-white"
+                : "text-ink-300 hover:text-white"
             }`}
           >
             Diamond Hands
@@ -133,14 +133,14 @@ export function Leaderboard() {
       </div>
 
       {rows === null ? (
-        <p className="text-slate-400 text-center py-8">Loading...</p>
+        <p className="text-ink-300 text-center py-8">Loading...</p>
       ) : list.length === 0 ? (
         <div className="text-center py-10 space-y-2">
           <p className="text-4xl">🏆</p>
-          <p className="text-slate-300 font-medium">
+          <p className="text-ink-200 font-medium">
             This leaderboard is wide open.
           </p>
-          <p className="text-slate-500 text-sm">
+          <p className="text-ink-400 text-sm">
             Stake now and claim rank #1 before anyone else does.
           </p>
         </div>
@@ -159,7 +159,7 @@ export function Leaderboard() {
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <span className="w-5 text-center text-sm text-slate-500 font-mono">
+                  <span className="w-5 text-center text-sm text-ink-400 font-mono">
                     {i + 1}
                   </span>
                   <span className="font-mono text-sm">

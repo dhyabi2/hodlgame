@@ -88,7 +88,7 @@ export function SoundToggle() {
         onClick={() => setOpen((o) => !o)}
         aria-label="Sound settings"
         title="Sound settings"
-        className="rounded-r-lg border border-l-0 border-holder-700 bg-holder-800/60 w-6 h-10 flex items-center justify-center text-[10px] text-slate-400 hover:border-holder-accent hover:text-holder-accent transition"
+        className="rounded-r-lg border border-l-0 border-holder-700 bg-holder-800/60 w-6 h-10 flex items-center justify-center text-[10px] text-ink-300 hover:border-holder-accent hover:text-holder-accent transition"
       >
         ▾
       </button>
@@ -96,7 +96,7 @@ export function SoundToggle() {
       {open && (
         <div className="absolute top-12 right-0 z-40 w-56 rounded-xl border border-holder-700 bg-holder-800 p-4 shadow-xl space-y-4">
           <div>
-            <label className="text-xs uppercase tracking-wider text-slate-400">
+            <label className="text-xs uppercase tracking-wider text-ink-300">
               Volume
             </label>
             <input
@@ -108,17 +108,17 @@ export function SoundToggle() {
               onChange={(e) => onVolume(parseFloat(e.target.value))}
               className="w-full mt-2 accent-holder-accent"
             />
-            <p className="text-xs text-slate-500 mt-1">
+            <p className="text-xs text-ink-400 mt-1">
               {muted ? "Muted" : `${Math.round(volume * 100)}%`}
             </p>
           </div>
 
           <div className="flex items-center justify-between border-t border-holder-700 pt-3">
             <div>
-              <p className="text-xs uppercase tracking-wider text-slate-400">
+              <p className="text-xs uppercase tracking-wider text-ink-300">
                 Vault hum
               </p>
-              <p className="text-[10px] text-slate-600 mt-0.5">
+              <p className="text-[10px] text-ink-500 mt-0.5">
                 Low ambient tone while you watch
               </p>
             </div>

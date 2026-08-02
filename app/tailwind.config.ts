@@ -21,9 +21,26 @@ const config: Config = {
           800: "#151829",
           700: "#2a2f4e",
           accent: "#22d3ee",
+          accentBright: "#5ee4fa",
           danger: "#f43f5e",
+          dangerBright: "#ff6b85",
           success: "#34d399",
           jackpot: "#f6c34a",
+          jackpotBright: "#ffd97a",
+          // The violet that was already living unnamed in the background glow,
+          // promoted to a real token: mythic/system hue (Adamantium, info).
+          violet: "#8b7bf7",
+        },
+        // Text neutrals cast to the same violet-blue hue as the surfaces —
+        // stock slate is blue-cast and reads dirty on these backgrounds. Each
+        // step is tuned lighter than the slate step it replaces, so the sweep
+        // is also a contrast fix (smallest text should never go below ink-400).
+        ink: {
+          100: "#eef0fa",
+          200: "#ccd2ea",
+          300: "#a0a8cc",
+          400: "#7b84ad",
+          500: "#5a6288",
         },
       },
       boxShadow: {

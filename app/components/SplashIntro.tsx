@@ -38,7 +38,7 @@ export function SplashIntro() {
       >
         <button
           onClick={dismiss}
-          className="absolute top-4 right-4 text-slate-500 hover:text-white text-sm"
+          className="absolute top-4 right-4 text-ink-400 hover:text-white text-sm"
         >
           Skip ✕
         </button>
@@ -98,7 +98,7 @@ export function SplashIntro() {
             <h1 className="font-display text-4xl md:text-5xl font-bold metallic-text">
               HOLDER
             </h1>
-            <p className="text-slate-400 max-w-xs mx-auto">
+            <p className="text-ink-300 max-w-xs mx-auto">
               Paper hands pay the tax. Diamond hands collect it.
             </p>
           </motion.div>
@@ -110,7 +110,7 @@ export function SplashIntro() {
             transition={{ delay: reduceMotion ? 0.2 : 1.6, duration: 0.5 }}
             whileHover={{ scale: 1.04 }}
             whileTap={{ scale: 0.97 }}
-            className="px-8 py-3 rounded-xl font-bold bg-holder-accent text-holder-900 hover:bg-cyan-300 transition"
+            className="px-8 py-3 rounded-xl font-bold bg-holder-accent text-holder-900 hover:bg-holder-accentBright transition"
           >
             Enter the Vault
           </motion.button>

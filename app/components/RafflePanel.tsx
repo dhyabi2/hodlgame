@@ -285,30 +285,30 @@ export function RafflePanel({
             className={`text-sm w-8 h-8 rounded-lg border flex items-center justify-center transition ${
               notifyOn
                 ? "border-holder-jackpot/60 bg-holder-jackpot/10"
-                : "border-holder-700 text-slate-500 hover:border-holder-accent"
+                : "border-holder-700 text-ink-400 hover:border-holder-accent"
             }`}
           >
             {notifyOn ? "🔔" : "🔕"}
           </button>
           {round !== null && (
-            <span className="text-xs text-slate-500">Round #{round}</span>
+            <span className="text-xs text-ink-400">Round #{round}</span>
           )}
         </div>
       </div>
 
       <div className="rounded-xl bg-holder-900/50 p-4 text-center">
-        <p className="text-xs text-slate-400 uppercase tracking-wider">
+        <p className="text-xs text-ink-300 uppercase tracking-wider">
           Prize pool
         </p>
         <p className="text-2xl font-bold stat-number text-holder-jackpot mt-1">
           {prizeEstimate.toFixed(2)} HOLD
         </p>
-        <p className="text-xs text-slate-500 mt-1">10% of the jackpot vault</p>
+        <p className="text-xs text-ink-400 mt-1">10% of the jackpot vault</p>
       </div>
 
       <div className="text-center">
         {secondsLeft !== null && secondsLeft > 0 ? (
-          <p className="text-sm text-slate-400">
+          <p className="text-sm text-ink-300">
             Next draw in{" "}
             <span className="font-mono text-white">
               {formatCountdown(secondsLeft)}
@@ -321,7 +321,7 @@ export function RafflePanel({
         )}
       </div>
 
-      <p className="text-xs text-slate-500 text-center">
+      <p className="text-xs text-ink-400 text-center">
         Odds weighted by Diamond Hands score (stake × time) — patience beats
         wallet size.
       </p>
@@ -331,7 +331,7 @@ export function RafflePanel({
         disabled={loading || !ready || !wallet.publicKey}
         whileHover={reduceMotion || !ready ? undefined : { scale: 1.03 }}
         whileTap={reduceMotion || !ready ? undefined : { scale: 0.97 }}
-        className="w-full py-3 rounded-xl font-bold bg-holder-jackpot text-holder-900 hover:bg-amber-300 shadow-glow-gold transition disabled:opacity-50"
+        className="w-full py-3 rounded-xl font-bold bg-holder-jackpot text-holder-900 hover:bg-holder-jackpotBright shadow-glow-gold transition disabled:opacity-50"
       >
         {loading
           ? "Drawing..."

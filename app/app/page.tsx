@@ -202,14 +202,14 @@ export default function Home() {
             <h1 className="font-display text-4xl md:text-5xl font-bold metallic-text">
               💎 HOLDER
             </h1>
-            <p className="text-slate-400 mt-1">
+            <p className="text-ink-300 mt-1">
               Paper hands pay the tax. Diamond hands collect it.
             </p>
           </div>
           <div className="flex items-center gap-3">
             <LoreModal />
             <SoundToggle />
-            <WalletMultiButton className="!bg-holder-accent !text-holder-900 !font-bold hover:!bg-cyan-300" />
+            <WalletMultiButton className="!bg-holder-accent !text-holder-900 !font-bold hover:!bg-holder-accentBright" />
           </div>
         </motion.header>
 
@@ -232,7 +232,7 @@ export default function Home() {
         <motion.div variants={reduceMotion ? undefined : itemVariants}>
           {!wallet.publicKey ? (
             <div className="panel p-12 text-center">
-              <p className="text-xl text-slate-300">
+              <p className="text-xl text-ink-200">
                 Connect your wallet to swap for HOLD and join the holding game.
               </p>
             </div>
@@ -264,7 +264,7 @@ export default function Home() {
 
         <motion.footer
           variants={reduceMotion ? undefined : itemVariants}
-          className="text-center text-xs text-slate-600 pb-6"
+          className="text-center text-xs text-ink-500 pb-6"
         >
           Your balance: <AnimatedNumber value={toUnits(balance)} decimals={2} /> HOLD
           {" · "}Devnet MVP — not financial advice.

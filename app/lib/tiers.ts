@@ -12,11 +12,13 @@ export interface Tier {
 
 export const TIERS: Tier[] = [
   { name: "Paper", emoji: "🧻", color: "text-slate-400", glow: "glow-danger", hex: "#94a3b8", minSeconds: 0 },
-  { name: "Bronze", emoji: "🥉", color: "text-amber-600", glow: "glow-jackpot", hex: "#d97706", minSeconds: 60 * 60 * 24 },
-  { name: "Silver", emoji: "🥈", color: "text-slate-300", glow: "glow-accent", hex: "#cbd5e1", minSeconds: 60 * 60 * 24 * 3 },
-  { name: "Gold", emoji: "🥇", color: "text-holder-jackpot", glow: "glow-jackpot", hex: "#fbbf24", minSeconds: 60 * 60 * 24 * 7 },
+  { name: "Bronze", emoji: "🥉", color: "text-amber-600", glow: "glow-jackpot", hex: "#cd8a3f", minSeconds: 60 * 60 * 24 },
+  { name: "Silver", emoji: "🥈", color: "text-ink-200", glow: "glow-accent", hex: "#ccd2ea", minSeconds: 60 * 60 * 24 * 3 },
+  { name: "Gold", emoji: "🥇", color: "text-holder-jackpot", glow: "glow-jackpot", hex: "#f6c34a", minSeconds: 60 * 60 * 24 * 7 },
   { name: "Diamond", emoji: "💎", color: "text-holder-accent", glow: "glow-accent", hex: "#22d3ee", minSeconds: 60 * 60 * 24 * 14 },
-  { name: "Adamantium", emoji: "⚡", color: "text-holder-success", glow: "glow-accent", hex: "#34d399", minSeconds: 60 * 60 * 24 * 30 },
+  // Violet, not success-green: the top tier deserves its own hue instead of
+  // borrowing the semantic "success" color used by toasts and positive numbers.
+  { name: "Adamantium", emoji: "⚡", color: "text-holder-violet", glow: "glow-accent", hex: "#8b7bf7", minSeconds: 60 * 60 * 24 * 30 },
 ];
 
 export interface HoldingScore {

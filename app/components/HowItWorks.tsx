@@ -24,10 +24,10 @@ export function HowItWorks() {
         >
           <span className="text-2xl leading-none">{step.icon}</span>
           <div>
-            <p className="text-sm font-bold text-slate-200">
+            <p className="text-sm font-bold text-ink-100">
               {i + 1}. {step.title}
             </p>
-            <p className="text-xs text-slate-500 mt-0.5">{step.body}</p>
+            <p className="text-xs text-ink-400 mt-0.5">{step.body}</p>
           </div>
         </div>
       ))}
