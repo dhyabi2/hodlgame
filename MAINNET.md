@@ -187,9 +187,6 @@ The directory's 24h price change and Hot list are served by a Vercel indexer:
 > snapshot needs Pro. On Hobby the data will simply be fresher-than-daily
 > wherever the cron actually runs.
 
-> Note: an empty Blob store (`holdfun-market`, `store_bWstoeH6ID2zvxYh`) was
-> created while evaluating storage backends and can be deleted in the dashboard.
-
 ## Post-flight (run these in *your* terminal — they need a TTY)
 
 Storage provisioning can't be scripted with an API token (OAuth + term
@@ -200,10 +197,9 @@ acceptance). When you're back, run exactly this:
 cd app && vercel integration add upstash/upstash-kv     # accept + link to `app`
 #    → auto-sets KV_REST_API_URL and KV_REST_API_TOKEN
 
-# 2. Token image storage (Vercel Blob)
-vercel blob create-store holdfun-assets --access public   # public: wallets must read it
-#    → then in the dashboard: Settings → Storage → Blob → "Create token"
-#    → add as BLOB_READ_WRITE_TOKEN
+# 2. Token image storage (IPFS via Pinata — free tier)
+#    pinata.cloud → create free account → API Keys → copy the JWT
+#    → add as PINATA_JWT (this is the only image step; no public store needed)
 
 # 3. Redeploy so the routes pick up the new secrets
 vercel --prod --yes

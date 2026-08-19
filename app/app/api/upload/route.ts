@@ -1,25 +1,21 @@
-import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
 const MAX_BYTES = 5 * 1024 * 1024; // 5 MB
-
-function ext(name: string): string {
-  const m = /\.([a-zA-Z0-9]+)$/.exec(name);
-  return m ? m[1].toLowerCase() : "png";
-}
+const GATEWAY = "https://gateway.pinata.cloud/ipfs";
 
 /**
- * Uploads a token image to Vercel Blob, wraps it in Metaplex-compatible
- * metadata JSON, and returns the metadata URI to be written on-chain by the
- * launch flow. Requires `BLOB_READ_WRITE_TOKEN`; otherwise returns 503 and the
- * client falls back to name/symbol-only metadata.
+ * Pins a token image to IPFS (via Pinata's free tier), then wraps it in
+ * Metaplex-compatible metadata JSON and pins that too. Returns the metadata
+ * URI written on-chain by the launch flow. Requires `PINATA_JWT`; otherwise it
+ * returns 503 and the client falls back to name/symbol-only metadata.
  */
 export async function POST(req: Request) {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+  const jwt = process.env.PINATA_JWT;
+  if (!jwt) {
     return NextResponse.json(
-      { error: "Image storage is not configured." },
+      { error: "IPFS storage is not configured." },
       { status: 503 }
     );
   }
@@ -40,28 +36,50 @@ export async function POST(req: Request) {
       );
     }
 
-    const id = crypto.randomUUID();
-    const image = await put(`images/${id}.${ext(file.name)}`, file, {
-      access: "public",
-      addRandomSuffix: true,
-      contentType: file.type || "image/png",
+    // 1. Pin the image.
+    const imageForm = new FormData();
+    imageForm.append("file", file);
+    const imgRes = await fetch("https://api.pinata.cloud/pinning/pinFileToIPFS", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${jwt}` },
+      body: imageForm,
     });
+    if (!imgRes.ok) {
+      const t = await imgRes.text().catch(() => "");
+      throw new Error(`IPFS pin failed (${imgRes.status}): ${t.slice(0, 200)}`);
+    }
+    const img = (await imgRes.json()) as { IpfsHash: string };
+    const imageUrl = `${GATEWAY}/${img.IpfsHash}`;
 
-    const metadata = {
-      name,
-      symbol,
-      description: "",
-      image: image.url,
-    };
-    const meta = await put(`meta/${id}.json`, JSON.stringify(metadata), {
-      access: "public",
-      addRandomSuffix: true,
-      contentType: "application/json",
+    // 2. Pin the metadata JSON pointing at the image.
+    const metaRes = await fetch(
+      "https://api.pinata.cloud/pinning/pinJSONToIPFS",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${jwt}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          symbol,
+          description: "",
+          image: imageUrl,
+        }),
+      }
+    );
+    if (!metaRes.ok) {
+      const t = await metaRes.text().catch(() => "");
+      throw new Error(`Metadata pin failed (${metaRes.status}): ${t.slice(0, 200)}`);
+    }
+    const meta = (await metaRes.json()) as { IpfsHash: string };
+
+    return NextResponse.json({
+      uri: `${GATEWAY}/${meta.IpfsHash}`,
+      image: imageUrl,
     });
-
-    return NextResponse.json({ uri: meta.url, image: image.url });
   } catch (err) {
-    console.error("image upload failed", err);
+    console.error("IPFS upload failed", err);
     return NextResponse.json({ error: "Upload failed." }, { status: 500 });
   }
 }
