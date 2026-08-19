@@ -1363,6 +1363,11 @@
       "code": 6006,
       "name": "SupplyTooSmall",
       "msg": "Supply is too small to allocate a 5% creator share"
+    },
+    {
+      "code": 6007,
+      "name": "MathOverflow",
+      "msg": "Arithmetic overflow"
     }
   ],
   "metadata": {

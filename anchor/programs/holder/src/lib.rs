@@ -68,11 +68,11 @@ pub mod holder {
 
         let creator_share = total_supply
             .checked_mul(MAX_CREATOR_SHARE_BPS)
-            .unwrap()
+            .ok_or(error!(HolderError::MathOverflow))?
             .checked_div(BPS_DENOMINATOR)
-            .unwrap();
+            .ok_or(error!(HolderError::MathOverflow))?;
         require!(creator_share > 0, HolderError::SupplyTooSmall);
-        let community_share = total_supply.checked_sub(creator_share).unwrap();
+        let community_share = total_supply.checked_sub(creator_share).ok_or(error!(HolderError::MathOverflow))?;
 
         let mint_key = ctx.accounts.mint.key();
         let mint_authority_seeds = &[
@@ -159,7 +159,7 @@ pub mod holder {
 
         let vault = &mut ctx.accounts.vault_state;
         let now = Clock::get()?.unix_timestamp;
-        update_vault_points(vault, now);
+        update_vault_points(vault, now)?;
 
         let stake_account = &mut ctx.accounts.stake_account;
         if stake_account.owner == Pubkey::default() {
@@ -169,7 +169,7 @@ pub mod holder {
         }
 
         let vault_reward_per_point = vault.reward_per_point;
-        update_stake_account_points(stake_account, now);
+        update_stake_account_points(stake_account, now)?;
 
         // Transfer tokens from user to stake vault.
         let cpi_accounts = Transfer {
@@ -180,14 +180,14 @@ pub mod holder {
         let cpi_ctx = CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts);
         token::transfer(cpi_ctx, amount)?;
 
-        stake_account.amount = stake_account.amount.checked_add(amount).unwrap();
-        vault.total_staked = vault.total_staked.checked_add(amount).unwrap();
+        stake_account.amount = stake_account.amount.checked_add(amount).ok_or(error!(HolderError::MathOverflow))?;
+        vault.total_staked = vault.total_staked.checked_add(amount).ok_or(error!(HolderError::MathOverflow))?;
         stake_account.reward_debt = stake_account
             .points
             .checked_mul(vault_reward_per_point)
-            .unwrap()
+            .ok_or(error!(HolderError::MathOverflow))?
             .checked_div(PRECISION)
-            .unwrap();
+            .ok_or(error!(HolderError::MathOverflow))?;
 
         emit!(StakeEvent {
             user: ctx.accounts.user.key(),
@@ -209,22 +209,22 @@ pub mod holder {
 
         let vault = &mut ctx.accounts.vault_state;
         let now = Clock::get()?.unix_timestamp;
-        update_vault_points(vault, now);
+        update_vault_points(vault, now)?;
         let vault_reward_per_point = vault.reward_per_point;
-        update_stake_account_points(stake_account, now);
+        update_stake_account_points(stake_account, now)?;
 
         let tax = amount
             .checked_mul(TAX_BPS)
-            .unwrap()
+            .ok_or(error!(HolderError::MathOverflow))?
             .checked_div(BPS_DENOMINATOR)
-            .unwrap();
+            .ok_or(error!(HolderError::MathOverflow))?;
         let burn_amount = tax
             .checked_mul(TAX_BURN_SHARE_BPS)
-            .unwrap()
+            .ok_or(error!(HolderError::MathOverflow))?
             .checked_div(BPS_DENOMINATOR)
-            .unwrap();
-        let rebate_amount = tax.checked_sub(burn_amount).unwrap();
-        let to_user = amount.checked_sub(tax).unwrap();
+            .ok_or(error!(HolderError::MathOverflow))?;
+        let rebate_amount = tax.checked_sub(burn_amount).ok_or(error!(HolderError::MathOverflow))?;
+        let to_user = amount.checked_sub(tax).ok_or(error!(HolderError::MathOverflow))?;
 
         let mint_key = ctx.accounts.mint.key();
         let stake_vault_seeds = &[
@@ -279,14 +279,14 @@ pub mod holder {
             token::transfer(cpi_ctx, to_user)?;
         }
 
-        stake_account.amount = stake_account.amount.checked_sub(amount).unwrap();
-        vault.total_staked = vault.total_staked.checked_sub(amount).unwrap();
+        stake_account.amount = stake_account.amount.checked_sub(amount).ok_or(error!(HolderError::MathOverflow))?;
+        vault.total_staked = vault.total_staked.checked_sub(amount).ok_or(error!(HolderError::MathOverflow))?;
         stake_account.reward_debt = stake_account
             .points
             .checked_mul(vault_reward_per_point)
-            .unwrap()
+            .ok_or(error!(HolderError::MathOverflow))?
             .checked_div(PRECISION)
-            .unwrap();
+            .ok_or(error!(HolderError::MathOverflow))?;
 
         sync_vault_rewards(vault, ctx.accounts.vault_token_account.amount)?;
 
@@ -306,20 +306,20 @@ pub mod holder {
     pub fn claim_rebate(ctx: Context<ClaimRebate>) -> Result<()> {
         let vault = &mut ctx.accounts.vault_state;
         let now = Clock::get()?.unix_timestamp;
-        update_vault_points(vault, now);
+        update_vault_points(vault, now)?;
         let vault_reward_per_point = vault.reward_per_point;
 
         let stake_account = &mut ctx.accounts.stake_account;
         let reward_debt_before = stake_account.reward_debt;
-        update_stake_account_points(stake_account, now);
+        update_stake_account_points(stake_account, now)?;
 
         let full_debt = stake_account
             .points
             .checked_mul(vault_reward_per_point)
-            .unwrap()
+            .ok_or(error!(HolderError::MathOverflow))?
             .checked_div(PRECISION)
-            .unwrap();
-        let pending = full_debt.checked_sub(reward_debt_before).unwrap();
+            .ok_or(error!(HolderError::MathOverflow))?;
+        let pending = full_debt.checked_sub(reward_debt_before).ok_or(error!(HolderError::MathOverflow))?;
 
         require!(pending > 0, HolderError::NoRewards);
 
@@ -327,8 +327,8 @@ pub mod holder {
         // amount that is paid — a shortfall stays accrued rather than forfeited.
         let available = ctx.accounts.vault_token_account.amount as u128;
         let payout = pending.min(available);
-        let shortfall = pending.checked_sub(payout).unwrap();
-        stake_account.reward_debt = full_debt.checked_sub(shortfall).unwrap();
+        let shortfall = pending.checked_sub(payout).ok_or(error!(HolderError::MathOverflow))?;
+        stake_account.reward_debt = full_debt.checked_sub(shortfall).ok_or(error!(HolderError::MathOverflow))?;
 
         let mint_key = ctx.accounts.mint.key();
         let vault_seeds = &[b"vault_state".as_ref(), mint_key.as_ref(), &[vault.bump]];
@@ -352,7 +352,7 @@ pub mod holder {
             .vault_token_account
             .amount
             .checked_sub(payout as u64)
-            .unwrap();
+            .ok_or(error!(HolderError::MathOverflow))?;
 
         emit!(ClaimEvent {
             user: ctx.accounts.user.key(),
@@ -367,7 +367,7 @@ pub mod holder {
     pub fn sync_rewards(ctx: Context<SyncRewards>) -> Result<()> {
         let vault = &mut ctx.accounts.vault_state;
         let now = Clock::get()?.unix_timestamp;
-        update_vault_points(vault, now);
+        update_vault_points(vault, now)?;
         sync_vault_rewards(vault, ctx.accounts.vault_token_account.amount)?;
         Ok(())
     }
@@ -532,7 +532,7 @@ pub mod holder {
                 .checked_sub(sol_out)
                 .ok_or(error!(HolderError::InsufficientLiquidity))?;
             **user_account_info.try_borrow_mut_lamports()? =
-                user_account_info.lamports().checked_add(sol_out).unwrap();
+                user_account_info.lamports().checked_add(sol_out).ok_or(error!(HolderError::MathOverflow))?;
         }
 
         emit!(SwapEvent {
@@ -548,25 +548,37 @@ pub mod holder {
 
 }
 
-fn update_vault_points(vault: &mut Account<VaultState>, now: i64) {
+fn update_vault_points(vault: &mut Account<VaultState>, now: i64) -> Result<()> {
     if now > vault.last_update_time && vault.total_staked > 0 {
         let elapsed = (now - vault.last_update_time) as u128;
-        let added = elapsed.checked_mul(vault.total_staked as u128).unwrap();
-        vault.total_points = vault.total_points.checked_add(added).unwrap();
+        let added = elapsed
+            .checked_mul(vault.total_staked as u128)
+            .ok_or(error!(HolderError::MathOverflow))?;
+        vault.total_points = vault
+            .total_points
+            .checked_add(added)
+            .ok_or(error!(HolderError::MathOverflow))?;
     }
     vault.last_update_time = now;
+    Ok(())
 }
 
 /// Advance a stake account's accrued points (stake × time) to `now`. Does NOT
 /// touch `reward_debt` — settling the debt is the caller's job, so `claim_rebate`
 /// can read the pre-settlement debt to compute what's actually owed.
-fn update_stake_account_points(stake_account: &mut Account<StakeAccount>, now: i64) {
+fn update_stake_account_points(stake_account: &mut Account<StakeAccount>, now: i64) -> Result<()> {
     if now > stake_account.last_update_time && stake_account.amount > 0 {
         let elapsed = (now - stake_account.last_update_time) as u128;
-        let added = elapsed.checked_mul(stake_account.amount as u128).unwrap();
-        stake_account.points = stake_account.points.checked_add(added).unwrap();
+        let added = elapsed
+            .checked_mul(stake_account.amount as u128)
+            .ok_or(error!(HolderError::MathOverflow))?;
+        stake_account.points = stake_account
+            .points
+            .checked_add(added)
+            .ok_or(error!(HolderError::MathOverflow))?;
     }
     stake_account.last_update_time = now;
+    Ok(())
 }
 
 /// Constant-product swap quote: how much of `reserve_out` you get for `amount_in`
@@ -579,14 +591,14 @@ fn constant_product_out(
     fee_bps: u64,
 ) -> Result<u64> {
     let amount_in_after_fee = (amount_in as u128)
-        .checked_mul((BPS_DENOMINATOR.checked_sub(fee_bps).unwrap()) as u128)
-        .unwrap()
+        .checked_mul((BPS_DENOMINATOR.checked_sub(fee_bps).ok_or(error!(HolderError::MathOverflow))?) as u128)
+        .ok_or(error!(HolderError::MathOverflow))?
         .checked_div(BPS_DENOMINATOR as u128)
-        .unwrap();
-    let numerator = amount_in_after_fee.checked_mul(reserve_out as u128).unwrap();
-    let denominator = (reserve_in as u128).checked_add(amount_in_after_fee).unwrap();
+        .ok_or(error!(HolderError::MathOverflow))?;
+    let numerator = amount_in_after_fee.checked_mul(reserve_out as u128).ok_or(error!(HolderError::MathOverflow))?;
+    let denominator = (reserve_in as u128).checked_add(amount_in_after_fee).ok_or(error!(HolderError::MathOverflow))?;
     require!(denominator > 0, HolderError::InsufficientLiquidity);
-    let out = numerator.checked_div(denominator).unwrap();
+    let out = numerator.checked_div(denominator).ok_or(error!(HolderError::MathOverflow))?;
     Ok(out as u64)
 }
 
@@ -596,10 +608,10 @@ fn sync_vault_rewards(vault: &mut Account<VaultState>, current_balance: u64) -> 
             let new_rewards = (current_balance - vault.last_recorded_balance) as u128;
             let increment = new_rewards
                 .checked_mul(PRECISION)
-                .unwrap()
+                .ok_or(error!(HolderError::MathOverflow))?
                 .checked_div(vault.total_points)
-                .unwrap();
-            vault.reward_per_point = vault.reward_per_point.checked_add(increment).unwrap();
+                .ok_or(error!(HolderError::MathOverflow))?;
+            vault.reward_per_point = vault.reward_per_point.checked_add(increment).ok_or(error!(HolderError::MathOverflow))?;
             vault.last_recorded_balance = current_balance;
         }
         // Rewards that arrive while nothing is staked (total_points == 0) are
@@ -1109,4 +1121,6 @@ pub enum HolderError {
     SupplyAlreadyMinted,
     #[msg("Supply is too small to allocate a 5% creator share")]
     SupplyTooSmall,
+    #[msg("Arithmetic overflow")]
+    MathOverflow,
 }
