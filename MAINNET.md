@@ -189,3 +189,26 @@ The directory's 24h price change and Hot list are served by a Vercel indexer:
 
 > Note: an empty Blob store (`holdfun-market`, `store_bWstoeH6ID2zvxYh`) was
 > created while evaluating storage backends and can be deleted in the dashboard.
+
+## Post-flight (run these in *your* terminal — they need a TTY)
+
+Storage provisioning can't be scripted with an API token (OAuth + term
+acceptance). When you're back, run exactly this:
+
+```bash
+# 1. Market indexer storage (Vercel KV via Upstash — free tier)
+cd app && vercel integration add upstash/upstash-kv     # accept + link to `app`
+#    → auto-sets KV_REST_API_URL and KV_REST_API_TOKEN
+
+# 2. Token image storage (Vercel Blob)
+vercel blob create-store holdfun-assets --access public   # public: wallets must read it
+#    → then in the dashboard: Settings → Storage → Blob → "Create token"
+#    → add as BLOB_READ_WRITE_TOKEN
+
+# 3. Redeploy so the routes pick up the new secrets
+vercel --prod --yes
+```
+
+Non-code blockers (still open): third-party audit, upgrade authority → multisig or
+`--final`, `vault_state.authority` → multisig, and legal review of the exit-tax
+model. Details below.
