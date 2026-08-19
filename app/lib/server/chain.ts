@@ -1,5 +1,5 @@
 import { Connection, PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { AnchorProvider, BN, Program } from "@coral-xyz/anchor";
+import { AnchorProvider, BN, Program, EventParser } from "@coral-xyz/anchor";
 import { getAssociatedTokenAddress, getMint } from "@solana/spl-token";
 import idl from "../idl.json";
 
@@ -90,4 +90,63 @@ export async function listTokens(
       return { mint: mint.toBase58(), decimals, supply, priceSol, marketCapSol };
     })
   );
+}
+
+export interface PricePoint {
+  time: number;
+  price: number;
+}
+
+/**
+ * Reconstructs a token's price history by replaying its `SwapEvent`s (each swap
+ * carries an execution price). Sorted ascending by time. Works without any
+ * indexer — straight from the chain.
+ */
+export async function getPriceHistory(
+  connection: Connection,
+  mint: PublicKey,
+  decimals: number,
+  limit = 100
+): Promise<PricePoint[]> {
+  const program = readProgram(connection);
+  const parser = new EventParser(PROGRAM_ID, program.coder);
+  const [swapPoolPDA] = PublicKey.findProgramAddressSync(
+    [Buffer.from("swap_pool"), mint.toBuffer()],
+    PROGRAM_ID
+  );
+
+  const sigs = await connection.getSignaturesForAddress(swapPoolPDA, { limit });
+  const wanted = sigs.filter((s) => !s.err).map((s) => s.signature);
+  if (wanted.length === 0) return [];
+
+  // Fetch each transaction individually — `getTransactions` batches, which the
+  // Helius devnet tier rejects.
+  const txs = await Promise.all(
+    wanted.map((sig) =>
+      connection
+        .getTransaction(sig, { maxSupportedTransactionVersion: 0 })
+        .catch(() => null)
+    )
+  );
+
+  const points: PricePoint[] = [];
+  for (const tx of txs) {
+    const logs = tx?.meta?.logMessages;
+    if (!logs) continue;
+    for (const parsed of parser.parseLogs(logs)) {
+      if (parsed.name !== "SwapEvent") continue;
+      const data = parsed.data as any;
+      const sol = Number(data.solAmount.toString());
+      const hold = Number(data.holdAmount.toString());
+      const time = Number(data.timestamp.toString());
+      if (hold <= 0 || !Number.isFinite(time)) continue;
+      points.push({
+        time,
+        price: sol / LAMPORTS_PER_SOL / (hold / 10 ** decimals),
+      });
+    }
+  }
+
+  points.sort((a, b) => a.time - b.time);
+  return points;
 }

@@ -10,6 +10,7 @@ import confetti from "canvas-confetti";
 import { StakePanel } from "@/components/StakePanel";
 import { SwapPanel } from "@/components/SwapPanel";
 import { LiquidityPanel } from "@/components/LiquidityPanel";
+import { PriceChart } from "@/components/PriceChart";
 import { LiveFeed } from "@/components/LiveFeed";
 import { Leaderboard } from "@/components/Leaderboard";
 import { DiamondHero } from "@/components/DiamondHero";
@@ -64,6 +65,7 @@ const MILESTONES = [
 
 const SECTIONS: NavSection[] = [
   { id: "vault", label: "Vault", icon: "💎" },
+  { id: "chart", label: "Chart", icon: "📈" },
   { id: "stake", label: "Stake", icon: "🔒" },
   { id: "liquidity", label: "Liquidity", icon: "💧" },
   { id: "activity", label: "Activity", icon: "📡" },
@@ -188,6 +190,10 @@ export function GameView({ game }: { game: GameSummary }) {
                 primaryLabel={connected ? "Go to your position" : undefined}
               />
             )}
+          </motion.div>
+
+          <motion.div variants={reduceMotion ? undefined : itemVariants}>
+            <PriceChart mint={mint} symbol={symbol} refreshTick={refreshTick} />
           </motion.div>
 
           {/* Anyone can launch a token here, so the risks come before the game. */}
