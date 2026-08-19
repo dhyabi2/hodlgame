@@ -48,11 +48,12 @@ async function main() {
     [Buffer.from("swap_pool"), mint.toBuffer()],
     programId
   );
-  const holdVault = await getAssociatedTokenAddress(mint, swapPool, true);
-  const authorityTokenAccount = await getAssociatedTokenAddress(
-    mint,
-    provider.wallet.publicKey
+  const [treasury] = PublicKey.findProgramAddressSync(
+    [Buffer.from("treasury"), mint.toBuffer()],
+    programId
   );
+  const holdVault = await getAssociatedTokenAddress(mint, swapPool, true);
+  const treasuryTokenAccount = await getAssociatedTokenAddress(mint, treasury, true);
 
   console.log("Authority:", provider.wallet.publicKey.toBase58());
   console.log("Swap pool PDA:", swapPool.toBase58());
@@ -68,7 +69,8 @@ async function main() {
       swapPool,
       mint,
       holdVault,
-      authorityTokenAccount,
+      treasury,
+      treasuryTokenAccount,
       authority: provider.wallet.publicKey,
       systemProgram: SystemProgram.programId,
       tokenProgram: TOKEN_PROGRAM_ID,

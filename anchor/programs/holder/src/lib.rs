@@ -1,8 +1,8 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::keccak;
 use anchor_lang::system_program;
-use anchor_spl::associated_token::{self, AssociatedToken};
-use anchor_spl::token::{self, Burn, Mint, Token, TokenAccount, Transfer};
+use anchor_spl::associated_token::{get_associated_token_address, AssociatedToken};
+use anchor_spl::token::spl_token::instruction::AuthorityType;
+use anchor_spl::token::{self, Burn, Mint, MintTo, SetAuthority, Token, TokenAccount, Transfer};
 
 declare_id!("9ggxpWrwYXH7sygoqQs2N5qCva38vVkJvr5ZzwPijPUu");
 
@@ -16,31 +16,140 @@ pub const TAX_BURN_SHARE_BPS: u64 = 2_500;
 /// 1% swap fee, baked into the constant-product invariant (stays in the pool).
 pub const SWAP_FEE_BPS: u64 = 100;
 pub const BPS_DENOMINATOR: u64 = 10_000;
-/// Minimum time between raffle draws.
-pub const RAFFLE_INTERVAL_SECS: i64 = 24 * 60 * 60;
-/// Winner takes 10% of the rebate vault's current balance.
-pub const RAFFLE_PRIZE_BPS: u64 = 1_000;
-/// Bound on entrants per draw to keep compute usage predictable.
-pub const MAX_RAFFLE_ENTRANTS: usize = 50;
+/// The creator may never receive more than this share of the supply. It is
+/// enforced on-chain, in `mint_supply` — not as a UI convention.
+pub const MAX_CREATOR_SHARE_BPS: u64 = 500;
 
 #[program]
 pub mod holder {
     use super::*;
 
-    /// Initialize the global vault state, the tax vault, and the stake vault.
+    /// Initialize the global vault state and the stake vault. Token accounts
+    /// are created separately in `mint_supply` (splitting the old `initialize`
+    /// in two also removes the SBF stack-overflow on this instruction).
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
+        let mint_key = ctx.accounts.mint.key();
+        let vault_state_key = ctx.accounts.vault_state.key();
+        let stake_vault_key = ctx.accounts.stake_vault.key();
+        let (treasury, treasury_bump) =
+            Pubkey::find_program_address(&[b"treasury".as_ref(), mint_key.as_ref()], ctx.program_id);
+
         let vault = &mut ctx.accounts.vault_state;
         vault.authority = ctx.accounts.authority.key();
-        vault.mint = ctx.accounts.mint.key();
-        vault.vault_token_account = ctx.accounts.vault_token_account.key();
-        vault.stake_vault = ctx.accounts.stake_vault.key();
-        vault.stake_token_account = ctx.accounts.stake_token_account.key();
+        vault.mint = mint_key;
+        vault.vault_token_account = get_associated_token_address(&vault_state_key, &mint_key);
+        vault.stake_vault = stake_vault_key;
+        vault.stake_token_account = get_associated_token_address(&stake_vault_key, &mint_key);
+        vault.treasury = treasury;
+        vault.treasury_bump = treasury_bump;
         vault.total_staked = 0;
         vault.total_points = 0;
         vault.reward_per_point = 0;
         vault.last_update_time = Clock::get()?.unix_timestamp;
         vault.last_recorded_balance = 0;
+        vault.total_supply = 0;
+        vault.creator_share = 0;
+        vault.supply_minted = false;
+        vault.created_at = Clock::get()?.unix_timestamp;
         vault.bump = ctx.bumps.vault_state;
+        ctx.accounts.stake_vault.bump = ctx.bumps.stake_vault;
+        Ok(())
+    }
+
+    /// Mint the entire supply exactly once: `MAX_CREATOR_SHARE_BPS` (5%) to the
+    /// creator, the remainder to the community treasury. The program holds the
+    /// mint authority, so this — and the `renounce` that nulls it — are the only
+    /// way supply ever moves. A creator can never be allocated more than 5%.
+    pub fn mint_supply(ctx: Context<MintSupply>, total_supply: u64) -> Result<()> {
+        require!(total_supply > 0, HolderError::ZeroAmount);
+
+        let vault = &mut ctx.accounts.vault_state;
+        require!(!vault.supply_minted, HolderError::SupplyAlreadyMinted);
+
+        let creator_share = total_supply
+            .checked_mul(MAX_CREATOR_SHARE_BPS)
+            .unwrap()
+            .checked_div(BPS_DENOMINATOR)
+            .unwrap();
+        require!(creator_share > 0, HolderError::SupplyTooSmall);
+        let community_share = total_supply.checked_sub(creator_share).unwrap();
+
+        let mint_key = ctx.accounts.mint.key();
+        let mint_authority_seeds = &[
+            b"mint_authority".as_ref(),
+            mint_key.as_ref(),
+            &[ctx.bumps.mint_authority],
+        ];
+        let signer = &[&mint_authority_seeds[..]];
+
+        // 5% — the creator's share, and their only share.
+        let cpi_accounts = MintTo {
+            mint: ctx.accounts.mint.to_account_info(),
+            to: ctx.accounts.creator_token_account.to_account_info(),
+            authority: ctx.accounts.mint_authority.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            cpi_accounts,
+            signer,
+        );
+        token::mint_to(cpi_ctx, creator_share)?;
+
+        // 95% — the community's share, held by the treasury PDA.
+        let cpi_accounts = MintTo {
+            mint: ctx.accounts.mint.to_account_info(),
+            to: ctx.accounts.treasury_token_account.to_account_info(),
+            authority: ctx.accounts.mint_authority.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            cpi_accounts,
+            signer,
+        );
+        token::mint_to(cpi_ctx, community_share)?;
+
+        vault.total_supply = total_supply;
+        vault.creator_share = creator_share;
+        vault.supply_minted = true;
+
+        emit!(SupplyEvent {
+            mint: mint_key,
+            total_supply,
+            creator_share,
+            community_share,
+            timestamp: Clock::get()?.unix_timestamp,
+        });
+
+        Ok(())
+    }
+
+    /// Irrevocably null the mint authority. `mint_supply` is already one-time,
+    /// so no more tokens can ever be minted; this removes the authority entirely
+    /// so even a program upgrade could not print supply.
+    pub fn renounce(ctx: Context<Renounce>) -> Result<()> {
+        let cpi_accounts = SetAuthority {
+            account_or_mint: ctx.accounts.mint.to_account_info(),
+            current_authority: ctx.accounts.mint_authority.to_account_info(),
+        };
+        let mint_key = ctx.accounts.mint.key();
+        let mint_authority_seeds = &[
+            b"mint_authority".as_ref(),
+            mint_key.as_ref(),
+            &[ctx.bumps.mint_authority],
+        ];
+        let signer = &[&mint_authority_seeds[..]];
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            cpi_accounts,
+            signer,
+        );
+        token::set_authority(cpi_ctx, AuthorityType::MintTokens, None)?;
+
+        emit!(RenounceEvent {
+            mint: mint_key,
+            timestamp: Clock::get()?.unix_timestamp,
+        });
+
         Ok(())
     }
 
@@ -60,7 +169,7 @@ pub mod holder {
         }
 
         let vault_reward_per_point = vault.reward_per_point;
-        update_stake_account_points(stake_account, now, vault_reward_per_point);
+        update_stake_account_points(stake_account, now);
 
         // Transfer tokens from user to stake vault.
         let cpi_accounts = Transfer {
@@ -102,7 +211,7 @@ pub mod holder {
         let now = Clock::get()?.unix_timestamp;
         update_vault_points(vault, now);
         let vault_reward_per_point = vault.reward_per_point;
-        update_stake_account_points(stake_account, now, vault_reward_per_point);
+        update_stake_account_points(stake_account, now);
 
         let tax = amount
             .checked_mul(TAX_BPS)
@@ -201,28 +310,25 @@ pub mod holder {
         let vault_reward_per_point = vault.reward_per_point;
 
         let stake_account = &mut ctx.accounts.stake_account;
-        update_stake_account_points(stake_account, now, vault_reward_per_point);
+        let reward_debt_before = stake_account.reward_debt;
+        update_stake_account_points(stake_account, now);
 
-        let pending = stake_account
+        let full_debt = stake_account
             .points
             .checked_mul(vault_reward_per_point)
             .unwrap()
             .checked_div(PRECISION)
-            .unwrap()
-            .checked_sub(stake_account.reward_debt)
             .unwrap();
+        let pending = full_debt.checked_sub(reward_debt_before).unwrap();
 
         require!(pending > 0, HolderError::NoRewards);
 
-        stake_account.reward_debt = stake_account
-            .points
-            .checked_mul(vault_reward_per_point)
-            .unwrap()
-            .checked_div(PRECISION)
-            .unwrap();
-
-        let available = ctx.accounts.vault_token_account.amount;
-        let payout = pending.min(available as u128) as u64;
+        // Clamp the payout to what the vault actually holds, but only settle the
+        // amount that is paid — a shortfall stays accrued rather than forfeited.
+        let available = ctx.accounts.vault_token_account.amount as u128;
+        let payout = pending.min(available);
+        let shortfall = pending.checked_sub(payout).unwrap();
+        stake_account.reward_debt = full_debt.checked_sub(shortfall).unwrap();
 
         let mint_key = ctx.accounts.mint.key();
         let vault_seeds = &[b"vault_state".as_ref(), mint_key.as_ref(), &[vault.bump]];
@@ -239,18 +345,18 @@ pub mod holder {
             cpi_accounts,
             vault_signer,
         );
-        token::transfer(cpi_ctx, payout)?;
+        token::transfer(cpi_ctx, payout as u64)?;
 
         vault.last_recorded_balance = ctx
             .accounts
             .vault_token_account
             .amount
-            .checked_sub(payout)
+            .checked_sub(payout as u64)
             .unwrap();
 
         emit!(ClaimEvent {
             user: ctx.accounts.user.key(),
-            amount: payout,
+            amount: payout as u64,
             timestamp: now,
         });
 
@@ -266,7 +372,9 @@ pub mod holder {
         Ok(())
     }
 
-    /// Authority-only: seed the SOL/HOLD swap pool with initial liquidity.
+    /// Authority-only: seed the SOL/token swap pool. SOL comes from the
+    /// authority; tokens come from the community treasury (never the creator's
+    /// own wallet), so the creator cannot direct the 95% anywhere but the pool.
     pub fn initialize_pool(ctx: Context<InitializePool>, sol_amount: u64, hold_amount: u64) -> Result<()> {
         require!(sol_amount > 0 && hold_amount > 0, HolderError::ZeroAmount);
 
@@ -277,23 +385,32 @@ pub mod holder {
         let cpi_ctx = CpiContext::new(ctx.accounts.system_program.to_account_info(), cpi_accounts);
         system_program::transfer(cpi_ctx, sol_amount)?;
 
+        let mint_key = ctx.accounts.mint.key();
+        let treasury_bump = ctx.accounts.vault_state.treasury_bump;
+        let treasury_seeds = &[b"treasury".as_ref(), mint_key.as_ref(), &[treasury_bump]];
+        let treasury_signer = &[&treasury_seeds[..]];
+
         let cpi_accounts = Transfer {
-            from: ctx.accounts.authority_token_account.to_account_info(),
+            from: ctx.accounts.treasury_token_account.to_account_info(),
             to: ctx.accounts.hold_vault.to_account_info(),
-            authority: ctx.accounts.authority.to_account_info(),
+            authority: ctx.accounts.treasury.to_account_info(),
         };
-        let cpi_ctx = CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts);
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.token_program.to_account_info(),
+            cpi_accounts,
+            treasury_signer,
+        );
         token::transfer(cpi_ctx, hold_amount)?;
 
         let pool = &mut ctx.accounts.swap_pool;
-        pool.mint = ctx.accounts.mint.key();
+        pool.mint = mint_key;
         pool.hold_vault = ctx.accounts.hold_vault.key();
         pool.bump = ctx.bumps.swap_pool;
 
         Ok(())
     }
 
-    /// Authority-only: top up the swap pool's liquidity.
+    /// Authority-only: top up the swap pool's liquidity from the treasury.
     pub fn add_liquidity(ctx: Context<AddLiquidity>, sol_amount: u64, hold_amount: u64) -> Result<()> {
         require!(sol_amount > 0 || hold_amount > 0, HolderError::ZeroAmount);
 
@@ -307,12 +424,21 @@ pub mod holder {
         }
 
         if hold_amount > 0 {
+            let mint_key = ctx.accounts.mint.key();
+            let treasury_bump = ctx.accounts.vault_state.treasury_bump;
+            let treasury_seeds = &[b"treasury".as_ref(), mint_key.as_ref(), &[treasury_bump]];
+            let treasury_signer = &[&treasury_seeds[..]];
+
             let cpi_accounts = Transfer {
-                from: ctx.accounts.authority_token_account.to_account_info(),
+                from: ctx.accounts.treasury_token_account.to_account_info(),
                 to: ctx.accounts.hold_vault.to_account_info(),
-                authority: ctx.accounts.authority.to_account_info(),
+                authority: ctx.accounts.treasury.to_account_info(),
             };
-            let cpi_ctx = CpiContext::new(ctx.accounts.token_program.to_account_info(), cpi_accounts);
+            let cpi_ctx = CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                cpi_accounts,
+                treasury_signer,
+            );
             token::transfer(cpi_ctx, hold_amount)?;
         }
 
@@ -420,131 +546,6 @@ pub mod holder {
         Ok(())
     }
 
-    /// Authority-only: create the Diamond Raffle, ready to draw after one interval.
-    pub fn initialize_raffle(ctx: Context<InitializeRaffle>) -> Result<()> {
-        let raffle = &mut ctx.accounts.raffle_pool;
-        raffle.mint = ctx.accounts.mint.key();
-        raffle.last_draw_time = Clock::get()?.unix_timestamp;
-        raffle.round = 0;
-        raffle.bump = ctx.bumps.raffle_pool;
-        Ok(())
-    }
-
-    /// Permissionless: draw the Diamond Raffle. Entrants are passed as
-    /// remaining_accounts, pairs of (stake_account, owner's HOLD token
-    /// account) — the client picks the top-points stakers (capped at
-    /// MAX_RAFFLE_ENTRANTS) so compute usage stays bounded. Odds are
-    /// weighted by each entrant's `points` (time-weighted holding), so
-    /// patience — not just wallet size — improves your chance of winning.
-    ///
-    /// Randomness note: Solana has no native secure RNG. This uses a
-    /// keccak hash of the current slot/timestamp/round as a pseudo-random
-    /// seed — fine for a devnet game with no real value at stake, but it
-    /// is influenceable by whoever controls block production and should
-    /// NOT be trusted for anything with real money without swapping in a
-    /// VRF oracle (e.g. Switchboard or ORAO).
-    pub fn draw_raffle<'info>(
-        ctx: Context<'_, '_, 'info, 'info, DrawRaffle<'info>>,
-    ) -> Result<()> {
-        let now = Clock::get()?.unix_timestamp;
-        {
-            let raffle = &ctx.accounts.raffle_pool;
-            require!(
-                now - raffle.last_draw_time >= RAFFLE_INTERVAL_SECS,
-                HolderError::RaffleNotReady
-            );
-        }
-
-        let remaining = ctx.remaining_accounts;
-        require!(
-            !remaining.is_empty()
-                && remaining.len() % 2 == 0
-                && remaining.len() / 2 <= MAX_RAFFLE_ENTRANTS,
-            HolderError::InvalidRaffleEntrants
-        );
-
-        let mint_key = ctx.accounts.mint.key();
-        let mut total_weight: u128 = 0;
-        let mut entrants: Vec<(u128, usize, Pubkey)> = Vec::with_capacity(remaining.len() / 2);
-
-        let mut i = 0;
-        while i < remaining.len() {
-            let stake_ai = &remaining[i];
-            let token_ai = &remaining[i + 1];
-            let stake_account: Account<StakeAccount> = Account::try_from(stake_ai)?;
-            require!(stake_account.amount > 0, HolderError::InvalidRaffleEntrants);
-            let expected_ata =
-                associated_token::get_associated_token_address(&stake_account.owner, &mint_key);
-            require_keys_eq!(
-                expected_ata,
-                token_ai.key(),
-                HolderError::InvalidRaffleEntrants
-            );
-            let weight = stake_account.points.max(1);
-            total_weight = total_weight.checked_add(weight).unwrap();
-            entrants.push((weight, i + 1, stake_account.owner));
-            i += 2;
-        }
-        require!(total_weight > 0, HolderError::InvalidRaffleEntrants);
-
-        let round = ctx.accounts.raffle_pool.round;
-        let seed = keccak::hashv(&[
-            &Clock::get()?.slot.to_le_bytes(),
-            &now.to_le_bytes(),
-            &round.to_le_bytes(),
-        ]);
-        let rand_val =
-            u128::from_le_bytes(seed.to_bytes()[0..16].try_into().unwrap()) % total_weight;
-
-        let mut acc: u128 = 0;
-        let mut winner_token_idx = entrants[0].1;
-        let mut winner_owner = entrants[0].2;
-        for (weight, token_idx, owner) in entrants.iter() {
-            acc = acc.checked_add(*weight).unwrap();
-            if rand_val < acc {
-                winner_token_idx = *token_idx;
-                winner_owner = *owner;
-                break;
-            }
-        }
-        let winner_token_ai = &remaining[winner_token_idx];
-
-        let prize = (ctx.accounts.vault_token_account.amount as u128)
-            .checked_mul(RAFFLE_PRIZE_BPS as u128)
-            .unwrap()
-            .checked_div(BPS_DENOMINATOR as u128)
-            .unwrap() as u64;
-        require!(prize > 0, HolderError::InsufficientLiquidity);
-
-        let vault_seeds = &[b"vault_state".as_ref(), mint_key.as_ref(), &[ctx.accounts.vault_state.bump]];
-        let vault_signer = &[&vault_seeds[..]];
-        let cpi_accounts = Transfer {
-            from: ctx.accounts.vault_token_account.to_account_info(),
-            to: winner_token_ai.clone(),
-            authority: ctx.accounts.vault_state.to_account_info(),
-        };
-        let cpi_ctx = CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
-            cpi_accounts,
-            vault_signer,
-        );
-        token::transfer(cpi_ctx, prize)?;
-
-        let entrant_count = entrants.len() as u32;
-        let raffle = &mut ctx.accounts.raffle_pool;
-        raffle.last_draw_time = now;
-        raffle.round = raffle.round.checked_add(1).unwrap();
-
-        emit!(RaffleEvent {
-            winner: winner_owner,
-            prize,
-            round,
-            participants: entrant_count,
-            timestamp: now,
-        });
-
-        Ok(())
-    }
 }
 
 fn update_vault_points(vault: &mut Account<VaultState>, now: i64) {
@@ -556,23 +557,16 @@ fn update_vault_points(vault: &mut Account<VaultState>, now: i64) {
     vault.last_update_time = now;
 }
 
-fn update_stake_account_points(
-    stake_account: &mut Account<StakeAccount>,
-    now: i64,
-    reward_per_point: u128,
-) {
+/// Advance a stake account's accrued points (stake × time) to `now`. Does NOT
+/// touch `reward_debt` — settling the debt is the caller's job, so `claim_rebate`
+/// can read the pre-settlement debt to compute what's actually owed.
+fn update_stake_account_points(stake_account: &mut Account<StakeAccount>, now: i64) {
     if now > stake_account.last_update_time && stake_account.amount > 0 {
         let elapsed = (now - stake_account.last_update_time) as u128;
         let added = elapsed.checked_mul(stake_account.amount as u128).unwrap();
         stake_account.points = stake_account.points.checked_add(added).unwrap();
     }
     stake_account.last_update_time = now;
-    stake_account.reward_debt = stake_account
-        .points
-        .checked_mul(reward_per_point)
-        .unwrap()
-        .checked_div(PRECISION)
-        .unwrap();
 }
 
 /// Constant-product swap quote: how much of `reserve_out` you get for `amount_in`
@@ -608,6 +602,9 @@ fn sync_vault_rewards(vault: &mut Account<VaultState>, current_balance: u64) -> 
             vault.reward_per_point = vault.reward_per_point.checked_add(increment).unwrap();
             vault.last_recorded_balance = current_balance;
         }
+        // Rewards that arrive while nothing is staked (total_points == 0) are
+        // left unrecorded so they are distributed to the first stakers on the
+        // next sync, rather than being silently dropped.
     }
     Ok(())
 }
@@ -643,29 +640,64 @@ pub struct Initialize<'info> {
 
     pub mint: Box<Account<'info, Mint>>,
 
-    #[account(
-        init,
-        payer = authority,
-        associated_token::mint = mint,
-        associated_token::authority = vault_state,
-    )]
-    pub vault_token_account: Box<Account<'info, TokenAccount>>,
-
-    #[account(
-        init,
-        payer = authority,
-        associated_token::mint = mint,
-        associated_token::authority = stake_vault,
-    )]
-    pub stake_token_account: Box<Account<'info, TokenAccount>>,
-
     #[account(mut)]
     pub authority: Signer<'info>,
 
     pub system_program: Program<'info, System>,
-    pub token_program: Program<'info, Token>,
-    pub associated_token_program: Program<'info, AssociatedToken>,
     pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct MintSupply<'info> {
+    #[account(
+        mut,
+        seeds = [b"vault_state", mint.key().as_ref()],
+        bump = vault_state.bump,
+        has_one = mint,
+        has_one = authority,
+    )]
+    pub vault_state: Box<Account<'info, VaultState>>,
+
+    #[account(mut)]
+    pub mint: Box<Account<'info, Mint>>,
+
+    #[account(seeds = [b"mint_authority", mint.key().as_ref()], bump)]
+    /// CHECK: PDA that holds the mint authority; the program signs with it.
+    pub mint_authority: UncheckedAccount<'info>,
+
+    #[account(seeds = [b"treasury", mint.key().as_ref()], bump = vault_state.treasury_bump)]
+    /// CHECK: treasury PDA that owns the community token account.
+    pub treasury: UncheckedAccount<'info>,
+
+    #[account(mut, associated_token::mint = mint, associated_token::authority = treasury)]
+    pub treasury_token_account: Box<Account<'info, TokenAccount>>,
+
+    #[account(mut, associated_token::mint = mint, associated_token::authority = authority)]
+    pub creator_token_account: Box<Account<'info, TokenAccount>>,
+
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct Renounce<'info> {
+    #[account(
+        seeds = [b"vault_state", mint.key().as_ref()],
+        bump = vault_state.bump,
+        has_one = mint,
+    )]
+    pub vault_state: Box<Account<'info, VaultState>>,
+
+    #[account(mut)]
+    pub mint: Box<Account<'info, Mint>>,
+
+    #[account(seeds = [b"mint_authority", mint.key().as_ref()], bump)]
+    /// CHECK: PDA that holds the mint authority; the program signs with it.
+    pub mint_authority: UncheckedAccount<'info>,
+
+    pub token_program: Program<'info, Token>,
 }
 
 #[derive(Accounts)]
@@ -731,6 +763,7 @@ pub struct Unstake<'info> {
     )]
     pub stake_vault: Box<Account<'info, StakeVault>>,
 
+    #[account(mut)]
     pub mint: Box<Account<'info, Mint>>,
 
     #[account(
@@ -849,8 +882,12 @@ pub struct InitializePool<'info> {
     )]
     pub hold_vault: Box<Account<'info, TokenAccount>>,
 
-    #[account(mut)]
-    pub authority_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(seeds = [b"treasury", mint.key().as_ref()], bump = vault_state.treasury_bump)]
+    /// CHECK: treasury PDA that owns the community token account.
+    pub treasury: UncheckedAccount<'info>,
+
+    #[account(mut, associated_token::mint = mint, associated_token::authority = treasury)]
+    pub treasury_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
     pub authority: Signer<'info>,
@@ -885,8 +922,12 @@ pub struct AddLiquidity<'info> {
     #[account(mut)]
     pub hold_vault: Box<Account<'info, TokenAccount>>,
 
-    #[account(mut)]
-    pub authority_token_account: Box<Account<'info, TokenAccount>>,
+    #[account(seeds = [b"treasury", mint.key().as_ref()], bump = vault_state.treasury_bump)]
+    /// CHECK: treasury PDA that owns the community token account.
+    pub treasury: UncheckedAccount<'info>,
+
+    #[account(mut, associated_token::mint = mint, associated_token::authority = treasury)]
+    pub treasury_token_account: Box<Account<'info, TokenAccount>>,
 
     #[account(mut)]
     pub authority: Signer<'info>,
@@ -953,61 +994,6 @@ pub struct SwapHoldForSol<'info> {
     pub token_program: Program<'info, Token>,
 }
 
-#[derive(Accounts)]
-pub struct InitializeRaffle<'info> {
-    #[account(
-        seeds = [b"vault_state", mint.key().as_ref()],
-        bump = vault_state.bump,
-        has_one = authority,
-        has_one = mint,
-    )]
-    pub vault_state: Box<Account<'info, VaultState>>,
-
-    #[account(
-        init,
-        payer = authority,
-        space = 8 + RafflePool::SIZE,
-        seeds = [b"raffle_pool", mint.key().as_ref()],
-        bump
-    )]
-    pub raffle_pool: Box<Account<'info, RafflePool>>,
-
-    pub mint: Box<Account<'info, Mint>>,
-
-    #[account(mut)]
-    pub authority: Signer<'info>,
-
-    pub system_program: Program<'info, System>,
-}
-
-#[derive(Accounts)]
-pub struct DrawRaffle<'info> {
-    #[account(
-        seeds = [b"vault_state", mint.key().as_ref()],
-        bump = vault_state.bump,
-        has_one = mint,
-        has_one = vault_token_account,
-    )]
-    pub vault_state: Box<Account<'info, VaultState>>,
-
-    #[account(
-        mut,
-        seeds = [b"raffle_pool", mint.key().as_ref()],
-        bump = raffle_pool.bump,
-        has_one = mint,
-    )]
-    pub raffle_pool: Box<Account<'info, RafflePool>>,
-
-    pub mint: Box<Account<'info, Mint>>,
-
-    #[account(mut)]
-    pub vault_token_account: Box<Account<'info, TokenAccount>>,
-
-    pub caller: Signer<'info>,
-
-    pub token_program: Program<'info, Token>,
-}
-
 #[account]
 pub struct VaultState {
     pub authority: Pubkey,
@@ -1015,16 +1001,22 @@ pub struct VaultState {
     pub vault_token_account: Pubkey,
     pub stake_vault: Pubkey,
     pub stake_token_account: Pubkey,
+    pub treasury: Pubkey,
     pub total_staked: u64,
     pub total_points: u128,
     pub reward_per_point: u128,
     pub last_update_time: i64,
     pub last_recorded_balance: u64,
+    pub total_supply: u64,
+    pub creator_share: u64,
+    pub supply_minted: bool,
+    pub created_at: i64,
     pub bump: u8,
+    pub treasury_bump: u8,
 }
 
 impl VaultState {
-    pub const SIZE: usize = 32 + 32 + 32 + 32 + 32 + 8 + 16 + 16 + 8 + 8 + 1;
+    pub const SIZE: usize = 32 + 32 + 32 + 32 + 32 + 32 + 8 + 16 + 16 + 8 + 8 + 8 + 8 + 1 + 8 + 1 + 1;
 }
 
 #[account]
@@ -1050,18 +1042,6 @@ pub struct SwapPool {
 
 impl SwapPool {
     pub const SIZE: usize = 32 + 32 + 1;
-}
-
-#[account]
-pub struct RafflePool {
-    pub mint: Pubkey,
-    pub last_draw_time: i64,
-    pub round: u64,
-    pub bump: u8,
-}
-
-impl RafflePool {
-    pub const SIZE: usize = 32 + 8 + 8 + 1;
 }
 
 #[event]
@@ -1099,11 +1079,17 @@ pub struct SwapEvent {
 }
 
 #[event]
-pub struct RaffleEvent {
-    pub winner: Pubkey,
-    pub prize: u64,
-    pub round: u64,
-    pub participants: u32,
+pub struct SupplyEvent {
+    pub mint: Pubkey,
+    pub total_supply: u64,
+    pub creator_share: u64,
+    pub community_share: u64,
+    pub timestamp: i64,
+}
+
+#[event]
+pub struct RenounceEvent {
+    pub mint: Pubkey,
     pub timestamp: i64,
 }
 
@@ -1119,8 +1105,8 @@ pub enum HolderError {
     SlippageExceeded,
     #[msg("Insufficient pool liquidity")]
     InsufficientLiquidity,
-    #[msg("Raffle is not ready to draw yet")]
-    RaffleNotReady,
-    #[msg("Invalid raffle entrant list")]
-    InvalidRaffleEntrants,
+    #[msg("Supply has already been minted")]
+    SupplyAlreadyMinted,
+    #[msg("Supply is too small to allocate a 5% creator share")]
+    SupplyTooSmall,
 }

@@ -21,8 +21,20 @@ export function friendlyError(err: unknown): string {
   if (lower.includes("slippagetolerance") || lower.includes("slippage")) {
     return "Price moved before your swap landed. Try again with the new quote.";
   }
-  if (lower.includes("rafflenotready")) {
-    return "The raffle isn't ready to draw yet — check the countdown.";
+  if (lower.includes("accountnotinitialized") || lower.includes("could not find account")) {
+    return "That account doesn't exist on-chain yet. If you've never staked, stake first.";
+  }
+  if (lower.includes("insufficientliquidity") || lower.includes("poolempty")) {
+    return "The swap pool doesn't have enough liquidity for that trade. Try a smaller amount.";
+  }
+  if (lower.includes("amounttoosmall") || lower.includes("zeroamount")) {
+    return "That amount rounds to zero on-chain. Try a larger one.";
+  }
+  if (lower.includes("failed to fetch") || lower.includes("networkerror")) {
+    return "Couldn't reach the network. Check your connection and try again.";
+  }
+  if (lower.includes("wallet not connected")) {
+    return "Your wallet disconnected. Reconnect and try again.";
   }
 
   // Fall back to the real message, but keep it short — a raw stack-trace-y

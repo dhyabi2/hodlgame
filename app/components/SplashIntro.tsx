@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 
-const SEEN_KEY = "holder:seenSplash";
+const SEEN_KEY = "holdfun:seenSplash";
 
 const SHARDS = Array.from({ length: 10 }, (_, i) => ({
   angle: (360 / 10) * i,
@@ -21,16 +21,37 @@ export function SplashIntro() {
     if (!seen) setVisible(true);
   }, []);
 
-  const dismiss = () => {
+  const dismiss = useCallback(() => {
     window.localStorage.setItem(SEEN_KEY, "1");
     setVisible(false);
-  };
+  }, []);
+
+  // Any of Esc, Enter or Space gets you into the app. A full-screen overlay you
+  // can only leave by finding and clicking a button is a wall, not a splash.
+  useEffect(() => {
+    if (!visible) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (["Escape", "Enter", " "].includes(e.key)) {
+        e.preventDefault();
+        dismiss();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [visible, dismiss]);
 
   if (!mounted || !visible) return null;
 
   return (
     <AnimatePresence>
       <motion.div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Welcome to HoldFun"
         className="fixed inset-0 z-[100] flex items-center justify-center bg-holder-900"
         initial={{ opacity: 1 }}
         exit={{ opacity: 0 }}
@@ -38,7 +59,8 @@ export function SplashIntro() {
       >
         <button
           onClick={dismiss}
-          className="absolute top-4 right-4 text-ink-400 hover:text-white text-sm"
+          autoFocus
+          className="absolute top-4 right-4 min-h-[44px] px-3 rounded-lg text-ink-300 hover:text-white text-sm"
         >
           Skip ✕
         </button>
@@ -75,15 +97,15 @@ export function SplashIntro() {
               transition={{ duration: 0.8, delay: reduceMotion ? 0 : 0.5, ease: "backOut" }}
             >
               <polygon points="50,5 90,35 50,95 10,35" fill="url(#splashDiamondBody)" />
-              <polygon points="50,5 90,35 50,45" fill="#67e8f9" opacity="0.85" />
-              <polygon points="50,5 10,35 50,45" fill="#22d3ee" opacity="0.7" />
-              <polygon points="10,35 50,45 50,95" fill="#0e7490" opacity="0.8" />
-              <polygon points="90,35 50,45 50,95" fill="#155e75" opacity="0.8" />
+              <polygon points="50,5 90,35 50,45" fill="#7df5ac" opacity="0.85" />
+              <polygon points="50,5 10,35 50,45" fill="#2ee57a" opacity="0.7" />
+              <polygon points="10,35 50,45 50,95" fill="#0d8f4a" opacity="0.8" />
+              <polygon points="90,35 50,45 50,95" fill="#0e7a42" opacity="0.8" />
               <defs>
                 <linearGradient id="splashDiamondBody" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stopColor="#a5f3fc" />
-                  <stop offset="50%" stopColor="#22d3ee" />
-                  <stop offset="100%" stopColor="#0891b2" />
+                  <stop offset="0%" stopColor="#a5f9c0" />
+                  <stop offset="50%" stopColor="#2ee57a" />
+                  <stop offset="100%" stopColor="#089a4f" />
                 </linearGradient>
               </defs>
             </motion.svg>
@@ -95,11 +117,11 @@ export function SplashIntro() {
             transition={{ delay: reduceMotion ? 0 : 1.2, duration: 0.5 }}
             className="space-y-2"
           >
-            <h1 className="font-display text-4xl md:text-5xl font-bold metallic-text">
-              HOLDER
+            <h1 className="font-display text-4xl md:text-5xl font-bold holdfun-gradient">
+              HOLDFUN
             </h1>
             <p className="text-ink-300 max-w-xs mx-auto">
-              Paper hands pay the tax. Diamond hands collect it.
+              The fun way to hold. Creator gets 5%, the community gets the rest.
             </p>
           </motion.div>
 
@@ -112,7 +134,7 @@ export function SplashIntro() {
             whileTap={{ scale: 0.97 }}
             className="px-8 py-3 rounded-xl font-bold bg-holder-accent text-holder-900 hover:bg-holder-accentBright transition"
           >
-            Enter the Vault
+            Enter HoldFun
           </motion.button>
         </div>
       </motion.div>

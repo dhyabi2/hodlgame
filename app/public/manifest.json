@@ -1,11 +1,11 @@
 {
-  "name": "Holder — Patience Pays",
-  "short_name": "Holder",
-  "description": "Stake HOLD. Diamond hands earn rebates and win the raffle. Paper hands pay the tax.",
+  "name": "HoldFun — The fun way to hold",
+  "short_name": "HoldFun",
+  "description": "Launch a token where the creator can only own 5%. Hold to earn, paper hands pay the tax.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0b0d19",
-  "theme_color": "#0b0d19",
+  "background_color": "#050505",
+  "theme_color": "#050505",
   "icons": [
     {
       "src": "/icon.svg",

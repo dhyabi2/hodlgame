@@ -5,6 +5,9 @@ skip-lint = false
 [programs.devnet]
 holder = "9ggxpWrwYXH7sygoqQs2N5qCva38vVkJvr5ZzwPijPUu"
 
+[programs.localnet]
+holder = "9ggxpWrwYXH7sygoqQs2N5qCva38vVkJvr5ZzwPijPUu"
+
 [registry]
 url = "https://api.apr.dev"
 

@@ -3,20 +3,19 @@
 @tailwind utilities;
 
 :root {
-  --foreground-rgb: 255, 255, 255;
+  --foreground-rgb: 245, 245, 245;
 }
 
 body {
   color: rgb(var(--foreground-rgb));
-  /* Layered background: a cool wash from above, a faint violet floor glow,
-     and an obsidian base — the room has a light source now. */
+  /* pump.fun: a flat black canvas with one faint green wash up top. */
   background:
-    radial-gradient(1400px 700px at 50% -200px, rgba(34, 211, 238, 0.07), transparent 60%),
-    radial-gradient(1000px 500px at 80% 110%, rgba(139, 123, 247, 0.06), transparent 60%),
-    linear-gradient(to bottom, #0b0d19, #06070e) fixed;
+    radial-gradient(1200px 600px at 50% -180px, rgba(0, 217, 95, 0.06), transparent 60%),
+    #050505;
 }
 
-/* Gem-facet sheen: faint light beams fanning from above the fold. */
+/* Very faint green light beams from above the fold — kept subtle so the
+   surface stays flat and black like pump.fun, not glassy. */
 body::before {
   content: "";
   position: fixed;
@@ -26,11 +25,11 @@ body::before {
   background: repeating-conic-gradient(
     from -40deg at 50% -20%,
     transparent 0deg 11deg,
-    rgba(165, 243, 252, 0.016) 11deg 13deg
+    rgba(0, 217, 95, 0.012) 11deg 13deg
   );
 }
 
-/* Film grain: kills the flat-plastic look. SVG turbulence, no asset. */
+/* Film grain: keeps the black from looking like flat plastic. */
 body::after {
   content: "";
   position: fixed;
@@ -42,33 +41,33 @@ body::after {
 }
 
 @layer components {
-  /* Edge-lit glass panel: gradient surface, hairline top highlight (light
-     from above), deep soft drop. The one class every card now shares. */
+  /* The one card surface the whole app shares: near-black, hairline border,
+     subtle top highlight. */
   .panel {
     border-radius: 1rem;
-    border: 1px solid rgba(96, 108, 168, 0.22);
-    background: linear-gradient(180deg, rgba(26, 30, 52, 0.78), rgba(12, 14, 26, 0.88));
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: linear-gradient(180deg, #161617, #0e0e0f);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.07),
-      0 16px 40px -20px rgba(0, 0, 0, 0.8);
+      inset 0 1px 0 rgba(255, 255, 255, 0.04),
+      0 16px 40px -24px rgba(0, 0, 0, 0.9);
   }
 
   .panel-gold {
-    border-color: rgba(246, 195, 74, 0.32);
-    background: linear-gradient(180deg, rgba(43, 36, 24, 0.55), rgba(12, 14, 26, 0.9));
+    border-color: rgba(245, 197, 66, 0.32);
+    background: linear-gradient(180deg, rgba(40, 34, 18, 0.6), #0e0e0f);
     box-shadow:
-      inset 0 1px 0 rgba(246, 195, 74, 0.18),
-      0 0 32px -14px rgba(246, 195, 74, 0.35),
-      0 16px 40px -20px rgba(0, 0, 0, 0.8);
+      inset 0 1px 0 rgba(245, 197, 66, 0.18),
+      0 0 32px -16px rgba(245, 197, 66, 0.35),
+      0 16px 40px -24px rgba(0, 0, 0, 0.9);
   }
 
   .panel-hero {
-    border-color: rgba(34, 211, 238, 0.22);
-    background: linear-gradient(180deg, rgba(21, 32, 51, 0.8), rgba(10, 12, 24, 0.9));
+    border-color: rgba(0, 217, 95, 0.22);
+    background: linear-gradient(180deg, rgba(16, 32, 22, 0.6), #0e0e0f);
     box-shadow:
-      inset 0 1px 0 rgba(165, 243, 252, 0.12),
-      0 0 44px -18px rgba(34, 211, 238, 0.3),
-      0 16px 40px -20px rgba(0, 0, 0, 0.8);
+      inset 0 1px 0 rgba(0, 217, 95, 0.1),
+      0 0 44px -20px rgba(0, 217, 95, 0.3),
+      0 16px 40px -24px rgba(0, 0, 0, 0.9);
   }
 
   /* Big financial numerals: display face + tabular digits so values align
@@ -79,21 +78,38 @@ body::after {
     letter-spacing: -0.01em;
   }
 
-  /* Diamond-metal headline: white-hot core with a cyan sheen that drifts. */
+  /* Headline: white-hot with a faint green sheen. */
   .metallic-text {
     background: linear-gradient(
       100deg,
-      #e6fbff 0%,
-      #8be6f8 25%,
-      #f8fdff 50%,
-      #67e8f9 75%,
-      #e6fbff 100%
+      #ffffff 0%,
+      #d9ffe8 25%,
+      #ffffff 50%,
+      #b6f7cf 75%,
+      #ffffff 100%
     );
     background-size: 200% 100%;
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
     animation: shimmer 7s linear infinite;
+  }
+
+  /* HoldFun wordmark: loud green → lime → teal, the fun in the name. */
+  .holdfun-gradient {
+    background: linear-gradient(
+      100deg,
+      #c8ffdb 0%,
+      #00d95f 28%,
+      #6effa8 50%,
+      #00d95f 72%,
+      #c8ffdb 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: shimmer 8s linear infinite;
   }
 }
 
@@ -102,27 +118,50 @@ body::after {
     text-wrap: balance;
   }
 
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  .focus\:not-sr-only:focus {
+    position: static;
+    width: auto;
+    height: auto;
+    padding: inherit;
+    margin: inherit;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+  }
+
   .glow-accent {
-    filter: drop-shadow(0 0 24px rgba(34, 211, 238, 0.55));
+    filter: drop-shadow(0 0 24px rgba(0, 217, 95, 0.55));
   }
 
   .glow-jackpot {
-    filter: drop-shadow(0 0 20px rgba(246, 195, 74, 0.45));
+    filter: drop-shadow(0 0 20px rgba(245, 197, 66, 0.45));
   }
 
   .glow-danger {
-    filter: drop-shadow(0 0 20px rgba(244, 63, 94, 0.5));
+    filter: drop-shadow(0 0 20px rgba(255, 59, 92, 0.5));
   }
 }
 
 /* Micro-details: the theme extends to the parts most UIs forget. */
 ::selection {
-  background: rgba(34, 211, 238, 0.35);
+  background: rgba(0, 217, 95, 0.35);
   color: #ffffff;
 }
 
 :focus-visible {
-  outline: 2px solid rgba(34, 211, 238, 0.7);
+  outline: 2px solid rgba(0, 217, 95, 0.7);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -134,11 +173,11 @@ body::after {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a2f4e;
+  background: #232327;
   border-radius: 999px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3b4268;
+  background: #333338;
 }
 
 @keyframes shimmer {
@@ -150,7 +189,29 @@ body::after {
   }
 }
 
+/* Anchored sections need to clear the sticky header when jumped to. */
+[id] {
+  scroll-margin-top: 5.5rem;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (max-width: 640px) {
+  body::before {
+    display: none;
+  }
+  body::after {
+    opacity: 0.03;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
   *,
   *::before,
   *::after {

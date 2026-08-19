@@ -2,8 +2,8 @@
 
 import { useReducedMotion } from "framer-motion";
 
-/** The brand trichrome — mostly cyan, occasional violet and gold motes. */
-const MOTE_COLORS = ["#22d3ee", "#22d3ee", "#8b7bf7", "#f6c34a"];
+/** The brand monochrome — mostly green, occasional white and gold motes. */
+const MOTE_COLORS = ["#00d95f", "#00d95f", "#2ee57a", "#f5c542"];
 
 const PARTICLES = Array.from({ length: 16 }, (_, i) => ({
   left: `${(i * 37) % 100}%`,
@@ -26,7 +26,9 @@ export function AmbientParticles() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed inset-0 overflow-hidden z-0"
+      // Hidden below `sm`: 16 continuously animating elements is real battery
+      // cost on a phone for a decoration nobody notices.
+      className="pointer-events-none fixed inset-0 overflow-hidden z-0 hidden sm:block"
     >
       {PARTICLES.map((p, i) => (
         <span

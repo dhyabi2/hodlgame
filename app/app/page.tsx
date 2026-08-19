@@ -1,275 +1,240 @@
 "use client";
 
-import { useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { getAccount, getAssociatedTokenAddress } from "@solana/spl-token";
-import { PublicKey } from "@solana/web3.js";
-import { AnchorProvider, BN, Program } from "@coral-xyz/anchor";
-import { StakePanel } from "@/components/StakePanel";
-import { SwapPanel } from "@/components/SwapPanel";
-import { RafflePanel } from "@/components/RafflePanel";
-import { LiveFeed } from "@/components/LiveFeed";
-import { Leaderboard } from "@/components/Leaderboard";
-import { DiamondHero } from "@/components/DiamondHero";
-import { StreakMeter } from "@/components/StreakMeter";
-import { SoundToggle } from "@/components/SoundToggle";
-import { AnimatedNumber } from "@/components/AnimatedNumber";
-import { SplashIntro } from "@/components/SplashIntro";
-import { HowItWorks } from "@/components/HowItWorks";
-import { PersonalStats } from "@/components/PersonalStats";
-import { AmbientParticles } from "@/components/AmbientParticles";
-import { DailyQuests } from "@/components/DailyQuests";
-import { TierAura } from "@/components/TierAura";
-import { LoreModal } from "@/components/LoreModal";
-import {
-  findVaultStatePDA,
-  findVaultTokenAccount,
-  formatAmount,
-  PROGRAM_ID,
-} from "@/lib/program";
-import { getHoldingScore } from "@/lib/tiers";
-import { useToast } from "@/lib/toast";
-import { checkAway, describeAway } from "@/lib/awaySummary";
-import idl from "@/lib/idl.json";
+import { useConnection } from "@solana/wallet-adapter-react";
+import { useEffect, useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import confetti from "canvas-confetti";
+import { Header } from "@/components/Header";
+import { AmbientParticles } from "@/components/AmbientParticles";
+import { SplashIntro } from "@/components/SplashIntro";
+import { GameCard } from "@/components/GameCard";
+import { EmptyState, LoadError, Skeleton } from "@/components/ui";
+import { fetchAllGames, type GameSummary } from "@/lib/games";
+import { NETWORK_LABEL } from "@/lib/explorer";
 
-const MINT = new PublicKey(process.env.NEXT_PUBLIC_MINT!);
+type State =
+  | { kind: "loading" }
+  | { kind: "error" }
+  | { kind: "ready"; games: GameSummary[]; truncated: boolean };
 
-function toUnits(amountStr: string): number {
-  return parseFloat(amountStr.replace(/,/g, ""));
+type List = "hot" | "new" | "mc";
+
+const TICKER = [
+  "Creator can only own 5%",
+  "95% goes to the community",
+  "Hold to earn — paper hands pay the tax",
+  "Supply locked forever",
+  "Liquidity is non-withdrawable",
+  "No rug — it's in the code",
+];
+
+function isRisky(g: GameSummary) {
+  return g.mintAuthorityRevoked === false || g.freezeAuthorityRevoked === false;
 }
-
-const containerVariants = {
-  hidden: {},
-  show: { transition: { staggerChildren: 0.08 } },
-};
-const itemVariants = {
-  hidden: { opacity: 0, y: 14 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.4 } },
-};
-
-const MILESTONES = [
-  {
-    id: "first-stake",
-    check: (avgHoldDays: number, amount: BN) => amount.gtn(0),
-    title: "💎 First stake!",
-    detail: "Welcome to the vault. Patience pays here.",
-  },
-  {
-    id: "first-day",
-    check: (avgHoldDays: number) => avgHoldDays >= 1,
-    title: "🥉 24 hours held!",
-    detail: "You've graduated from Paper hands. Bronze tier unlocked.",
-  },
-  {
-    id: "diamond-tier",
-    check: (avgHoldDays: number) => avgHoldDays >= 14,
-    title: "💎 Diamond tier reached!",
-    detail: "14 days held. You're the exact reason paper hands pay tax.",
-  },
-] as const;
 
 export default function Home() {
   const { connection } = useConnection();
-  const wallet = useWallet();
-  const toast = useToast();
   const reduceMotion = useReducedMotion();
-  const [balance, setBalance] = useState<string>("0");
-  const [totalStaked, setTotalStaked] = useState<string>("0");
-  const [jackpot, setJackpot] = useState<string>("0");
-  const [position, setPosition] = useState<{ amount: BN; points: BN } | null>(
-    null
-  );
-  const [refreshTick, setRefreshTick] = useState(0);
-  const [statsLoaded, setStatsLoaded] = useState(false);
+  const [state, setState] = useState<State>({ kind: "loading" });
+  const [attempt, setAttempt] = useState(0);
+  const [query, setQuery] = useState("");
+  const [list, setList] = useState<List>("hot");
+  const [lockedOnly, setLockedOnly] = useState(false);
 
-  const bumpRefresh = useCallback(() => setRefreshTick((t) => t + 1), []);
-  const awayChecked = useRef(false);
-
-  // Milestone toasts — fire once per wallet the first time each condition is true.
   useEffect(() => {
-    if (!position || !wallet.publicKey) return;
-    const score = getHoldingScore(position.points, position.amount);
-    for (const milestone of MILESTONES) {
-      if (!milestone.check(score.avgHoldDays, position.amount)) continue;
-      const key = `holder:milestone:${wallet.publicKey.toBase58()}:${milestone.id}`;
-      if (window.localStorage.getItem(key)) continue;
-      window.localStorage.setItem(key, "1");
-      toast.push("success", milestone.title, milestone.detail);
-      if (!reduceMotion) {
-        confetti({
-          particleCount: 80,
-          spread: 70,
-          origin: { y: 0.6 },
-          colors: ["#22d3ee", "#34d399", "#fbbf24"],
-        });
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [position, wallet.publicKey]);
-
-  // Public vault stats — readable without a connected wallet.
-  useEffect(() => {
-    const [vaultPDA] = findVaultStatePDA(MINT);
-    const provider = new AnchorProvider(
-      connection,
-      {} as any,
-      AnchorProvider.defaultOptions()
-    );
-    const program = new Program<any>(idl as any, PROGRAM_ID, provider);
-
-    const fetchPublicData = async () => {
-      try {
-        let jackpotNum = 0;
-        let stakedNum = 0;
-        const vaultAta = await findVaultTokenAccount(MINT, vaultPDA);
-        try {
-          const vaultAcc = await getAccount(connection, vaultAta);
-          jackpotNum = Number(vaultAcc.amount) / 1e6;
-          setJackpot(formatAmount(Number(vaultAcc.amount)));
-        } catch {
-          setJackpot("0");
-        }
-
-        const vault = await (program.account as any).vaultState.fetchNullable(
-          vaultPDA
-        );
-        if (vault) {
-          stakedNum = Number(vault.totalStaked) / 1e6;
-          setTotalStaked(formatAmount(vault.totalStaked));
-        }
-
-        // Once per session, on the first real numbers: was the user away?
-        if (!awayChecked.current) {
-          awayChecked.current = true;
-          const report = checkAway(jackpotNum, stakedNum);
-          if (report) {
-            toast.push("info", "👋 While you were away", describeAway(report));
-          }
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setStatsLoaded(true);
-      }
+    let cancelled = false;
+    setState({ kind: "loading" });
+    fetchAllGames(connection)
+      .then(({ games, truncated }) => {
+        if (!cancelled) setState({ kind: "ready", games, truncated });
+      })
+      .catch((err) => {
+        console.error("games load error", err);
+        if (!cancelled) setState({ kind: "error" });
+      });
+    return () => {
+      cancelled = true;
     };
+  }, [connection, attempt]);
 
-    fetchPublicData();
-    const id = setInterval(fetchPublicData, 12000);
-    return () => clearInterval(id);
-  }, [connection, refreshTick]);
+  const games =
+    state.kind === "ready"
+      ? state.games
+          .filter((g) => {
+            const q = query.trim().toLowerCase();
+            const matchQuery =
+              !q ||
+              g.name.toLowerCase().includes(q) ||
+              g.symbol.toLowerCase().includes(q) ||
+              g.mint.toLowerCase().startsWith(q);
+            if (!matchQuery) return false;
+            if (lockedOnly && isRisky(g)) return false;
+            return true;
+          })
+          .slice()
+          .sort((a, b) => {
+            if (list === "new") return b.createdAt - a.createdAt;
+            if (list === "mc")
+              return (b.marketCapSol ?? -1) - (a.marketCapSol ?? -1);
+            // hot: 24h price change desc; fall back to most staked when there
+            // is no price history yet.
+            const ac = a.change24hPct;
+            const bc = b.change24hPct;
+            if (ac !== null && bc !== null) return bc - ac;
+            if (ac !== null) return -1;
+            if (bc !== null) return 1;
+            return b.totalStaked.cmp(a.totalStaked);
+          })
+      : [];
 
-  // User's own token balance — needs a connected wallet.
-  useEffect(() => {
-    if (!wallet.publicKey) {
-      setBalance("0");
-      return;
-    }
-
-    const fetchBalance = async () => {
-      try {
-        const ata = await getAssociatedTokenAddress(MINT, wallet.publicKey!);
-        const acc = await getAccount(connection, ata).catch(() => null);
-        setBalance(formatAmount(acc ? Number(acc.amount) : 0));
-      } catch (err) {
-        console.error(err);
-      }
-    };
-
-    fetchBalance();
-    const id = setInterval(fetchBalance, 12000);
-    return () => clearInterval(id);
-  }, [connection, wallet.publicKey, refreshTick]);
+  const lists: { id: List; label: string }[] = [
+    { id: "hot", label: "🔥 Hot" },
+    { id: "new", label: "🆕 New" },
+    { id: "mc", label: "💎 Top MC" },
+  ];
 
   return (
-    <main className="min-h-screen p-6 md:p-12 relative overflow-hidden">
+    <>
       <AmbientParticles />
-      <TierAura position={position} />
       <SplashIntro />
-      <motion.div
-        className="max-w-6xl mx-auto space-y-8 relative z-10"
-        variants={reduceMotion ? undefined : containerVariants}
-        initial={reduceMotion ? undefined : "hidden"}
-        animate={reduceMotion ? undefined : "show"}
-      >
-        <motion.header
-          variants={reduceMotion ? undefined : itemVariants}
-          className="flex flex-col md:flex-row md:items-center justify-between gap-4"
-        >
-          <div>
-            <h1 className="font-display text-4xl md:text-5xl font-bold metallic-text">
-              💎 HOLDER
+
+      <main className="min-h-screen px-4 sm:px-6 relative">
+        <Header />
+
+        {/* Ticker */}
+        <div className="-mx-4 sm:-mx-6 border-y border-holder-700/60 bg-holder-900/60 overflow-hidden">
+          <div className="flex w-max animate-marquee gap-8 py-2">
+            {[...TICKER, ...TICKER].map((t, i) => (
+              <span
+                key={i}
+                className="text-xs text-ink-300 whitespace-nowrap flex items-center gap-8"
+              >
+                <span>{t}</span>
+                <span className="text-holder-accent" aria-hidden>
+                  ✦
+                </span>
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="max-w-6xl mx-auto pb-16 relative z-10">
+          {/* Hero */}
+          <div className="py-10 sm:py-14 text-center space-y-4">
+            <h1 className="font-display text-4xl sm:text-6xl font-bold metallic-text text-balance">
+              The fun way to hold
             </h1>
-            <p className="text-ink-300 mt-1">
-              Paper hands pay the tax. Diamond hands collect it.
+            <p className="text-base sm:text-lg text-ink-300 max-w-md mx-auto text-balance">
+              Launch a coin. You keep 5%. Holders get paid.
             </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <LoreModal />
-            <SoundToggle />
-            <WalletMultiButton className="!bg-holder-accent !text-holder-900 !font-bold hover:!bg-holder-accentBright" />
-          </div>
-        </motion.header>
-
-        <motion.div variants={reduceMotion ? undefined : itemVariants}>
-          <HowItWorks />
-        </motion.div>
-
-        <motion.div variants={reduceMotion ? undefined : itemVariants}>
-          <DiamondHero
-            jackpot={toUnits(jackpot)}
-            totalStaked={toUnits(totalStaked)}
-            loading={!statsLoaded}
-          />
-        </motion.div>
-
-        <motion.div variants={reduceMotion ? undefined : itemVariants}>
-          <RafflePanel mint={MINT} onUpdate={bumpRefresh} />
-        </motion.div>
-
-        <motion.div variants={reduceMotion ? undefined : itemVariants}>
-          {!wallet.publicKey ? (
-            <div className="panel p-12 text-center">
-              <p className="text-xl text-ink-200">
-                Connect your wallet to swap for HOLD and join the holding game.
-              </p>
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <a
+                href="/create"
+                className="px-8 min-h-[52px] flex items-center justify-center rounded-xl font-bold bg-holder-accent text-holder-950 hover:bg-holder-accentBright shadow-glow-accent transition"
+              >
+                Start a new coin
+              </a>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <div className="space-y-8">
-                <SwapPanel mint={MINT} onUpdate={bumpRefresh} />
-                <DailyQuests position={position} refreshTick={refreshTick} />
-                {position && (
-                  <StreakMeter points={position.points} amount={position.amount} />
-                )}
-                <StakePanel mint={MINT} onUpdate={bumpRefresh} onPosition={setPosition} />
-                <PersonalStats position={position} />
-              </div>
-              <div className="space-y-8">
-                <LiveFeed />
-              </div>
+          </div>
+
+          {/* Controls */}
+          <div className="flex items-center justify-between gap-3 flex-wrap pb-4">
+            <div className="flex items-center gap-2">
+              {lists.map((l) => (
+                <button
+                  key={l.id}
+                  onClick={() => setList(l.id)}
+                  className={`px-4 min-h-[36px] rounded-full text-sm font-semibold border transition ${
+                    list === l.id
+                      ? "bg-holder-accent text-holder-950 border-holder-accent"
+                      : "border-holder-700 text-ink-300 hover:border-holder-accent hover:text-holder-accent"
+                  }`}
+                >
+                  {l.label}
+                </button>
+              ))}
+              <button
+                onClick={() => setLockedOnly((v) => !v)}
+                aria-pressed={lockedOnly}
+                className={`px-4 min-h-[36px] rounded-full text-sm font-semibold border transition ${
+                  lockedOnly
+                    ? "border-holder-accent/60 text-holder-accent bg-holder-accent/10"
+                    : "border-holder-700 text-ink-300 hover:border-holder-accent hover:text-holder-accent"
+                }`}
+              >
+                ✓ Locked only
+              </button>
+            </div>
+            {state.kind === "ready" && state.games.length > 0 && (
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search coin or mint"
+                aria-label="Search coins"
+                className="min-h-[40px] w-56 max-w-full rounded-xl bg-holder-900 border border-holder-700 px-3 text-sm text-white placeholder-ink-500 focus:outline-none focus:border-holder-accent"
+              />
+            )}
+          </div>
+
+          {/* Grid */}
+          {state.kind === "loading" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }, (_, i) => (
+                <Skeleton key={i} className="h-48" />
+              ))}
             </div>
           )}
-        </motion.div>
 
-        <motion.div
-          variants={reduceMotion ? undefined : itemVariants}
-          className="grid grid-cols-1 lg:grid-cols-2 gap-8"
-        >
-          {!wallet.publicKey && <LiveFeed />}
-          <Leaderboard />
-        </motion.div>
+          {state.kind === "error" && (
+            <div className="panel p-8">
+              <LoadError
+                what="the coin directory"
+                onRetry={() => setAttempt((a) => a + 1)}
+              />
+            </div>
+          )}
 
-        <motion.footer
-          variants={reduceMotion ? undefined : itemVariants}
-          className="text-center text-xs text-ink-500 pb-6"
-        >
-          Your balance: <AnimatedNumber value={toUnits(balance)} decimals={2} /> HOLD
-          {" · "}Devnet MVP — not financial advice.
-        </motion.footer>
-      </motion.div>
-    </main>
+          {state.kind === "ready" && state.games.length === 0 && (
+            <div className="panel">
+              <EmptyState
+                icon="🌱"
+                title="No coins yet."
+                body="Be the first — launch a coin where you can only own 5%."
+                action={{ label: "Start a new coin", href: "/create" }}
+              />
+            </div>
+          )}
+
+          {state.kind === "ready" && state.games.length > 0 && games.length === 0 && (
+            <div className="panel">
+              <EmptyState
+                icon="🔍"
+                title="No matches"
+                body={`Nothing matches "${query}". Try a different name, ticker or mint.`}
+              />
+            </div>
+          )}
+
+          {games.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {games.map((game) => (
+                <GameCard key={game.mint} game={game} />
+              ))}
+            </div>
+          )}
+
+          {state.kind === "ready" && state.truncated && (
+            <p className="text-xs text-ink-500 text-center pt-4">
+              Showing the {state.games.length} largest vaults. Paste a mint in
+              the search box to jump straight to one.
+            </p>
+          )}
+
+          <footer className="text-center text-xs text-ink-500 pt-8">
+            {NETWORK_LABEL} · Nothing here is financial advice.
+          </footer>
+        </div>
+      </main>
+    </>
   );
 }

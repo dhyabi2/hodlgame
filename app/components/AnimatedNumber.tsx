@@ -30,6 +30,11 @@ export function AnimatedNumber({
       return;
     }
     const from = prevValue.current;
+    // A poll that returns the same number shouldn't restart an 0.8s tween.
+    if (from === value) {
+      setDisplay(value);
+      return;
+    }
     const controls = animate(from, value, {
       duration: 0.8,
       ease: "easeOut",

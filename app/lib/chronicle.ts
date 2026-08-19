@@ -42,18 +42,11 @@ const SWAP_LINES = [
   "{who} struck a deal with the pool.",
 ];
 
-const RAFFLE_LINES = [
-  "Fortune chose {who}. {amt} HOLD from the vault, claimed in a single draw.",
-  "The draw favoured the patient — {who} walked away with {amt} HOLD.",
-  "{who} won the Diamond Raffle. {amt} HOLD, decided by fate and time held.",
-];
-
 const POOLS: Record<string, string[]> = {
   stake: STAKE_LINES,
   unstake: UNSTAKE_LINES,
   claim: CLAIM_LINES,
   swap: SWAP_LINES,
-  raffle: RAFFLE_LINES,
 };
 
 export function chronicleLine(opts: {

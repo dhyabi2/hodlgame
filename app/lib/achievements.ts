@@ -17,7 +17,6 @@ export interface AchievementInput {
   totalTaxPaid: BN;
   totalBurned: BN;
   totalClaimed: BN;
-  raffleWins: number;
 }
 
 export interface Achievement {
@@ -84,13 +83,6 @@ export function getAchievements(input: AchievementInput): Achievement[] {
       emoji: "🔥",
       description: "Burn HOLD forever by exiting early",
       unlocked: input.totalBurned.gtn(0),
-    },
-    {
-      id: "lottery-winner",
-      name: "Fortune's Favourite",
-      emoji: "🎉",
-      description: "Win the Diamond Raffle",
-      unlocked: input.raffleWins > 0,
     },
   ];
 }

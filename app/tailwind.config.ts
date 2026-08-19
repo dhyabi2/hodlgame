@@ -12,42 +12,39 @@ const config: Config = {
         display: ["var(--font-display)"],
       },
       colors: {
-        // Retuned away from stock Tailwind slate to a custom obsidian scale
-        // with a violet-blue cast. Same token keys, so the whole app upgrades
-        // from this one block.
+        // pump.fun-inspired: near-black surfaces with one loud green accent.
+        // Same token keys as before, so the whole app retunes from this block.
         holder: {
-          950: "#06070e",
-          900: "#0b0d19",
-          800: "#151829",
-          700: "#2a2f4e",
-          accent: "#22d3ee",
-          accentBright: "#5ee4fa",
-          danger: "#f43f5e",
+          950: "#050505",
+          900: "#0a0a0a",
+          800: "#131315",
+          700: "#232327",
+          accent: "#00d95f",
+          accentBright: "#2ee57a",
+          danger: "#ff3b5c",
           dangerBright: "#ff6b85",
-          success: "#34d399",
-          jackpot: "#f6c34a",
+          success: "#00d95f",
+          jackpot: "#f5c542",
           jackpotBright: "#ffd97a",
-          // The violet that was already living unnamed in the background glow,
-          // promoted to a real token: mythic/system hue (Adamantium, info).
+          // Tier/system hues, kept for the tier aura and info accents.
           violet: "#8b7bf7",
+          fun: "#f472b6",
+          funBright: "#f9a8d4",
         },
-        // Text neutrals cast to the same violet-blue hue as the surfaces —
-        // stock slate is blue-cast and reads dirty on these backgrounds. Each
-        // step is tuned lighter than the slate step it replaces, so the sweep
-        // is also a contrast fix (smallest text should never go below ink-400).
+        // Neutral grays — pump.fun reads as black + white, not a tinted slate.
         ink: {
-          100: "#eef0fa",
-          200: "#ccd2ea",
-          300: "#a0a8cc",
-          400: "#7b84ad",
-          500: "#5a6288",
+          100: "#f5f5f5",
+          200: "#d4d4d4",
+          300: "#a3a3a3",
+          400: "#737373",
+          500: "#525252",
         },
       },
       boxShadow: {
-        "glow-accent": "0 0 24px -6px rgba(34, 211, 238, 0.55)",
-        "glow-gold": "0 0 24px -6px rgba(246, 195, 74, 0.55)",
+        "glow-accent": "0 0 24px -6px rgba(0, 217, 95, 0.55)",
+        "glow-gold": "0 0 24px -6px rgba(245, 197, 66, 0.55)",
         panel:
-          "inset 0 1px 0 rgba(255,255,255,0.06), 0 16px 40px -20px rgba(0,0,0,0.8)",
+          "inset 0 1px 0 rgba(255,255,255,0.04), 0 16px 40px -20px rgba(0,0,0,0.9)",
       },
       keyframes: {
         "spin-slow": {
@@ -70,11 +67,11 @@ const config: Config = {
           "100%": { transform: "translateY(0)", opacity: "1" },
         },
         flash: {
-          "0%": { backgroundColor: "rgba(244, 63, 94, 0.35)" },
+          "0%": { backgroundColor: "rgba(255, 59, 92, 0.35)" },
           "100%": { backgroundColor: "transparent" },
         },
         "flash-accent": {
-          "0%": { backgroundColor: "rgba(34, 211, 238, 0.25)" },
+          "0%": { backgroundColor: "rgba(0, 217, 95, 0.25)" },
           "100%": { backgroundColor: "transparent" },
         },
         "float-up": {
@@ -87,6 +84,10 @@ const config: Config = {
           "0%": { backgroundPosition: "-200% 0" },
           "100%": { backgroundPosition: "200% 0" },
         },
+        marquee: {
+          "0%": { transform: "translateX(0)" },
+          "100%": { transform: "translateX(-50%)" },
+        },
       },
       animation: {
         "spin-slow": "spin-slow 12s linear infinite",
@@ -97,6 +98,7 @@ const config: Config = {
         "flash-accent": "flash-accent 1s ease-out",
         "float-up": "float-up linear infinite",
         shimmer: "shimmer 6s linear infinite",
+        marquee: "marquee 30s linear infinite",
       },
     },
   },

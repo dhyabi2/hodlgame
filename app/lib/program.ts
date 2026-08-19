@@ -1,4 +1,4 @@
-import { AnchorProvider, Program, BN } from "@coral-xyz/anchor";
+import { AnchorProvider, Program } from "@coral-xyz/anchor";
 import { Connection, PublicKey } from "@solana/web3.js";
 import { getAssociatedTokenAddress } from "@solana/spl-token";
 import { WalletContextState } from "@solana/wallet-adapter-react";
@@ -64,23 +64,29 @@ export function findSwapPoolPDA(mint: PublicKey): [PublicKey, number] {
   );
 }
 
+export function findTreasuryPDA(mint: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("treasury"), mint.toBuffer()],
+    PROGRAM_ID
+  );
+}
+
+export function findMintAuthorityPDA(mint: PublicKey): [PublicKey, number] {
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("mint_authority"), mint.toBuffer()],
+    PROGRAM_ID
+  );
+}
+
+export const CREATOR_SHARE_BPS = 500;
+export const BPS = 10000;
+
 export function findSwapPoolHoldVault(
   mint: PublicKey,
   swapPool: PublicKey
 ): Promise<PublicKey> {
   return getAssociatedTokenAddress(mint, swapPool, true);
 }
-
-export function findRafflePoolPDA(mint: PublicKey): [PublicKey, number] {
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("raffle_pool"), mint.toBuffer()],
-    PROGRAM_ID
-  );
-}
-
-export const RAFFLE_INTERVAL_SECS = 24 * 60 * 60;
-export const RAFFLE_PRIZE_BPS = 1000;
-export const MAX_RAFFLE_ENTRANTS = 50;
 
 const SWAP_FEE_BPS = 100;
 const BPS_DENOMINATOR = 10000;
@@ -96,10 +102,6 @@ export function quoteSwapOut(
   return (amountInAfterFee * reserveOut) / (reserveIn + amountInAfterFee);
 }
 
-export function formatAmount(amount: BN | number, decimals = 6): string {
-  const bn = BN.isBN(amount) ? amount : new BN(amount);
-  const divisor = new BN(10).pow(new BN(decimals));
-  const whole = bn.div(divisor).toString();
-  const frac = bn.mod(divisor).toString().padStart(decimals, "0").slice(0, 4);
-  return `${whole}.${frac}`;
-}
+// Display formatting lives in lib/amount.ts alongside the exact parsing that
+// has to agree with it. Re-exported here so existing imports keep working.
+export { formatAmount, parseAmount, formatCompact } from "./amount";

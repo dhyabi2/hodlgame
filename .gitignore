@@ -28,3 +28,6 @@ app/.env.local
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# TypeScript incremental build info
+app/tsconfig.tsbuildinfo
