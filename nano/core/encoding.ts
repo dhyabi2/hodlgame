@@ -107,5 +107,5 @@ export function decodeOp(buf: Buffer): Op {
 
 /** 32-byte hex blake2b-256 commitment — what goes in the Nano `link` field. */
 export function opCommitment(op: Op): string {
-  return blake2bHex(Buffer.from(encodeOp(op)), null, 32);
+  return blake2bHex(Buffer.from(encodeOp(op)), undefined, 32);
 }

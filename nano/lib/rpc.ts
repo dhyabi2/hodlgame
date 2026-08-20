@@ -3,6 +3,8 @@
 import * as fs from "node:fs";
 
 export const NANO_RPC = "https://rpc.nano.to";
+export const SEND_DIFFICULTY = "fffffff800000000";
+export const RECEIVE_DIFFICULTY = "fffffe0000000000";
 
 /** Load the rpc.nano.to API key from env or the local (gitignored) .keys.json. */
 export function loadNanoRpcKey(): string {
