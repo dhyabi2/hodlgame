@@ -88,6 +88,11 @@ export class MultiIndexer {
 
   /** Decode a block into a routed event, or null if it carries no op. */
   decode(block: NanoBlock): IndexedEvent | null {
+    // Op blocks are 1-raw data sends. Value transfers (buy deposits, plain sends)
+    // have a different native amount, and receive/open blocks carry amount 0 —
+    // none of these can be an op, so a random destination pubkey never collides
+    // with a valid opcode.
+    if (block.amount != null && BigInt(block.amount) !== 1n) return null;
     let tokenId: TokenId;
     let op: Op;
     if (isCommitLink(block.link)) {

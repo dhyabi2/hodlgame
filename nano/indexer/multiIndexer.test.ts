@@ -129,6 +129,15 @@ async function main() {
     assert.ok((s.balances.get(ALICE) ?? 0n) > 0n, "buyer holds tokens after buy/sell");
   }
 
+  // 5. amount guard: a value transfer (amount > 1 raw) is never decoded as an op,
+  //    even if its destination pubkey's first byte looks like an opcode.
+  {
+    const source = new MemorySource();
+    source.push(mkBlock(ALICE, "03" + "a".repeat(62), 1n, "f".repeat(64), { amount: "10000000000000000000000000000" }));
+    const events = await new MultiIndexer(source).collectEvents([ALICE]);
+    assert.equal(events.length, 0, "value transfer not decoded as an op");
+  }
+
   console.log("✅ multi-token indexer tests passed");
 }
 

@@ -11,6 +11,7 @@ import { poolKeysFromSeed, tokenPoolKeys, signPayout, broadcastPayout, type Pool
 import { replayState, readOps } from "./indexer";
 import { planSellPayouts } from "./plan";
 import { computeRefunds } from "./reconcile";
+import { atomicWrite } from "./fsutil";
 import { applyOp, emptyState, type State } from "../core/state";
 import { decodeOpCompact } from "../core/compact";
 import type { MultiState } from "../core/multi";
@@ -29,7 +30,7 @@ function loadPaid(): Set<string> {
 }
 
 function savePaid(set: Set<string>) {
-  fs.writeFileSync(PAID_FILE, JSON.stringify([...set], null, 2));
+  atomicWrite(PAID_FILE, JSON.stringify([...set], null, 2));
 }
 
 // Pool deposits ledger: sourceHash → { sender, amount } for every XNO send the
@@ -45,7 +46,7 @@ function loadDeposits(): DepositLedger {
 }
 
 function saveDeposits(ledger: DepositLedger) {
-  fs.writeFileSync(DEPOSITS_FILE, JSON.stringify(ledger, null, 2));
+  atomicWrite(DEPOSITS_FILE, JSON.stringify(ledger, null, 2));
 }
 
 /** Accept all pending XNO into the pool account (buys). */
