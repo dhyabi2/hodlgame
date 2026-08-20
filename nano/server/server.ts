@@ -12,6 +12,7 @@
 import * as http from "node:http";
 import { replayState } from "./indexer";
 import { poolKeysFromSeed } from "./custody";
+import { receivePoolPending, payoutSells } from "./sweep";
 import { loadNanoRpcKey, nanoRpc } from "../lib/rpc";
 import { keysFromSeed } from "../client/nano";
 
@@ -78,7 +79,13 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { account: acct, balance: bal.toString() });
     }
     if (url.pathname === "/sweep" && req.method === "POST") {
-      return json(res, 200, { note: "sweep: sells detected; payouts not yet wired (custody v1)" });
+      const key = loadNanoRpcKey();
+      const p = pool();
+      if (!p) return json(res, 400, { error: "POOL_SEED not set" });
+      const poolKeys = poolKeysFromSeed(process.env.POOL_SEED!);
+      const received = await receivePoolPending(key, poolKeys);
+      const { paid, skipped } = await payoutSells(key, poolKeys, meta(), watched(), []);
+      return json(res, 200, { received, paid, skipped });
     }
     return json(res, 404, { error: "not found" });
   } catch (e: any) {

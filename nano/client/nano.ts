@@ -45,6 +45,33 @@ export function signDataBlock(
   });
 }
 
+/**
+ * Build + sign a state block, returning the on-chain JSON shape: nano_ prefix,
+ * `link` = raw hex, no `link_as_account` field.
+ */
+export function buildStateBlock(
+  secretKey: string,
+  opts: {
+    work: string;
+    previous: string | null;
+    representative: string;
+    balance: string;
+    link: string;
+  }
+): any {
+  const b = nanocurrency.createBlock(secretKey, {
+    work: opts.work,
+    previous: opts.previous,
+    representative: opts.representative,
+    balance: opts.balance,
+    link: opts.link,
+  });
+  const blk: any = { ...b.block };
+  blk.account = blk.account.replace(/^xrb_/, "nano_");
+  delete blk.link_as_account;
+  return blk;
+}
+
 /** Verify a signed block's signature against the account public key. */
 export function verifySignature(hash: string, signature: string, publicKey: string): boolean {
   // nanocurrency.verifyBlock({ hash, signature, publicKey }) does the real
