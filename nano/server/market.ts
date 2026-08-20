@@ -31,6 +31,7 @@ export interface TokenView {
   marketCap: string;
   change1h: number | null;
   change24h: number | null;
+  createdAt: number;
   buyVolume: string;
   sellVolume: string;
   holders: number;
@@ -124,6 +125,7 @@ function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket): TokenView {
     marketCap: a.marketCapRaw,
     change1h: changePct(a.series, 3600),
     change24h: changePct(a.series, 86400),
+    createdAt: a.launchTime,
     buyVolume: a.buyVolumeRaw,
     sellVolume: a.sellVolumeRaw,
     holders: a.holders.length,

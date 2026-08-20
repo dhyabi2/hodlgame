@@ -66,6 +66,7 @@ interface Token {
   marketCap: string;
   change1h: number | null;
   change24h: number | null;
+  createdAt: number;
   buyVolume: string;
   sellVolume: string;
   holders: number;
@@ -510,6 +511,26 @@ function WalletPanel({
 }
 
 function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id: string) => void; myAddress?: string }) {
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<"mc" | "price" | "change" | "vol" | "new">("mc");
+
+  const filtered = tokens
+    .filter((t) => {
+      const q = query.trim().toLowerCase();
+      if (!q) return true;
+      return t.name.toLowerCase().includes(q) || t.symbol.toLowerCase().includes(q);
+    })
+    .slice()
+    .sort((a, b) => {
+      switch (sort) {
+        case "price": return BigInt(b.price) > BigInt(a.price) ? 1 : -1;
+        case "change": return (b.change24h ?? -1e9) - (a.change24h ?? -1e9);
+        case "vol": return BigInt(b.buyVolume) > BigInt(a.buyVolume) ? 1 : -1;
+        case "new": return b.createdAt - a.createdAt;
+        default: return BigInt(b.marketCap) > BigInt(a.marketCap) ? 1 : -1;
+      }
+    });
+
   if (tokens.length === 0) {
     return (
       <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-10 text-center text-zinc-500">
@@ -520,10 +541,30 @@ function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id:
     );
   }
   return (
-    <div className="space-y-2">
-      <p className="text-sm font-bold text-zinc-400">Trending</p>
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-bold text-zinc-400 shrink-0">Coins</h2>
+        <input
+          className={inputC + " py-2"}
+          placeholder="search name / symbol"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <select
+          className="rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-300 shrink-0"
+          value={sort}
+          onChange={(e) => setSort(e.target.value as any)}
+        >
+          <option value="mc">market cap</option>
+          <option value="price">price</option>
+          <option value="change">24h change</option>
+          <option value="vol">volume</option>
+          <option value="new">newest</option>
+        </select>
+      </div>
+      {filtered.length === 0 && <p className="text-sm text-zinc-600 py-6 text-center">No coins match.</p>}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {tokens.map((t) => (
+        {filtered.map((t) => (
           <button
             key={t.tokenId}
             onClick={() => onSelect(t.tokenId)}

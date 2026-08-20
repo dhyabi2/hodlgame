@@ -1,5 +1,6 @@
 import { strict as assert } from "node:assert";
-import { poolSeedForToken, tokenPoolKeys, cosignerSeeds, cosignerPoolKeys } from "./custody";
+import * as nanocurrency from "nanocurrency";
+import { poolSeedForToken, tokenPoolKeys, cosignerSeeds, cosignerPoolKeys, payoutBlockHash, cosignHash } from "./custody";
 
 const MASTER = "f".repeat(64);
 const TOKEN_A = "a".repeat(32);
@@ -47,6 +48,24 @@ const TOKEN_B = "b".repeat(32);
   assert.equal(new Set(addrs).size, 3, "pool + 2 cosigners are 3 distinct accounts");
   assert.notEqual(seeds[0], seeds[1], "shares differ");
   assert.equal(seeds[0].length, 64, "share is 32-byte hex");
+}
+
+// 6. Payout block hash is deterministic; a cosigner signature verifies.
+{
+  const pool = tokenPoolKeys(MASTER, TOKEN_A);
+  const payout = {
+    to: tokenPoolKeys(MASTER, TOKEN_B).address,
+    amountRaw: "500",
+    frontier: "f".repeat(64),
+    balance: "1000",
+    representative: pool.address,
+  };
+  const h1 = payoutBlockHash(pool, payout);
+  assert.equal(h1, payoutBlockHash(pool, payout), "hash is deterministic");
+  assert.equal(h1.length, 64, "hash is 32-byte hex");
+  const sig = cosignHash(pool.secretKey, h1);
+  assert.equal(cosignHash(pool.secretKey, h1), sig, "cosign is deterministic");
+  assert.ok((nanocurrency as any).verifyBlock({ hash: h1, signature: sig, publicKey: pool.publicKey }), "cosignature verifies");
 }
 
 console.log("✅ per-token custody derivation tests passed");

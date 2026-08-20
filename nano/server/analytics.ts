@@ -31,6 +31,7 @@ export interface TokenAnalytics {
   supplyRaw: string;
   poolXno: string;
   poolTokens: string;
+  launchTime: number; // epoch seconds (or height fallback) at launch
   holders: Holder[];
   trades: TradeEvent[];
   series: PricePoint[];
@@ -66,6 +67,7 @@ export function analyze(events: IndexedEvent[]): Analytics {
   const seriesMap = new Map<string, PricePoint[]>();
   const lastTimeMap = new Map<string, number>();
   const sellPayouts: SellPayout[] = [];
+  const launchTime = new Map<string, number>();
   const tradesMap = new Map<string, TradeEvent[]>();
   const buyVol = new Map<string, bigint>();
   const sellVol = new Map<string, bigint>();
@@ -96,6 +98,10 @@ export function analyze(events: IndexedEvent[]): Analytics {
     s = next;
     const st = s.get(ev.tokenId);
     if (!st) continue;
+
+    if (ev.op.kind === "launch") {
+      launchTime.set(ev.tokenId, ev.timestamp ?? Number(ev.height));
+    }
 
     // Exact XNO-out computed at the sell's execution point (pre-sell reserves),
     // so a batch of sells is paid path-dependently, not against final reserves.
@@ -147,6 +153,7 @@ export function analyze(events: IndexedEvent[]): Analytics {
       supplyRaw: st.supply.toString(),
       poolXno: st.poolXno.toString(),
       poolTokens: st.poolTokens.toString(),
+      launchTime: launchTime.get(tokenId) ?? 0,
       holders,
       trades: (tradesMap.get(tokenId) ?? []).slice(-100).reverse(),
       series: seriesMap.get(tokenId) ?? [],

@@ -8,7 +8,8 @@
     "live-smoke": "tsx scripts/live-smoke.ts",
     "multitoken-e2e": "tsx scripts/multitoken-e2e.ts",
     "buy-e2e": "tsx scripts/buy-e2e.ts",
-    "operator": "tsx server/server.ts"
+    "operator": "tsx server/server.ts",
+    "guardian": "tsx server/guardian.ts"
   },
   "dependencies": {
     "blakejs": "^1.2.1",

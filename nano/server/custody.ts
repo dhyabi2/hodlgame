@@ -127,3 +127,79 @@ export async function broadcastPayout(rpcKey: string, block: any): Promise<strin
   const r = await nanoRpc(rpcKey, { action: "process", json_block: "true", block });
   return r.hash as string;
 }
+
+/** The block hash a pool → recipient send will have (what cosigners must sign). */
+export function payoutBlockHash(pool: PoolKeys, payout: Payout): string {
+  const newBalance = (BigInt(payout.balance) - BigInt(payout.amountRaw)).toString();
+  return (nanocurrency as any).hashBlock({
+    account: pool.address,
+    previous: payout.frontier,
+    representative: payout.representative,
+    balance: newBalance,
+    link: payout.to,
+  });
+}
+
+/** Sign a block hash with a secret key (used by local cosigners and the guardian). */
+export function cosignHash(secretKey: string, hash: string): string {
+  return (nanocurrency as any).signBlock({ hash, secretKey });
+}
+
+/**
+ * Sign a payout given externally-collected cosignatures (e.g. from a remote
+ * guardian). Emits a block with a `signatures` array = [poolSig, ...cosignerSigs].
+ */
+export async function signPayoutWithSignatures(
+  pool: PoolKeys,
+  payout: Payout,
+  rpcKey: string,
+  cosignerSigs: string[]
+): Promise<any> {
+  const newBalance = (BigInt(payout.balance) - BigInt(payout.amountRaw)).toString();
+  const hash = payoutBlockHash(pool, payout);
+  const poolSig = cosignHash(pool.secretKey, hash);
+  const work = (await nanoRpc(rpcKey, { action: "work_generate", hash: payout.frontier, difficulty: "fffffff800000000" })).work;
+
+  const b = nanocurrency.createBlock(pool.secretKey, {
+    work,
+    previous: payout.frontier,
+    representative: payout.representative,
+    balance: newBalance,
+    link: (nanocurrency as any).derivePublicKey(payout.to) || payout.to,
+  });
+  const blk: any = { ...b.block };
+  blk.account = blk.account.replace(/^xrb_/, "nano_");
+  blk.link = payout.to;
+  delete blk.link_as_account;
+  delete blk.signature;
+  blk.signatures = [poolSig, ...cosignerSigs];
+  return blk;
+}
+
+/** Ask a remote guardian to co-sign a payout. Returns null if unavailable. */
+export async function remoteCosign(
+  url: string,
+  apiKey: string,
+  args: { tokenId: string; pool: PoolKeys; payout: Payout }
+): Promise<string | null> {
+  try {
+    const newBalance = (BigInt(args.payout.balance) - BigInt(args.payout.amountRaw)).toString();
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiKey,
+        tokenId: args.tokenId,
+        account: args.pool.address,
+        previous: args.payout.frontier,
+        representative: args.payout.representative,
+        balance: newBalance,
+        link: args.payout.to,
+      }),
+    });
+    const j = (await res.json()) as { signature?: string };
+    return j.signature ?? null;
+  } catch {
+    return null;
+  }
+}

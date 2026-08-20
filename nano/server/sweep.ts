@@ -8,7 +8,7 @@
 // Paid sells and deposits are tracked in a durable store so a crash doesn't
 // double-pay; ledger writes are atomic.
 
-import { tokenPoolKeys, signPayout, broadcastPayout, type PoolKeys } from "./custody";
+import { tokenPoolKeys, signPayout, signPayoutWithSignatures, remoteCosign, broadcastPayout, type PoolKeys, type Payout } from "./custody";
 import { computeRefunds } from "./reconcile";
 import { loadJson, saveJson } from "./store";
 import type { SellPayout } from "./analytics";
@@ -115,20 +115,45 @@ export async function payoutSellsMulti(
       skipped++;
       continue;
     }
-    const payout = await signPayout(pool, {
+    const payout: Payout = {
       to: p.to,
       amountRaw: p.amountRaw.toString(),
       frontier: poolInfo.frontier,
       balance: poolInfo.balance,
       representative: poolInfo.representative,
-    }, rpcKey, cosignerSeeds);
-    const hash = await broadcastPayout(rpcKey, payout);
+    };
+    const block = await signGuardedPayout(rpcKey, pool, p.tokenId, payout, cosignerSeeds);
+    const hash = await broadcastPayout(rpcKey, block);
     paidOut.push(hash);
     paid.add(p.hash);
   }
 
   savePaid(paid);
   return { paid: paidOut, skipped };
+}
+
+/**
+ * Sign a payout, collecting remote guardian cosignatures when GUARDIAN_URL +
+ * GUARDIAN_KEY are configured (2-of-3). Falls back to single-key otherwise.
+ */
+async function signGuardedPayout(
+  rpcKey: string,
+  pool: PoolKeys,
+  tokenId: string,
+  payout: Payout,
+  cosignerSeeds: string[]
+): Promise<any> {
+  const gurl = process.env.GUARDIAN_URL;
+  const gkey = process.env.GUARDIAN_KEY;
+  if (gurl && gkey) {
+    const sigs: string[] = [];
+    for (const url of gurl.split(",").map((s) => s.trim()).filter(Boolean)) {
+      const s = await remoteCosign(url, gkey, { tokenId, pool, payout });
+      if (s) sigs.push(s);
+    }
+    return signPayoutWithSignatures(pool, payout, rpcKey, sigs);
+  }
+  return signPayout(pool, payout, rpcKey, cosignerSeeds);
 }
 
 /**
