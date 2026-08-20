@@ -54,9 +54,9 @@ export async function runSweep(onlyToken: string | null) {
     const refunds: string[] = [];
     for (const tokenId of targets) {
       const pool = tokenPoolKeys(masterSeed, tokenId);
-      const poolReceived = await readPoolDeposits(key, pool);
+      const poolReceived = await readPoolDeposits(key, pool, tokenId);
       const owed = computeRefunds(poolReceived, credits.get(tokenId) ?? new Map());
-      refunds.push(...(await refundRejectedBuys(key, pool, owed)));
+      refunds.push(...(await refundRejectedBuys(key, pool, tokenId, owed)));
     }
 
     return { received, paid, skipped, refunds };

@@ -19,13 +19,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
   }
 
-  const apiKey = process.env.GUARDIAN_KEY;
-  if (apiKey && r.apiKey !== apiKey) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 403 });
-  }
-
   const seed = process.env.GUARDIAN_SEED;
   if (!seed) return NextResponse.json({ error: "GUARDIAN_SEED not set" }, { status: 500 });
+
+  // Fail CLOSED: never operate as an open signing oracle. A guardian that holds
+  // a seed MUST also have a shared API key configured, and callers must present
+  // it. (Previously an unset GUARDIAN_KEY skipped auth entirely.)
+  const apiKey = process.env.GUARDIAN_KEY;
+  if (!apiKey) return NextResponse.json({ error: "GUARDIAN_KEY not configured" }, { status: 500 });
+  if (r.apiKey !== apiKey) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 403 });
+  }
 
   const guarded = new Set((process.env.GUARDED_POOLS ?? "").split(",").map((s) => s.trim()).filter(Boolean));
   const account = String(r.account ?? "");

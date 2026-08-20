@@ -72,6 +72,21 @@ export interface IndexedEvent {
   hash: string;
 }
 
+/**
+ * Canonical, indexer-independent event order. `height` is a PER-ACCOUNT Nano
+ * chain height, so equal heights across different accounts are the common case;
+ * ordering ties by input/enumeration order is non-deterministic (two indexers
+ * that discover accounts in a different order would diverge). We tie-break on
+ * the block hash — a globally unique, consensus-defined value — so every honest
+ * indexer folds the same blocks into byte-identical state. Returns 0 only for
+ * the same block (same hash), never relying on sort stability.
+ */
+export function canonicalOrder(a: IndexedEvent, b: IndexedEvent): number {
+  if (a.height !== b.height) return a.height < b.height ? -1 : 1;
+  if (a.hash === b.hash) return 0;
+  return a.hash < b.hash ? -1 : 1;
+}
+
 export class MultiIndexer {
   private state: MultiState = multiEmpty();
 
@@ -139,7 +154,7 @@ export class MultiIndexer {
         events.push(ev);
       }
     }
-    return events.sort((a, b) => (a.height < b.height ? -1 : 1));
+    return events.sort(canonicalOrder);
   }
 
   /** Pull blocks for the given accounts and fold them into a MultiState. */

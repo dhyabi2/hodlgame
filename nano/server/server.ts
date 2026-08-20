@@ -29,12 +29,11 @@ function serializeState(s: State, tokenId: string): Record<string, unknown> {
     poolXno: s.poolXno.toString(),
     poolTokens: s.poolTokens.toString(),
     totalStaked: s.totalStaked.toString(),
-    totalPoints: s.totalPoints.toString(),
-    rewardPerPoint: s.rewardPerPoint.toString(),
+    rewardPerShare: s.rewardPerShare.toString(),
     height: s.height.toString(),
     balances: mapToObj(s.balances),
     staked: mapToObj(s.staked),
-    points: mapToObj(s.points),
+    banked: mapToObj(s.banked),
   };
 }
 

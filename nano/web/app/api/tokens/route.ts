@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { registerToken } from "../../../server/tokens";
+import { isTokenId, sanitizeMeta } from "../../../server/validate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,18 +14,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
   }
   const tokenId = body?.tokenId;
-  if (!tokenId || typeof tokenId !== "string" || tokenId.length !== 32) {
+  if (!isTokenId(tokenId)) {
     return NextResponse.json({ error: "tokenId (32 hex) required" }, { status: 400 });
   }
-  await registerToken(tokenId, {
-    name: String(body.name ?? ""),
-    symbol: String(body.symbol ?? ""),
-    decimals: Number(body.decimals ?? 6),
-    image: String(body.image ?? ""),
-    description: String(body.description ?? ""),
-    website: String(body.website ?? ""),
-    twitter: String(body.twitter ?? ""),
-    telegram: String(body.telegram ?? ""),
-  });
+  try {
+    // sanitizeMeta clamps decimals to 0..18 and drops non-http(s) URLs (XSS).
+    await registerToken(tokenId, sanitizeMeta(body));
+  } catch (e: any) {
+    return NextResponse.json({ error: e?.message ?? String(e) }, { status: 400 });
+  }
   return NextResponse.json({ ok: true });
 }

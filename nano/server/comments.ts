@@ -31,6 +31,9 @@ export async function addComment(tokenId: string, account: string, text: string)
     time: Date.now(),
   };
   all.push(comment);
-  await saveJson("comments", all);
+  // Bound total storage (unauthenticated writes): keep the most recent.
+  const MAX_COMMENTS = 20000;
+  const trimmed = all.length > MAX_COMMENTS ? all.slice(all.length - MAX_COMMENTS) : all;
+  await saveJson("comments", trimmed);
   return comment;
 }

@@ -22,9 +22,11 @@ async function savePaid(set: Set<string>): Promise<void> {
   await saveJson("paid", [...set]);
 }
 
-// Pool deposits ledger: sourceHash → { sender, amount } for every XNO send the
-// pool has received. Powers the deterministic buy-reconciliation refund.
-type DepositLedger = Record<string, { sender: string; amount: string }>;
+// Pool deposits ledger: sourceHash → { sender, amount, tokenId } for every XNO
+// send a pool has received. `tokenId` scopes a deposit to the pool it landed in
+// — WITHOUT it, one token's pool would refund another token's depositors, since
+// refunds compare pool-received XNO against a single token's credited buys.
+type DepositLedger = Record<string, { sender: string; amount: string; tokenId?: string }>;
 
 async function loadDeposits(): Promise<DepositLedger> {
   return (await loadJson<DepositLedger>("deposits")) ?? {};
@@ -34,10 +36,24 @@ async function saveDeposits(ledger: DepositLedger): Promise<void> {
   await saveJson("deposits", ledger);
 }
 
+// Refunded ledger: `${tokenId}:${sender}` → cumulative XNO already refunded.
+// Makes refunds IDEMPOTENT — without it every sweep re-computes the same
+// (received − credited) owed amount and pays it again, draining the pool.
+type RefundedLedger = Record<string, string>;
+
+async function loadRefunded(): Promise<RefundedLedger> {
+  return (await loadJson<RefundedLedger>("refunded")) ?? {};
+}
+
+function refundedKey(tokenId: string, sender: string): string {
+  return `${tokenId}:${sender}`;
+}
+
 /** Accept all pending XNO into the pool account (buys). */
 export async function receivePoolPending(
   rpcKey: string,
-  pool: PoolKeys
+  pool: PoolKeys,
+  tokenId: string
 ): Promise<string[]> {
   const pending = await nanoRpc(rpcKey, { action: "pending", account: pool.address, count: 100 });
   const blocks: string[] = pending.blocks ?? [];
@@ -56,7 +72,10 @@ export async function receivePoolPending(
       ledger[srcHash] = {
         sender: String(srcInfo.block_account ?? srcInfo.contents?.account ?? ""),
         amount: String(amount),
+        tokenId,
       };
+    } else if (!ledger[srcHash].tokenId) {
+      ledger[srcHash].tokenId = tokenId; // backfill legacy entries
     }
     const newBalance = (balance + amount).toString();
     const work = (await nanoRpc(rpcKey, {
@@ -91,7 +110,7 @@ export async function receivePoolsMulti(
   const hashes: string[] = [];
   for (const tokenId of tokenIds) {
     const pool = tokenPoolKeys(masterSeed, tokenId);
-    hashes.push(...(await receivePoolPending(rpcKey, pool)));
+    hashes.push(...(await receivePoolPending(rpcKey, pool, tokenId)));
   }
   return hashes;
 }
@@ -122,13 +141,24 @@ export async function payoutSellsMulti(
       balance: poolInfo.balance,
       representative: poolInfo.representative,
     };
-    const block = await signGuardedPayout(rpcKey, pool, p.tokenId, payout, cosignerSeeds);
-    const hash = await broadcastPayout(rpcKey, block);
-    paidOut.push(hash);
+    // Mark as paid BEFORE broadcasting and persist immediately, so a crash or a
+    // concurrent/overlapping sweep can never re-pay this sell block. (Previously
+    // `paid` was saved only once after the whole batch, so any mid-loop throw
+    // dropped every already-broadcast entry → double payments.) If the broadcast
+    // itself fails we roll the mark back so the payout is retried next sweep.
     paid.add(p.hash);
+    await savePaid(paid);
+    try {
+      const block = await signGuardedPayout(rpcKey, pool, p.tokenId, payout, cosignerSeeds);
+      const hash = await broadcastPayout(rpcKey, block);
+      paidOut.push(hash);
+    } catch (e) {
+      paid.delete(p.hash);
+      await savePaid(paid);
+      skipped++;
+    }
   }
 
-  await savePaid(paid);
   return { paid: paidOut, skipped };
 }
 
@@ -160,7 +190,7 @@ async function signGuardedPayout(
  * Total XNO each sender has deposited into a token's pool account (received
  * ledger + still-pending), used to reconcile rejected buys.
  */
-export async function readPoolDeposits(rpcKey: string, pool: PoolKeys): Promise<Map<string, bigint>> {
+export async function readPoolDeposits(rpcKey: string, pool: PoolKeys, tokenId: string): Promise<Map<string, bigint>> {
   const out = new Map<string, bigint>();
   const seen = new Set<string>();
 
@@ -168,6 +198,7 @@ export async function readPoolDeposits(rpcKey: string, pool: PoolKeys): Promise<
     if (seen.has(hash)) continue;
     seen.add(hash);
     if (!d.sender) continue;
+    if (d.tokenId !== tokenId) continue; // only THIS token's pool deposits
     out.set(d.sender, (out.get(d.sender) ?? 0n) + BigInt(d.amount));
   }
 
@@ -184,22 +215,44 @@ export async function readPoolDeposits(rpcKey: string, pool: PoolKeys): Promise<
   return out;
 }
 
-/** Refund uncredited XNO (rejected buys) back to each sender, idempotently. */
+/**
+ * Refund uncredited XNO (rejected buys) back to each sender, idempotently.
+ *
+ * `refunds` is the TOTAL owed per sender for this token (received − credited).
+ * We subtract what has already been refunded (durable `refunded` ledger) and
+ * only pay the remaining delta, recording each payment immediately. This makes
+ * the refund exactly-once: without it, every sweep recomputes the same owed
+ * amount (the deposit ledger never shrinks and the buy stays rejected) and pays
+ * it again, draining the pool.
+ */
 export async function refundRejectedBuys(
   rpcKey: string,
   pool: PoolKeys,
+  tokenId: string,
   refunds: Map<string, bigint>
 ): Promise<string[]> {
   const hashes: string[] = [];
   if (refunds.size === 0) return hashes;
+
+  const refunded = await loadRefunded();
+
+  // Net each sender's owed amount against what was already refunded.
+  const owed = new Map<string, bigint>();
+  for (const [sender, total] of refunds) {
+    const already = BigInt(refunded[refundedKey(tokenId, sender)] ?? "0");
+    const delta = total - already;
+    if (delta > 0n) owed.set(sender, delta);
+  }
+  if (owed.size === 0) return hashes;
 
   let info = await nanoRpc(rpcKey, { action: "account_info", account: pool.address, representative: "true" }).catch(() => null);
   if (!info?.frontier) return hashes;
   let frontier = info.frontier as string;
   let balance = BigInt(info.balance);
 
-  for (const [sender, amount] of refunds) {
+  for (const [sender, amount] of owed) {
     if (amount <= 0n) continue;
+    if (amount > balance) break; // never send more than the pool holds
     const payout = await signPayout(pool, {
       to: sender,
       amountRaw: amount.toString(),
@@ -208,6 +261,10 @@ export async function refundRejectedBuys(
       representative: info.representative,
     }, rpcKey, []);
     const hash = await broadcastPayout(rpcKey, payout);
+    // Record the refund immediately (exactly-once), before moving on.
+    const key = refundedKey(tokenId, sender);
+    refunded[key] = (BigInt(refunded[key] ?? "0") + amount).toString();
+    await saveJson("refunded", refunded);
     hashes.push(hash);
     frontier = hash;
     balance = balance - amount;

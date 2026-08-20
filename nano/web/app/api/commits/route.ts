@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { registerCommit } from "../../../server/commits";
 import { bustCache } from "../../../server/market";
 import { parse } from "../../../core/json";
+import { isTokenId, validateCommitOp } from "../../../server/validate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,8 +17,12 @@ export async function POST(req: Request) {
   }
   const tokenId = body?.tokenId;
   const op = body?.op;
-  if (!tokenId || typeof tokenId !== "string" || tokenId.length !== 32 || !op || typeof op !== "object") {
+  if (!isTokenId(tokenId) || !op || typeof op !== "object") {
     return NextResponse.json({ error: "tokenId and op required" }, { status: 400 });
+  }
+  const check = validateCommitOp(op);
+  if (!check.ok) {
+    return NextResponse.json({ error: check.reason }, { status: 400 });
   }
   try {
     const link = await registerCommit(tokenId, op);

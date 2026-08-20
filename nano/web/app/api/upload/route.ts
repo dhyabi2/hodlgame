@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as crypto from "node:crypto";
+import { safeUrl } from "../../../server/validate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,10 +49,12 @@ export async function POST(req: Request) {
     const contentType = req.headers.get("content-type") ?? "";
     if (contentType.includes("application/json")) {
       const body = await req.json();
-      const url = typeof body?.url === "string" ? body.url.trim() : "";
+      // Only echo back safe http(s)/ipfs URLs — the result is stored as an
+      // image/social URL and rendered in the browser (no javascript:/data:).
+      const url = safeUrl(body?.url);
       return url
         ? NextResponse.json({ url })
-        : NextResponse.json({ error: "url required" }, { status: 400 });
+        : NextResponse.json({ error: "valid http(s) url required" }, { status: 400 });
     }
 
     const form = await req.formData();
@@ -61,6 +64,9 @@ export async function POST(req: Request) {
     }
     if (file.size > MAX_BYTES) {
       return NextResponse.json({ error: "file too large (max 5MB)" }, { status: 400 });
+    }
+    if (!EXTS[file.type]) {
+      return NextResponse.json({ error: "unsupported image type" }, { status: 400 });
     }
 
     // Pinata/IPFS → local filesystem.

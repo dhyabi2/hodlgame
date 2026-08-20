@@ -20,12 +20,19 @@ export async function loadCommits(): Promise<CommitMap> {
   return new Map(list.map((e) => [commitLink(e.tokenId, e.op).toLowerCase(), e]));
 }
 
+// Bound the registry so an unauthenticated caller can't grow the blob without
+// limit (it is read + rewritten in full on every register / resolve).
+const MAX_COMMITS = 5000;
+
 /** Register a reveal and return the on-chain commit link to broadcast. */
 export async function registerCommit(tokenId: string, op: Op): Promise<string> {
   const link = commitLink(tokenId, op);
   const map = await loadCommits();
+  map.delete(link.toLowerCase()); // move-to-end (most-recent wins)
   map.set(link.toLowerCase(), { tokenId, op });
-  await saveJson("commits", [...map.values()]);
+  let entries = [...map.values()];
+  if (entries.length > MAX_COMMITS) entries = entries.slice(entries.length - MAX_COMMITS);
+  await saveJson("commits", entries);
   return link;
 }
 

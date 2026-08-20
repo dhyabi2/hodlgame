@@ -20,6 +20,13 @@ const ALLOWED = new Set([
 const hits = new Map<string, number[]>();
 function rateLimit(key: string, max: number, windowMs: number): boolean {
   const now = Date.now();
+  // Opportunistically evict stale keys so a spoofed-IP flood can't grow `hits`
+  // without bound (best-effort — per serverless instance).
+  if (hits.size > 10_000) {
+    for (const [k, v] of hits) {
+      if (v.every((t) => now - t >= windowMs)) hits.delete(k);
+    }
+  }
   const arr = (hits.get(key) ?? []).filter((t) => now - t < windowMs);
   if (arr.length >= max) {
     hits.set(key, arr);

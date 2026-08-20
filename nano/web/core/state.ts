@@ -32,12 +32,15 @@ export interface State {
   creatorShare: bigint;
   balances: Map<string, bigint>;
   staked: Map<string, bigint>;
-  points: Map<string, bigint>;
+  // Harvested-but-unclaimed rewards per staker (banked at each stake change).
+  banked: Map<string, bigint>;
+  // rewardDebt[a] = staked[a] * rewardPerShare / PRECISION at last settle.
   rewardDebt: Map<string, bigint>;
-  lastHeight: Map<string, bigint>;
   totalStaked: bigint;
-  totalPoints: bigint;
-  rewardPerPoint: bigint;
+  // Accumulated XNO-rebate reward per staked unit (× PRECISION). Each rebate is
+  // distributed pro-rata to the CURRENT stakers by stake, which is bounded and
+  // independent of the (per-account, attacker-inflatable) block height.
+  rewardPerShare: bigint;
   rebateVault: bigint;
   treasury: bigint;
   poolXno: bigint;
@@ -58,12 +61,10 @@ export function emptyState(): State {
     creatorShare: 0n,
     balances: new Map(),
     staked: new Map(),
-    points: new Map(),
+    banked: new Map(),
     rewardDebt: new Map(),
-    lastHeight: new Map(),
     totalStaked: 0n,
-    totalPoints: 0n,
-    rewardPerPoint: 0n,
+    rewardPerShare: 0n,
     rebateVault: 0n,
     treasury: 0n,
     poolXno: 0n,
@@ -80,28 +81,28 @@ function set(m: Map<string, bigint>, k: string, v: bigint) {
   else m.set(k, v);
 }
 
-// Advance points using confirmation height as the clock.
-function accrue(s: State, h: bigint) {
-  if (h > s.height && s.totalStaked > 0n) {
-    s.totalPoints += (h - s.height) * s.totalStaked;
-  }
-  s.height = h;
-}
-
-function settlePoints(s: State, a: string, h: bigint) {
-  accrue(s, h);
+// Harvest a staker's pending reward into `banked` and reset their debt to the
+// current accumulator. Bounded: a staker can only ever bank their pro-rata
+// share of the rebates distributed while they were staked. No time/height term,
+// so it cannot be gamed by inflating an account's block height, and repeated
+// calls without a new rebate bank nothing (pending == 0).
+function settle(s: State, a: string) {
   const st = get(s.staked, a);
-  const start = get(s.lastHeight, a);
-  if (h > start && st > 0n) {
-    set(s.points, a, get(s.points, a) + (h - start) * st);
-  }
-  set(s.lastHeight, a, h);
-  set(s.rewardDebt, a, (get(s.points, a) * s.rewardPerPoint) / PRECISION);
+  const acc = (st * s.rewardPerShare) / PRECISION;
+  const pending = acc - get(s.rewardDebt, a);
+  if (pending > 0n) set(s.banked, a, get(s.banked, a) + pending);
+  set(s.rewardDebt, a, acc);
 }
 
+// Reset a staker's debt after their stake changed (so future pending starts at 0).
+function resetDebt(s: State, a: string) {
+  set(s.rewardDebt, a, (get(s.staked, a) * s.rewardPerShare) / PRECISION);
+}
+
+// Distribute a new rebate across the CURRENT stakers, pro-rata by stake.
 function syncRewards(s: State, newRebate: bigint) {
-  if (newRebate > 0n && s.totalPoints > 0n) {
-    s.rewardPerPoint += (newRebate * PRECISION) / s.totalPoints;
+  if (newRebate > 0n && s.totalStaked > 0n) {
+    s.rewardPerShare += (newRebate * PRECISION) / s.totalStaked;
   }
 }
 
@@ -117,9 +118,8 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint): Stat
     ...s0,
     balances: new Map(s0.balances),
     staked: new Map(s0.staked),
-    points: new Map(s0.points),
+    banked: new Map(s0.banked),
     rewardDebt: new Map(s0.rewardDebt),
-    lastHeight: new Map(s0.lastHeight),
   };
 
   switch (op.kind) {
@@ -186,42 +186,46 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint): Stat
       if (op.amount <= 0n) throw new InvalidOp("zero amount");
       const bal = get(s.balances, sender);
       if (bal < op.amount) throw new InvalidOp("insufficient balance");
-      settlePoints(s, sender, height);
+      settle(s, sender); // harvest pending at the old stake first
       set(s.balances, sender, bal - op.amount);
       set(s.staked, sender, get(s.staked, sender) + op.amount);
       s.totalStaked += op.amount;
+      resetDebt(s, sender);
       s.height = height;
       return s;
     }
 
     case "unstake": {
       if (!s.launched) throw new InvalidOp("not launched");
+      if (op.amount <= 0n) throw new InvalidOp("zero amount");
       const st = get(s.staked, sender);
       if (st < op.amount) throw new InvalidOp("insufficient stake");
-      settlePoints(s, sender, height);
+      settle(s, sender); // harvest pending at the old stake first
       const tax = (op.amount * TAX_BPS) / BPS;
       const burn = (tax * TAX_BURN_SHARE_BPS) / BPS;
       const rebate = tax - burn;
       const toUser = op.amount - tax;
       s.supply -= burn; // permanent deflation
       s.rebateVault += rebate;
-      syncRewards(s, rebate);
+      // Reduce the unstaker's stake BEFORE distributing their own rebate, so the
+      // rebate goes to the REMAINING stakers (the reward for holding).
       set(s.balances, sender, get(s.balances, sender) + toUser);
       set(s.staked, sender, st - op.amount);
       s.totalStaked -= op.amount;
+      resetDebt(s, sender);
+      syncRewards(s, rebate);
       s.height = height;
       return s;
     }
 
     case "claim": {
       if (!s.launched) throw new InvalidOp("not launched");
-      const debtBefore = get(s.rewardDebt, sender);
-      settlePoints(s, sender, height);
-      const full = (get(s.points, sender) * s.rewardPerPoint) / PRECISION;
-      const pending = full - debtBefore;
-      if (pending <= 0n) throw new InvalidOp("nothing to claim");
-      const payout = pending < s.rebateVault ? pending : s.rebateVault;
-      set(s.rewardDebt, sender, full - (pending - payout));
+      settle(s, sender); // bank any pending into `banked`
+      const owed = get(s.banked, sender);
+      if (owed <= 0n) throw new InvalidOp("nothing to claim");
+      const payout = owed < s.rebateVault ? owed : s.rebateVault;
+      if (payout <= 0n) throw new InvalidOp("nothing to claim");
+      set(s.banked, sender, owed - payout);
       s.rebateVault -= payout;
       set(s.balances, sender, get(s.balances, sender) + payout);
       s.height = height;
@@ -232,6 +236,10 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint): Stat
     case "addLiq": {
       if (!s.launched) throw new InvalidOp("not launched");
       if (sender !== s.creator) throw new InvalidOp("creator only");
+      // Reject negatives on EITHER leg — a negative `tokens` with a positive
+      // `xno` must never slip through (it would push poolTokens negative / move
+      // pool tokens back to treasury and corrupt the AMM).
+      if (op.xno < 0n || op.tokens < 0n) throw new InvalidOp("negative amount");
       if (op.xno <= 0n && op.tokens <= 0n) throw new InvalidOp("zero amounts");
       if (op.tokens > s.treasury) throw new InvalidOp("exceeds treasury");
       s.treasury -= op.tokens;

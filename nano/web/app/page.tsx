@@ -575,8 +575,9 @@ function trendColor(points: PricePoint[]): string {
 }
 
 function Avatar({ image, symbol, size = 40 }: { image: string; symbol: string; size?: number }) {
-  if (image) {
-    return <img src={image} alt="" style={{ width: size, height: size }} className="rounded-full object-cover shrink-0" />;
+  const safeImage = image ? safeHref(image) : undefined;
+  if (safeImage) {
+    return <img src={safeImage} alt="" style={{ width: size, height: size }} className="rounded-full object-cover shrink-0" />;
   }
   return (
     <div
@@ -794,9 +795,21 @@ function TokenDetail({
   );
 }
 
+/** Only allow http(s)/ipfs URLs in href/src sinks — blocks javascript:/data: XSS. */
+function safeHref(url: string): string | undefined {
+  try {
+    const u = new URL(url);
+    return u.protocol === "http:" || u.protocol === "https:" || u.protocol === "ipfs:" ? u.toString() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function SocialLink({ href, label }: { href: string; label: string }) {
+  const safe = safeHref(href);
+  if (!safe) return null;
   return (
-    <a href={href} target="_blank" rel="noreferrer" className="text-[11px] text-green-400 hover:underline">
+    <a href={safe} target="_blank" rel="noreferrer" className="text-[11px] text-green-400 hover:underline">
       {label}
     </a>
   );

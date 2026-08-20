@@ -3,6 +3,7 @@
 
 import { applyBlock, multiEmpty, type MultiState } from "../core/multi";
 import type { IndexedEvent } from "../indexer/multiIndexer";
+import { clampDecimals } from "./validate";
 
 export interface Holder {
   account: string;
@@ -42,11 +43,11 @@ export interface TokenAnalytics {
 /** XNO-raw price of one whole token. */
 export function priceOf(poolXno: bigint, poolTokens: bigint, decimals: number): bigint {
   if (poolTokens <= 0n) return 0n;
-  return (poolXno * 10n ** BigInt(decimals)) / poolTokens;
+  return (poolXno * 10n ** BigInt(clampDecimals(decimals))) / poolTokens;
 }
 
 export function marketCapOf(priceRaw: bigint, supply: bigint, decimals: number): bigint {
-  return (priceRaw * supply) / 10n ** BigInt(decimals);
+  return (priceRaw * supply) / 10n ** BigInt(clampDecimals(decimals));
 }
 
 export interface SellPayout {
