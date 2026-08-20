@@ -169,39 +169,29 @@ opened to the public, since depositors would receive nothing back.
 - [ ] Legal review — a 20% exit tax with a burn is a securities/consumer-protection
       question in several jurisdictions, and this repo gives no opinion on it
 
-## Market indexer (Hot list / 24h change)
+## Market data (Hot list / 24h change)
 
-The directory's 24h price change and Hot list are served by a Vercel indexer:
+The directory's 24h price change and Hot list are computed **on-chain** — no
+indexer, no cron, no external storage. A constant-product pool's price only
+changes when a swap happens, so the swap history *is* the price history:
 
-- `app/api/cron/snapshot` — cron job (`vercel.json`, `*/10 * * * *`) that snapshots
-  every token's price into Vercel KV. Secured by `CRON_SECRET`.
-- `app/api/market` — public endpoint returning `change24hPct` per mint, merged
-  into the directory client-side.
+- `app/api/market` — replays each token's `SwapEvent`s to compute `change24hPct`
+  (and the per-token chart uses the same reconstruction via
+  `/api/market/[mint]/history`).
 
-**One manual step remains:** provision Vercel KV. From the project dashboard run
-`vercel integration add upstash` (or Storage → KV → Connect), which auto-sets
-`KV_REST_API_URL` and `KV_REST_API_TOKEN`. Until then the app degrades gracefully
-(no change %, Hot falls back to most-staked). `CRON_SECRET` is already set.
-
-> Note: Vercel's Hobby plan limits cron to a daily minimum interval; a 10-minute
-> snapshot needs Pro. On Hobby the data will simply be fresher-than-daily
-> wherever the cron actually runs.
+This trades RPC calls for zero infra. At mainnet scale the full-history replay
+per token should be replaced with a cached indexer, but there is nothing to
+provision to go live.
 
 ## Post-flight (run these in *your* terminal — they need a TTY)
 
-Storage provisioning can't be scripted with an API token (OAuth + term
-acceptance). When you're back, run exactly this:
+Token image storage (IPFS via Pinata) is the only thing needing a secret:
 
 ```bash
-# 1. Market indexer storage (Vercel KV via Upstash — free tier)
-cd app && vercel integration add upstash/upstash-kv     # accept + link to `app`
-#    → auto-sets KV_REST_API_URL and KV_REST_API_TOKEN
+# pinata.cloud → free account → API Keys → copy the JWT
+# → add as PINATA_JWT (server-only; never a NEXT_PUBLIC_ var)
 
-# 2. Token image storage (IPFS via Pinata — free tier)
-#    pinata.cloud → create free account → API Keys → copy the JWT
-#    → add as PINATA_JWT (this is the only image step; no public store needed)
-
-# 3. Redeploy so the routes pick up the new secrets
+# redeploy so the route picks it up
 vercel --prod --yes
 ```
 
