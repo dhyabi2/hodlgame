@@ -209,71 +209,43 @@ export default function Home() {
     setHasWallet(Boolean(loadWallet()));
   }, []);
 
-  // Feed (SSE with polling fallback) — includes my balance when unlocked.
+  // Feed — Vercel-safe polling (no SSE), includes my balance when unlocked.
   useEffect(() => {
     const acct = keys?.address ?? "";
-    let es: EventSource | null = null;
-    let poll: ReturnType<typeof setInterval> | null = null;
+    let live = true;
     const load = async () => {
       try {
         const j = await (await fetch(`/api/state?account=${acct}`)).json();
-        setTokens(j.tokens ?? []);
+        if (live) setTokens(j.tokens ?? []);
       } catch {}
     };
     load();
-    try {
-      es = new EventSource(`/api/stream?account=${acct}`);
-      es.onmessage = (e) => {
-        const j = JSON.parse(e.data);
-        if (j.tokens) setTokens(j.tokens);
-      };
-      es.onerror = () => {
-        es?.close();
-        es = null;
-        if (!poll) poll = setInterval(load, 6000);
-      };
-    } catch {
-      if (!poll) poll = setInterval(load, 6000);
-    }
+    const t = setInterval(load, 4000);
     return () => {
-      es?.close();
-      if (poll) clearInterval(poll);
+      live = false;
+      clearInterval(t);
     };
   }, [keys?.address]);
 
-  // Detail (SSE with polling fallback).
+  // Detail — polling.
   useEffect(() => {
     const acct = keys?.address ?? "";
     if (!selectedId) {
       setDetail(null);
       return;
     }
-    let es: EventSource | null = null;
-    let poll: ReturnType<typeof setInterval> | null = null;
+    let live = true;
     const load = async () => {
       try {
         const j = await (await fetch(`/api/token?token=${selectedId}&account=${acct}`)).json();
-        if (j.token) setDetail(j.token);
+        if (live && j.token) setDetail(j.token);
       } catch {}
     };
     load();
-    try {
-      es = new EventSource(`/api/stream?token=${selectedId}&account=${acct}`);
-      es.onmessage = (e) => {
-        const j = JSON.parse(e.data);
-        if (j.token) setDetail(j.token);
-      };
-      es.onerror = () => {
-        es?.close();
-        es = null;
-        if (!poll) poll = setInterval(load, 4000);
-      };
-    } catch {
-      if (!poll) poll = setInterval(load, 4000);
-    }
+    const t = setInterval(load, 3000);
     return () => {
-      es?.close();
-      if (poll) clearInterval(poll);
+      live = false;
+      clearInterval(t);
     };
   }, [selectedId, keys?.address]);
 

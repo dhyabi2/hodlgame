@@ -15,6 +15,14 @@ const EXTS: Record<string, string> = {
   "image/webp": "webp",
 };
 
+async function putToBlob(file: File): Promise<string> {
+  const { put } = require("@vercel/blob");
+  const ext = EXTS[file.type] ?? "png";
+  const name = `${crypto.randomBytes(16).toString("hex")}.${ext}`;
+  const blob = await put(`uploads/${name}`, file, { access: "public" });
+  return blob.url;
+}
+
 async function pinToIpfs(file: File): Promise<string> {
   const jwt = process.env.PINATA_JWT;
   if (!jwt) throw new Error("no PINATA_JWT");
@@ -63,9 +71,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "file too large (max 5MB)" }, { status: 400 });
     }
 
-    // Pinata/IPFS when configured, else local filesystem.
-    const url = process.env.PINATA_JWT ? await pinToIpfs(file) : await saveLocal(file);
-    return NextResponse.json({ url, ipfs: Boolean(process.env.PINATA_JWT) });
+    // Vercel Blob → Pinata/IPFS → local filesystem.
+    let url: string;
+    if (process.env.BLOB_READ_WRITE_TOKEN) url = await putToBlob(file);
+    else if (process.env.PINATA_JWT) url = await pinToIpfs(file);
+    else url = await saveLocal(file);
+
+    return NextResponse.json({ url, blob: Boolean(process.env.BLOB_READ_WRITE_TOKEN), ipfs: Boolean(process.env.PINATA_JWT) });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? String(e) }, { status: 400 });
   }

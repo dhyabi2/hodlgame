@@ -1,45 +1,11 @@
-// Operator server: multi-token indexer + per-token custody behind a minimal HTTP API.
-//
-//   NANO_RPC_KEY=... POOL_SEED=<64B hex master seed> WATCHED_ACCOUNTS=comma,sep \
-//   npm run operator
-//
-// Endpoints:
-//   GET  /health                 liveness
-//   GET  /tokens                 all tokens (summary)
-//   GET  /state?token=<id>       one token's full state (omit token → summaries)
-//   GET  /balance?token=<id>&account=<nano_…>   a user's token balance
-//   POST /sweep?token=<id>       receive buys + pay sells (omit token → all)
+// Operator server (self-host fallback). For Vercel, the sweep runs via the
+// cron endpoint /api/cron/sweep (see web/app/api/cron/sweep/route.ts).
 
 import * as http from "node:http";
-import { MultiIndexer } from "../indexer/multiIndexer";
-import { NanoRpcSource } from "../indexer/blockSource";
 import type { State } from "../core/state";
-import { tokenPoolKeys } from "./custody";
-import { receivePoolsMulti, payoutSellsMulti, readPoolDeposits, refundRejectedBuys } from "./sweep";
-import { creditedBuys, computeRefunds } from "./reconcile";
-import { analyze } from "./analytics";
-import { commitResolver } from "./commits";
-import { loadNanoRpcKey } from "../lib/rpc";
+import { watched, indexer, runSweep } from "./operator";
 
 const PORT = Number(process.env.PORT ?? 8080);
-
-function watched(): string[] {
-  const raw = process.env.WATCHED_ACCOUNTS ?? "";
-  return raw.split(",").map((s) => s.trim()).filter(Boolean);
-}
-
-async function indexer(): Promise<MultiIndexer> {
-  const master = process.env.POOL_SEED ?? "";
-  const poolKey = (tokenId: string) => (master ? tokenPoolKeys(master, tokenId).publicKey : null);
-  const idx = new MultiIndexer(
-    new NanoRpcSource(loadNanoRpcKey()),
-    () => ({ name: "", symbol: "", decimals: 6, image: "" }),
-    commitResolver(),
-    poolKey
-  );
-  await idx.sync(watched());
-  return idx;
-}
 
 function mapToObj(m: Map<string, bigint>): Record<string, string> {
   const o: Record<string, string> = {};
@@ -136,43 +102,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-let sweeping = false;
-
-async function runSweep(onlyToken: string | null) {
-  if (sweeping) return { skipped: "sweep already in progress" };
-  sweeping = true;
-  try {
-    const masterSeed = process.env.POOL_SEED;
-    if (!masterSeed) return { error: "POOL_SEED not set" };
-    const key = loadNanoRpcKey();
-    const idx = await indexer();
-    const events = await idx.collectEvents(watched());
-    const credits = creditedBuys(events);
-    const { sellPayouts } = analyze(events);
-
-    const known = [...idx.getState().keys()];
-    const targets = onlyToken ? (known.includes(onlyToken) ? [onlyToken] : []) : known;
-
-    const received = await receivePoolsMulti(key, masterSeed, targets);
-
-    const payouts = onlyToken ? sellPayouts.filter((p) => p.tokenId === onlyToken) : sellPayouts;
-    const { paid, skipped } = await payoutSellsMulti(key, masterSeed, payouts, []);
-
-    const refunds: string[] = [];
-    for (const tokenId of targets) {
-      const pool = tokenPoolKeys(masterSeed, tokenId);
-      const poolReceived = await readPoolDeposits(key, pool);
-      const owed = computeRefunds(poolReceived, credits.get(tokenId) ?? new Map());
-      refunds.push(...(await refundRejectedBuys(key, pool, owed)));
-    }
-
-    return { received, paid, skipped, refunds };
-  } finally {
-    sweeping = false;
-  }
-}
-
-/** Background loop: sweep every SWEEP_SECONDS (default 30s). */
 function startSweepLoop() {
   const seconds = Number(process.env.SWEEP_SECONDS ?? 30);
   if (!process.env.POOL_SEED) {

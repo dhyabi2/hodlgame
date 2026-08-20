@@ -20,7 +20,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "tokenId and op required" }, { status: 400 });
   }
   try {
-    const link = registerCommit(tokenId, op);
+    const link = await registerCommit(tokenId, op);
     bustCache();
     return NextResponse.json({ ok: true, link });
   } catch (e: any) {

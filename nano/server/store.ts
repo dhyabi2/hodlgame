@@ -1,7 +1,6 @@
-// Durable store. Uses SQLite (node:sqlite, zero-dependency) by default — a
-// single key/value table in $DATA_DIR/holdfun.db — with an atomic JSON-file
-// fallback (STORE=json or if SQLite is unavailable). BigInt-safe via core/json.
-// Swap in Postgres/D1 later by replacing the two functions below.
+// Durable store. Async API so the same code runs on a local filesystem (default,
+// for tests/self-host) or Vercel Postgres (STORE=postgres + POSTGRES_URL).
+// BigInt-safe via core/json. Swap in another DB by reimplementing load/save.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -12,51 +11,50 @@ function dir(): string {
   return process.env.DATA_DIR ?? path.join(process.cwd(), "data");
 }
 
-let sqlite: { prepare: (sql: string) => any } | null | undefined;
+// --- Vercel Postgres backend ---
+let pgSql: any = null;
+let pgChecked = false;
 
-function getDb(): { prepare: (sql: string) => any } | null {
-  if (process.env.STORE === "json") return null;
-  if (sqlite !== undefined) return sqlite;
+async function getPg(): Promise<any | null> {
+  if (pgChecked) return pgSql;
+  pgChecked = true;
+  if (process.env.STORE !== "postgres") return null;
   try {
-    // node:sqlite is built into Node 22.5+. require() keeps this side-effect-free
-    // at type-check time (no @types/node upgrade needed).
-    const { DatabaseSync } = require("node:sqlite") as { DatabaseSync: any };
-    fs.mkdirSync(dir(), { recursive: true });
-    const db = new DatabaseSync(path.join(dir(), "holdfun.db"));
-    db.exec("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
-    sqlite = db;
-    return db;
+    const { sql } = require("@vercel/postgres");
+    await sql`CREATE TABLE IF NOT EXISTS holdfun_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)`;
+    pgSql = sql;
   } catch {
-    sqlite = null;
-    return null;
+    pgSql = null;
   }
+  return pgSql;
 }
 
-export function loadJson<T>(name: string): T | null {
-  const db = getDb();
-  if (db) {
+export async function loadJson<T>(name: string): Promise<T | null> {
+  const s = await getPg();
+  if (s) {
     try {
-      const row = db.prepare("SELECT value FROM kv WHERE key = ?").get(name) as { value?: string } | undefined;
-      return row?.value != null ? parse<T>(row.value) : null;
+      const r = await s`SELECT value FROM holdfun_kv WHERE key = ${name}`;
+      return r.rowCount > 0 ? parse<T>(r.rows[0].value) : null;
     } catch {
       return null;
     }
   }
   try {
-    return parse<T>(fs.readFileSync(path.join(dir(), name + ".json"), "utf-8"));
+    return parse<T>(await fs.promises.readFile(path.join(dir(), name + ".json"), "utf-8"));
   } catch {
     return null;
   }
 }
 
-export function saveJson(name: string, value: unknown): void {
-  const db = getDb();
-  if (db) {
-    db.prepare(
-      "INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-    ).run(name, stringify(value));
+export async function saveJson(name: string, value: unknown): Promise<void> {
+  const s = await getPg();
+  if (s) {
+    await s`
+      INSERT INTO holdfun_kv (key, value) VALUES (${name}, ${stringify(value)})
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+    `;
     return;
   }
-  fs.mkdirSync(dir(), { recursive: true });
+  await fs.promises.mkdir(dir(), { recursive: true });
   atomicWrite(path.join(dir(), name + ".json"), stringify(value));
 }

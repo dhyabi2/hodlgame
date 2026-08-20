@@ -10,19 +10,19 @@ export interface Comment {
   time: number;
 }
 
-export function loadComments(): Comment[] {
-  return loadJson<Comment[]>("comments.json") ?? [];
+export async function loadComments(): Promise<Comment[]> {
+  return (await loadJson<Comment[]>("comments")) ?? [];
 }
 
-export function commentsFor(tokenId: string): Comment[] {
-  return loadComments()
+export async function commentsFor(tokenId: string): Promise<Comment[]> {
+  return (await loadComments())
     .filter((c) => c.tokenId === tokenId)
     .sort((a, b) => a.time - b.time)
     .slice(-200);
 }
 
-export function addComment(tokenId: string, account: string, text: string): Comment {
-  const all = loadComments();
+export async function addComment(tokenId: string, account: string, text: string): Promise<Comment> {
+  const all = await loadComments();
   const comment: Comment = {
     id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
     tokenId,
@@ -31,6 +31,6 @@ export function addComment(tokenId: string, account: string, text: string): Comm
     time: Date.now(),
   };
   all.push(comment);
-  saveJson("comments.json", all);
+  await saveJson("comments", all);
   return comment;
 }

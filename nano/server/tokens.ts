@@ -8,19 +8,13 @@ import { loadJson, saveJson } from "./store";
 export const EMPTY_META: LaunchMeta = { name: "", symbol: "", decimals: 6, image: "" };
 
 /** tokenId → metadata. Returns an empty map if no registry exists yet. */
-export function loadRegistry(): Map<string, LaunchMeta> {
-  const raw = loadJson<Record<string, LaunchMeta>>("tokens.json") ?? {};
+export async function loadRegistry(): Promise<Map<string, LaunchMeta>> {
+  const raw = (await loadJson<Record<string, LaunchMeta>>("tokens")) ?? {};
   return new Map(Object.entries(raw));
 }
 
-export function registerToken(tokenId: string, meta: LaunchMeta): void {
-  const reg = loadRegistry();
+export async function registerToken(tokenId: string, meta: LaunchMeta): Promise<void> {
+  const reg = await loadRegistry();
   reg.set(tokenId, meta);
-  saveJson("tokens.json", Object.fromEntries(reg));
-}
-
-/** MetaResolver bound to the on-disk registry. */
-export function registryMetaResolver() {
-  const reg = loadRegistry();
-  return (tokenId: string): LaunchMeta => reg.get(tokenId) ?? EMPTY_META;
+  await saveJson("tokens", Object.fromEntries(reg));
 }

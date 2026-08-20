@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   if (!tokenId || typeof tokenId !== "string" || tokenId.length !== 32) {
     return NextResponse.json({ error: "tokenId (32 hex) required" }, { status: 400 });
   }
-  registerToken(tokenId, {
+  await registerToken(tokenId, {
     name: String(body.name ?? ""),
     symbol: String(body.symbol ?? ""),
     decimals: Number(body.decimals ?? 6),

@@ -62,10 +62,11 @@ let cache: { at: number; value: RawMarket } | null = null;
 const TTL_MS = 2000;
 
 async function computeFresh(): Promise<RawMarket> {
-  const reg = loadRegistry();
+  const reg = await loadRegistry();
+  const commit = await commitResolver();
   const master = process.env.POOL_SEED ?? "";
   const poolKey = (tokenId: string) => (master ? tokenPoolKeys(master, tokenId).publicKey : null);
-  const idx = new MultiIndexer(new NanoRpcSource(loadNanoRpcKey()), (id) => reg.get(id) ?? EMPTY_META, commitResolver(), poolKey);
+  const idx = new MultiIndexer(new NanoRpcSource(loadNanoRpcKey()), (id) => reg.get(id) ?? EMPTY_META, commit, poolKey);
   const events = await idx.collectEvents(watched());
   const { state, byToken } = analyze(events);
   return { state, byToken, meta: reg, master };
@@ -103,7 +104,7 @@ function changePct(series: PricePoint[], secondsAgo: number): number | null {
   return Number.isFinite(pct) ? pct : null;
 }
 
-function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, account = ""): TokenView {
+async function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, account = ""): Promise<TokenView> {
   const meta = raw.meta.get(tokenId) ?? EMPTY_META;
   const s = raw.state.get(tokenId);
   return {
@@ -136,7 +137,7 @@ function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, account = ""
     series: a.series,
     trades: a.trades,
     topHolders: a.holders,
-    comments: commentsFor(tokenId),
+    comments: await commentsFor(tokenId),
   };
 }
 
@@ -145,7 +146,7 @@ export async function feed(account = ""): Promise<TokenView[]> {
   const raw = await compute();
   const out: TokenView[] = [];
   for (const [tokenId, a] of raw.byToken) {
-    const v = toView(tokenId, a, raw, account);
+    const v = await toView(tokenId, a, raw, account);
     v.series = [];
     v.trades = [];
     v.topHolders = [];

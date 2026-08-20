@@ -15,23 +15,23 @@ export interface CommitEntry {
 
 export type CommitMap = Map<string, CommitEntry>;
 
-export function loadCommits(): CommitMap {
-  const list = loadJson<CommitEntry[]>("commits.json") ?? [];
+export async function loadCommits(): Promise<CommitMap> {
+  const list = (await loadJson<CommitEntry[]>("commits")) ?? [];
   return new Map(list.map((e) => [commitLink(e.tokenId, e.op).toLowerCase(), e]));
 }
 
 /** Register a reveal and return the on-chain commit link to broadcast. */
-export function registerCommit(tokenId: string, op: Op): string {
+export async function registerCommit(tokenId: string, op: Op): Promise<string> {
   const link = commitLink(tokenId, op);
-  const map = loadCommits();
+  const map = await loadCommits();
   map.set(link.toLowerCase(), { tokenId, op });
-  saveJson("commits.json", [...map.values()]);
+  await saveJson("commits", [...map.values()]);
   return link;
 }
 
-/** A CommitResolver bound to the on-disk registry (re-verifies each hit). */
-export function commitResolver() {
-  const reg = loadCommits();
+/** An async CommitResolver bound to the on-disk registry (re-verifies each hit). */
+export async function commitResolver(): Promise<(link: string) => { tokenId: string; op: Op } | null> {
+  const reg = await loadCommits();
   return (link: string) => {
     const e = reg.get(link.toLowerCase());
     if (!e || !verifyCommit(e.tokenId, e.op, link)) return null;

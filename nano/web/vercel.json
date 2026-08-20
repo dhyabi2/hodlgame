@@ -1,0 +1,13 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/sweep",
+      "schedule": "*/1 * * * *"
+    }
+  ],
+  "functions": {
+    "app/api/cron/sweep/route.ts": {
+      "maxDuration": 300
+    }
+  }
+}

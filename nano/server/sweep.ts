@@ -14,24 +14,24 @@ import { loadJson, saveJson } from "./store";
 import type { SellPayout } from "./analytics";
 import { nanoRpc, SEND_DIFFICULTY } from "../lib/rpc";
 
-function loadPaid(): Set<string> {
-  return new Set(loadJson<string[]>("paid.json") ?? []);
+async function loadPaid(): Promise<Set<string>> {
+  return new Set((await loadJson<string[]>("paid")) ?? []);
 }
 
-function savePaid(set: Set<string>) {
-  saveJson("paid.json", [...set]);
+async function savePaid(set: Set<string>): Promise<void> {
+  await saveJson("paid", [...set]);
 }
 
 // Pool deposits ledger: sourceHash → { sender, amount } for every XNO send the
 // pool has received. Powers the deterministic buy-reconciliation refund.
 type DepositLedger = Record<string, { sender: string; amount: string }>;
 
-function loadDeposits(): DepositLedger {
-  return loadJson<DepositLedger>("deposits.json") ?? {};
+async function loadDeposits(): Promise<DepositLedger> {
+  return (await loadJson<DepositLedger>("deposits")) ?? {};
 }
 
-function saveDeposits(ledger: DepositLedger) {
-  saveJson("deposits.json", ledger);
+async function saveDeposits(ledger: DepositLedger): Promise<void> {
+  await saveJson("deposits", ledger);
 }
 
 /** Accept all pending XNO into the pool account (buys). */
@@ -48,7 +48,7 @@ export async function receivePoolPending(
   let balance = BigInt(info?.balance ?? "0");
   const rep = info?.representative ?? pool.address;
 
-  const ledger = loadDeposits();
+  const ledger = await loadDeposits();
   for (const srcHash of blocks) {
     const srcInfo = await nanoRpc(rpcKey, { action: "block_info", hash: srcHash, json_block: true });
     const amount = BigInt(srcInfo.amount);
@@ -78,7 +78,7 @@ export async function receivePoolPending(
     frontier = r.hash;
     balance = balance + amount;
   }
-  saveDeposits(ledger);
+  await saveDeposits(ledger);
   return hashes;
 }
 
@@ -103,7 +103,7 @@ export async function payoutSellsMulti(
   payouts: SellPayout[],
   cosignerSeeds: string[] = []
 ): Promise<{ paid: string[]; skipped: number }> {
-  const paid = loadPaid();
+  const paid = await loadPaid();
   const paidOut: string[] = [];
   let skipped = 0;
 
@@ -128,7 +128,7 @@ export async function payoutSellsMulti(
     paid.add(p.hash);
   }
 
-  savePaid(paid);
+  await savePaid(paid);
   return { paid: paidOut, skipped };
 }
 
@@ -164,7 +164,7 @@ export async function readPoolDeposits(rpcKey: string, pool: PoolKeys): Promise<
   const out = new Map<string, bigint>();
   const seen = new Set<string>();
 
-  for (const [hash, d] of Object.entries(loadDeposits())) {
+  for (const [hash, d] of Object.entries(await loadDeposits())) {
     if (seen.has(hash)) continue;
     seen.add(hash);
     if (!d.sender) continue;
