@@ -5,7 +5,7 @@
 // The op signer is the block's own account (block.account), not the account the
 // indexer happened to be watching — so creator/buyer/seller are real.
 
-import { multiEmpty, type MultiState, type MultiBlock } from "../core/multi";
+import { multiEmpty, type MultiState } from "../core/multi";
 import { tokenIdFromLaunchHash, type TokenId } from "../core/token";
 import { decodeOpLink } from "../core/oplink";
 import { commitLink, isCommitLink, verifyCommit } from "../core/commit";
@@ -18,6 +18,10 @@ export interface LaunchMeta {
   symbol: string;
   decimals: number;
   image: string;
+  description?: string;
+  website?: string;
+  twitter?: string;
+  telegram?: string;
 }
 
 export type MetaResolver = (tokenId: TokenId) => LaunchMeta;
@@ -56,6 +60,15 @@ export interface SellRecord {
   hash: string;
 }
 
+export interface IndexedEvent {
+  tokenId: TokenId;
+  op: Op;
+  sender: string;
+  height: bigint;
+  timestamp?: number;
+  hash: string;
+}
+
 export class MultiIndexer {
   private state: MultiState = multiEmpty();
 
@@ -70,38 +83,46 @@ export class MultiIndexer {
   }
 
   /** Decode a block into a routed event, or null if it carries no op. */
-  decode(block: NanoBlock): MultiBlock | null {
+  decode(block: NanoBlock): IndexedEvent | null {
+    let tokenId: TokenId;
+    let op: Op;
     if (isCommitLink(block.link)) {
       const r = this.commit(block.link);
       if (!r) return null;
-      return { tokenId: r.tokenId, op: r.op, sender: block.account, height: block.height };
+      tokenId = r.tokenId;
+      op = r.op;
+    } else {
+      try {
+        const d = decodeOpLink(block.link);
+        tokenId = d.tokenId;
+        op = d.op;
+      } catch {
+        return null;
+      }
+      if (op.kind === "launch") {
+        tokenId = tokenIdFromLaunchHash(block.hash);
+        op = { ...op, ...this.meta(tokenId) };
+      }
     }
-    let op: Op;
-    let tokenId: TokenId;
-    try {
-      const d = decodeOpLink(block.link);
-      op = d.op;
-      tokenId = d.tokenId;
-    } catch {
-      return null;
-    }
-    if (op.kind === "launch") {
-      tokenId = tokenIdFromLaunchHash(block.hash);
-      op = { ...op, ...this.meta(tokenId) };
-    }
-    return { tokenId, op, sender: block.account, height: block.height };
+    const timestamp = block.timestamp ? Number(block.timestamp) : undefined;
+    return { tokenId, op, sender: block.account, height: block.height, timestamp, hash: block.hash };
   }
 
-  /** Pull blocks for the given accounts and fold them into a MultiState. */
-  async sync(accounts: string[]): Promise<SyncResult> {
-    const events: MultiBlock[] = [];
+  /** Pull + decode all ops for the given accounts, in confirmation order. */
+  async collectEvents(accounts: string[]): Promise<IndexedEvent[]> {
+    const events: IndexedEvent[] = [];
     for (const account of accounts) {
       for (const block of await this.source.listBlocks(account)) {
         const ev = this.decode(block);
         if (ev) events.push(ev);
       }
     }
-    events.sort((a, b) => (a.height < b.height ? -1 : 1));
+    return events.sort((a, b) => (a.height < b.height ? -1 : 1));
+  }
+
+  /** Pull blocks for the given accounts and fold them into a MultiState. */
+  async sync(accounts: string[]): Promise<SyncResult> {
+    const events = await this.collectEvents(accounts);
     const result = replayMulti(events);
     this.state = result.state;
     return {

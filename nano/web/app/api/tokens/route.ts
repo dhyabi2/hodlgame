@@ -21,6 +21,10 @@ export async function POST(req: Request) {
     symbol: String(body.symbol ?? ""),
     decimals: Number(body.decimals ?? 6),
     image: String(body.image ?? ""),
+    description: String(body.description ?? ""),
+    website: String(body.website ?? ""),
+    twitter: String(body.twitter ?? ""),
+    telegram: String(body.telegram ?? ""),
   });
   return NextResponse.json({ ok: true });
 }
