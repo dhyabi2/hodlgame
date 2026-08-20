@@ -1,7 +1,9 @@
 // HoldFun Nano L2 — block sources.
 //
 // The indexer reads Nano blocks through a `BlockSource`. Two implementations:
-// `MemorySource` (tests / local) and `NanoRpcSource` (a real Nano node via RPC).
+// `MemorySource` (tests / local) and `NanoRpcSource` (rpc.nano.to).
+
+import { NANO_RPC, nanoRpc } from "../lib/rpc";
 
 export interface NanoBlock {
   account: string;
@@ -32,33 +34,14 @@ export class MemorySource implements BlockSource {
 }
 
 /**
- * Reads blocks from a Nano node's JSON-RPC API (e.g. `https://rpc.nano.to`).
- * Uses `account_history` + `blocks_info` — both are read-only and work on
- * public nodes. Pass an `apiKey` to use rpc.nano.to's keyed endpoint.
+ * Reads blocks from rpc.nano.to (strict — no other nodes). Uses
+ * `account_history` + `blocks_info`.
  */
 export class NanoRpcSource implements BlockSource {
-  constructor(
-    private endpoint: string,
-    private apiKey?: string
-  ) {}
-
-  private async rpc(body: Record<string, unknown>) {
-    const res = await fetch(this.endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(this.apiKey ? { "x-api-key": this.apiKey } : {}),
-      },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`nano rpc ${res.status}`);
-    const json = (await res.json()) as Record<string, unknown>;
-    if (json.error) throw new Error(String(json.error));
-    return json;
-  }
+  constructor(private apiKey: string) {}
 
   async listBlocks(account: string, limit = 100): Promise<NanoBlock[]> {
-    const hist = (await this.rpc({
+    const hist = (await nanoRpc(this.apiKey, {
       action: "account_history",
       account,
       count: limit,
@@ -68,11 +51,21 @@ export class NanoRpcSource implements BlockSource {
     const hashes = (hist.history ?? []).map((h) => h.hash);
     if (hashes.length === 0) return [];
 
-    const info = (await this.rpc({
+    const info = (await nanoRpc(this.apiKey, {
       action: "blocks_info",
       hashes,
       json_block: true,
-    })) as { blocks?: Record<string, { block_account: string; contents: any; height: string; local_timestamp?: string }> };
+    })) as {
+      blocks?: Record<
+        string,
+        {
+          block_account: string;
+          contents: any;
+          height: string;
+          local_timestamp?: string;
+        }
+      >;
+    };
 
     return hashes
       .map((hash) => {
@@ -92,3 +85,4 @@ export class NanoRpcSource implements BlockSource {
       .sort((a, b) => (a.height < b.height ? -1 : 1));
   }
 }
+
