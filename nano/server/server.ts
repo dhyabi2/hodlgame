@@ -28,7 +28,14 @@ function watched(): string[] {
 }
 
 async function indexer(): Promise<MultiIndexer> {
-  const idx = new MultiIndexer(new NanoRpcSource(loadNanoRpcKey()), () => ({ name: "", symbol: "", decimals: 6, image: "" }), commitResolver());
+  const master = process.env.POOL_SEED ?? "";
+  const poolKey = (tokenId: string) => (master ? tokenPoolKeys(master, tokenId).publicKey : null);
+  const idx = new MultiIndexer(
+    new NanoRpcSource(loadNanoRpcKey()),
+    () => ({ name: "", symbol: "", decimals: 6, image: "" }),
+    commitResolver(),
+    poolKey
+  );
   await idx.sync(watched());
   return idx;
 }

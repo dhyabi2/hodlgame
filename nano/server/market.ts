@@ -58,10 +58,12 @@ const TTL_MS = 2000;
 
 async function computeFresh(): Promise<RawMarket> {
   const reg = loadRegistry();
-  const idx = new MultiIndexer(new NanoRpcSource(loadNanoRpcKey()), (id) => reg.get(id) ?? EMPTY_META, commitResolver());
+  const master = process.env.POOL_SEED ?? "";
+  const poolKey = (tokenId: string) => (master ? tokenPoolKeys(master, tokenId).publicKey : null);
+  const idx = new MultiIndexer(new NanoRpcSource(loadNanoRpcKey()), (id) => reg.get(id) ?? EMPTY_META, commitResolver(), poolKey);
   const events = await idx.collectEvents(watched());
   const { state, byToken } = analyze(events);
-  return { state, byToken, meta: reg, master: process.env.POOL_SEED ?? "" };
+  return { state, byToken, meta: reg, master };
 }
 
 /** Shared in-memory cache so burst requests (feed + detail + SSE) share one index. */

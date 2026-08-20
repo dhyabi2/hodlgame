@@ -10,8 +10,14 @@ const CREATOR = "nano_creator";
 const CREATOR_B = "nano_creator_b";
 const ALICE = "nano_alice";
 
-function mkBlock(account: string, link: string, height: bigint, hash: string): NanoBlock {
-  return { account, hash, previous: "0".repeat(64), link, representative: account, height };
+function mkBlock(
+  account: string,
+  link: string,
+  height: bigint,
+  hash: string,
+  opts?: { previous?: string; amount?: string }
+): NanoBlock {
+  return { account, hash, previous: opts?.previous ?? "0".repeat(64), link, representative: account, height, amount: opts?.amount };
 }
 
 async function main() {
@@ -59,12 +65,18 @@ async function main() {
     const launchA: Op = { kind: "launch", supply: 1_000_000_000_000n, name: "A", symbol: "A", decimals: 6, image: "" };
     const hashA = "c".repeat(64);
     const ta = tokenIdFromLaunchHash(hashA);
+    const POOL_PUB = "9".repeat(64);
+    const depHash = "d".repeat(64);
 
     const source = new MemorySource();
     source.push(mkBlock(CREATOR, encodeOpLink("", launchA), 1n, hashA));
-    source.push(mkBlock(ALICE, encodeOpLink(ta, { kind: "buy", xno: 10n ** 28n, minTokens: 0n }), 2n, "d".repeat(64)));
+    // deposit: ALICE sends XNO to token A's pool (value-bound buy, part 1)
+    source.push(mkBlock(ALICE, POOL_PUB, 2n, depHash, { amount: "10000000000000000000000000000" }));
+    // buy op chained after the deposit (part 2)
+    source.push(mkBlock(ALICE, encodeOpLink(ta, { kind: "buy", xno: 0n, minTokens: 0n }), 3n, "e".repeat(64), { previous: depHash, amount: "1" }));
 
-    const { applied, invalid, reasons } = await new MultiIndexer(source).sync([CREATOR, ALICE]);
+    const poolKey = (id: string) => (id === ta ? POOL_PUB : null);
+    const { applied, invalid, reasons } = await new MultiIndexer(source, undefined, undefined, poolKey).sync([CREATOR, ALICE]);
     assert.equal(applied, 1, "only launch applied");
     assert.equal(invalid, 1, "buy flagged");
     assert.ok(reasons.some((r) => /liquidity/.test(r)), "buy hit launched token A → 'no liquidity'");
@@ -84,30 +96,36 @@ async function main() {
     assert.deepEqual(a.getState(), b.getState(), "indexer replay is byte-identical");
   }
 
-  // 4. End-to-end: launch (compact) → seedLiq (commit-reveal) → buy → sell.
+  // 4. End-to-end: launch (compact) → seedLiq (commit-reveal) → buy (value-bound) → sell.
   {
     const launchA: Op = { kind: "launch", supply: 1_000_000_000_000n, name: "A", symbol: "A", decimals: 6, image: "" };
     const seed: Op = { kind: "seedLiq", xno: 1_000_000_000n, tokens: 950_000_000_000n };
-    const buy: Op = { kind: "buy", xno: 100_000_000n, minTokens: 0n };
     const sell: Op = { kind: "sell", tokens: 10_000_000n, minXno: 0n };
     const hashA = "f".repeat(64);
     const ta = tokenIdFromLaunchHash(hashA);
+    const POOL_PUB = "8".repeat(64);
+    const depHash = "2".repeat(64);
 
     const source = new MemorySource();
     source.push(mkBlock(CREATOR, encodeOpLink("", launchA), 1n, hashA));
     source.push(mkBlock(CREATOR, commitLink(ta, seed), 2n, "1".repeat(64)));
-    source.push(mkBlock(ALICE, encodeOpLink(ta, buy), 3n, "2".repeat(64)));
-    source.push(mkBlock(ALICE, encodeOpLink(ta, sell), 4n, "3".repeat(64)));
+    // deposit (ALICE sends 100_000_000 raw XNO to token A's pool)
+    source.push(mkBlock(ALICE, POOL_PUB, 3n, depHash, { amount: "100000000" }));
+    // buy op chained after the deposit
+    source.push(mkBlock(ALICE, encodeOpLink(ta, { kind: "buy", xno: 0n, minTokens: 0n }), 4n, "3".repeat(64), { previous: depHash, amount: "1" }));
+    source.push(mkBlock(ALICE, encodeOpLink(ta, sell), 5n, "4".repeat(64), { previous: "3".repeat(64), amount: "1" }));
 
     const commits = commitMapResolver([{ tokenId: ta, op: seed }]);
-    const idx = new MultiIndexer(source, undefined, commits);
+    const poolKey = (id: string) => (id === ta ? POOL_PUB : null);
+    const idx = new MultiIndexer(source, undefined, commits, poolKey);
     const { applied, invalid } = await idx.sync([CREATOR, ALICE]);
     assert.equal(invalid, 0, "full flow has no invalid ops");
     assert.equal(applied, 4, "launch + seedLiq + buy + sell all applied");
 
     const s = idx.getState().get(ta)!;
     assert.equal(s.launched, true);
-    assert.ok(s.poolXno > 0n && s.poolTokens > 0n, "token has liquidity after seedLiq");
+    assert.ok(s.poolXno > 1_000_000_000n && s.poolXno <= 1_100_000_000n, "pool XNO = seedLiq 1e9 + buy 1e8 − sell out");
+    assert.ok(s.poolTokens > 0n, "token has liquidity after seedLiq");
     assert.ok((s.balances.get(ALICE) ?? 0n) > 0n, "buyer holds tokens after buy/sell");
   }
 

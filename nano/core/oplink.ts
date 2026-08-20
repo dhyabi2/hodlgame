@@ -51,7 +51,7 @@ function readTokenId(buf: Uint8Array, offset: number): TokenId {
 function primaryAmount(op: Op): bigint {
   switch (op.kind) {
     case "launch": return op.supply;
-    case "buy": return op.xno;
+    case "buy": return op.minTokens; // xno is bound by the chained deposit, not here
     case "sell": return op.tokens;
     case "stake":
     case "unstake": return op.amount;
@@ -100,7 +100,7 @@ export function decodeOpLink(
       };
       break;
     case OP_CODE.buy:
-      op = { kind: "buy", xno: amt, minTokens: 0n };
+      op = { kind: "buy", xno: 0n, minTokens: amt };
       break;
     case OP_CODE.sell:
       op = { kind: "sell", tokens: amt, minXno: 0n };

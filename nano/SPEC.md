@@ -42,12 +42,13 @@ indexer (who re-checks the commitment). BlackBird uses the same pattern.
   only after the launch block is signed/broadcast.
 - Every subsequent op (`buy`/`sell`/`stake`/…) carries its `tokenId` in the
   `link` high bytes, so the indexer routes the op to that token's own `State`.
-- Compact ops carry **one** amount; `buy.minTokens` / `sell.minXno` (slippage)
-  are not representable and decode to `0` — reserved for commit-reveal.
-- Two-amount / string ops (`seedLiq`, `addLiq`, `transfer`) use **commit-reveal**
-  (`core/commit.ts`): `link = 0xFF ‖ blake2b(tokenId ‖ encodeOp(op))[0..30]`. The
-  `0xFF` prefix disambiguates from compact opcodes (`0x01..0x09`). The full op is
-  served off-chain and re-verified against the commitment.
+- Compact ops carry **one** amount. For `buy` that amount is `minTokens` (the
+  slippage guard); the spent XNO is **bound by value**, not declared — see §7.1.
+  `sell.minXno` needs a second amount and uses commit-reveal.
+- Two-amount / string ops (`seedLiq`, `addLiq`, `transfer`, `sell` with `minXno`)
+  use **commit-reveal** (`core/commit.ts`): `link = 0xFF ‖ blake2b(tokenId ‖ encodeOp(op))[0..30]`.
+  The `0xFF` prefix disambiguates from compact opcodes (`0x01..0x09`). The full op
+  is served off-chain and re-verified against the commitment.
 - Indexer state is a `MultiState = Map<tokenId, State>` (`core/multi.ts`); each
   token has its own `supply`/`poolXno`/`poolTokens`/`balances`/`treasury` and its
   own XNO pool account.
@@ -149,3 +150,20 @@ substituted for unix time — deterministic and timestamp-free.
 4. `poolXno * poolTokens` non-decreasing across a swap (fee retained).
 5. Unstake splits 80/15/5 exactly (user / rebate / burn).
 6. Two independent replays of the same op sequence are byte-identical.
+
+## 7.1 Value-bound buy (no declared-xno trust)
+
+A buy is **two chained blocks** (same account, no smart contract needed):
+
+1. **Deposit** — a native XNO `send` to the token's pool account. The amount is
+   the authoritative `xno`.
+2. **Buy op** — a 1-raw data block whose `previous` field points to the deposit
+   hash; its `link` carries `tokenId` + `minTokens` (slippage guard).
+
+The indexer reads the deposit's native amount and uses it as `op.xno`, so a
+buyer can neither under-declare (pool insolvency) nor over-declare (free credit)
+— the value and the intent are bound by Nano's own `previous` chain. A rejected
+buy (e.g. slippage) is refunded the deposit amount by custody reconciliation
+(`poolReceived − creditedBuyXno`), a sender who never depositing cannot refund.
+This mirrors the Velas reference's deposit→commitment chain
+(`verifyXNOPrivacyProtocol/src/vela_indexer.py`).

@@ -9,10 +9,11 @@ export interface NanoBlock {
   account: string;
   hash: string;
   previous: string;
-  link: string; // 64-hex: the op commitment
+  link: string; // 64-hex: the op commitment / destination
   representative: string; // token id (or data carrier)
   height: bigint;
   timestamp?: string;
+  amount?: string; // raw amount the block sends (0 for opens/receives)
 }
 
 export interface BlockSource {
@@ -63,6 +64,7 @@ export class NanoRpcSource implements BlockSource {
           contents: any;
           height: string;
           local_timestamp?: string;
+          amount?: string;
         }
       >;
     };
@@ -79,6 +81,7 @@ export class NanoRpcSource implements BlockSource {
         representative: b.contents?.representative ?? "",
         height: BigInt(b.height),
         timestamp: b.local_timestamp,
+        amount: b.amount,
       });
     }
     return blocks.sort((a, b) => (a.height < b.height ? -1 : 1));

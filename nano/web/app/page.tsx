@@ -487,17 +487,38 @@ function TokenDetail({
     const raw = BigInt(Math.floor(Number(amount || "0") * 1e30)) || 0n;
     if (raw <= 0n) return say("enter XNO amount");
     try {
+      const info = await rpc("account_info", { account: keys.address, representative: "true" });
+      if (!info.frontier) return say("account not opened — fund it first");
+
+      // 1. deposit: send XNO to the token's pool (the authoritative value).
+      const w1 = (await rpc("work_generate", { hash: info.frontier, difficulty: "fffffff800000000" })).work;
+      const blk1 = buildBlock(keys.secretKey, {
+        work: w1,
+        previous: info.frontier,
+        representative: info.representative,
+        balance: (BigInt(info.balance) - raw).toString(),
+        link: token.pool,
+      });
+      const r1 = await rpc("process", { json_block: "true", block: blk1 });
+
+      // 2. buy op chained directly after the deposit (previous = deposit hash).
       const slip = Number(slippage || "0");
+      let minTokens = 0n;
       if (slip > 0) {
         const expected = quoteBuy(token.poolXno, token.poolTokens, raw);
-        const minTokens = (expected * BigInt(Math.round((100 - slip) * 100))) / 10000n;
-        const link = await registerCommit(token.tokenId, { kind: "buy", xno: raw, minTokens });
-        await submitBlock(link, 1n);
-      } else {
-        await submitBlock(encodeOpLink(token.tokenId, { kind: "buy", xno: raw, minTokens: 0n }), 1n);
+        minTokens = (expected * BigInt(Math.round((100 - slip) * 100))) / 10000n;
       }
-      const hash = await submitBlock(token.pool!, raw);
-      say(`buy ✓ ${hash.slice(0, 10)}…`);
+      const opLink = encodeOpLink(token.tokenId, { kind: "buy", xno: 0n, minTokens });
+      const w2 = (await rpc("work_generate", { hash: r1.hash, difficulty: "fffffff800000000" })).work;
+      const blk2 = buildBlock(keys.secretKey, {
+        work: w2,
+        previous: r1.hash,
+        representative: info.representative,
+        balance: (BigInt(info.balance) - raw - 1n).toString(),
+        link: opLink,
+      });
+      const r2 = await rpc("process", { json_block: "true", block: blk2 });
+      say(`buy ✓ ${r2.hash.slice(0, 10)}…`);
       setAmount("");
     } catch (e: any) {
       say("buy failed: " + e.message);

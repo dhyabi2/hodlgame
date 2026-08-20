@@ -36,6 +36,9 @@ export function metaMapResolver(map: Map<string, LaunchMeta>): MetaResolver {
 /** Resolve a commit-reveal link back to { tokenId, op }. */
 export type CommitResolver = (link: string) => { tokenId: TokenId; op: Op } | null;
 
+/** Resolve a tokenId to its XNO pool account public key (hex). */
+export type PoolKeyResolver = (tokenId: TokenId) => string | null;
+
 /** In-memory commitment resolver that re-verifies each hit. */
 export function commitMapResolver(entries: { tokenId: TokenId; op: Op }[]): CommitResolver {
   const map = new Map(entries.map((e) => [commitLink(e.tokenId, e.op).toLowerCase(), e]));
@@ -75,7 +78,8 @@ export class MultiIndexer {
   constructor(
     private source: BlockSource,
     private meta: MetaResolver = () => EMPTY_META,
-    private commit: CommitResolver = () => null
+    private commit: CommitResolver = () => null,
+    private poolKey: PoolKeyResolver = () => null
   ) {}
 
   getState(): MultiState {
@@ -112,9 +116,22 @@ export class MultiIndexer {
   async collectEvents(accounts: string[]): Promise<IndexedEvent[]> {
     const events: IndexedEvent[] = [];
     for (const account of accounts) {
-      for (const block of await this.source.listBlocks(account)) {
+      const blocks = await this.source.listBlocks(account);
+      const byHash = new Map(blocks.map((b) => [b.hash, b]));
+      for (const block of blocks) {
         const ev = this.decode(block);
-        if (ev) events.push(ev);
+        if (!ev) continue;
+        if (ev.op.kind === "buy") {
+          // Value-bound buy: the authoritative xno is the native amount of the
+          // deposit block the op chains from (previous), not any declared value.
+          const dep = byHash.get(block.previous);
+          const amount = dep ? BigInt(dep.amount ?? "0") : 0n;
+          const poolPub = this.poolKey?.(ev.tokenId);
+          const routesToPool = Boolean(dep && poolPub && dep.link.toLowerCase() === poolPub.toLowerCase());
+          if (!dep || amount <= 0n || !routesToPool) continue; // malformed buy → skip
+          ev.op = { ...ev.op, xno: amount };
+        }
+        events.push(ev);
       }
     }
     return events.sort((a, b) => (a.height < b.height ? -1 : 1));

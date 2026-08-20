@@ -27,11 +27,12 @@ for (const op of OPS) {
   }
 }
 
-// 2. buy/sell carry their primary amount; slippage decodes to 0 (compact limit).
+// 2. buy carries its slippage guard (minTokens); xno is bound by the deposit.
 {
-  const buy = decodeOpLink(encodeOpLink(TOKEN, { kind: "buy", xno: 12345n, minTokens: 0n }));
+  const buy = decodeOpLink(encodeOpLink(TOKEN, { kind: "buy", xno: 0n, minTokens: 900_000n }));
   assert.equal(buy.op.kind, "buy");
-  assert.equal(buy.op.kind === "buy" ? buy.op.xno : 0n, 12345n);
+  assert.equal(buy.op.kind === "buy" ? buy.op.minTokens : 0n, 900_000n, "minTokens round-trips");
+  assert.equal(buy.op.kind === "buy" ? buy.op.xno : 1n, 0n, "buy op carries no xno (value-bound)");
   const sell = decodeOpLink(encodeOpLink(TOKEN, { kind: "sell", tokens: 999n, minXno: 0n }));
   assert.equal(sell.op.kind, "sell");
   assert.equal(sell.op.kind === "sell" ? sell.op.tokens : 0n, 999n);
