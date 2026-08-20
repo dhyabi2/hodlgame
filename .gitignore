@@ -1,19 +1,19 @@
 # Dependencies
 node_modules/
 
-# Anchor build artifacts (includes generated program keypairs)
-anchor/target/
-anchor/.anchor/
+# Solana (archived) — Anchor build artifacts (includes generated program keypairs)
+archive/solana/anchor/target/
+archive/solana/anchor/.anchor/
 
-# Next.js build output
-app/.next/
-app/out/
+# Solana (archived) — Next.js build output
+archive/solana/app/.next/
+archive/solana/app/out/
 
 # Vercel
-app/.vercel/
+archive/solana/app/.vercel/
 
 # Environment / local config
-app/.env.local
+archive/solana/app/.env.local
 .env
 .env.local
 
@@ -30,4 +30,4 @@ yarn-debug.log*
 yarn-error.log*
 
 # TypeScript incremental build info
-app/tsconfig.tsbuildinfo
+archive/solana/app/tsconfig.tsbuildinfo
