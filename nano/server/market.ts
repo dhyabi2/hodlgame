@@ -29,6 +29,8 @@ export interface TokenView {
   poolTokens: string;
   price: string;
   marketCap: string;
+  change1h: number | null;
+  change24h: number | null;
   buyVolume: string;
   sellVolume: string;
   holders: number;
@@ -79,6 +81,26 @@ export function bustCache(): void {
   cache = null;
 }
 
+/** Percent change vs the last price at or before `now - secondsAgo` (step fn). */
+function changePct(series: PricePoint[], secondsAgo: number): number | null {
+  if (series.length < 2) return null;
+  const last = series[series.length - 1];
+  const target = last.time - secondsAgo;
+  let base = series[0];
+  for (const p of series) {
+    if (p.time >= target) {
+      base = p;
+      break;
+    }
+  }
+  const cur = BigInt(last.priceRaw);
+  const prev = BigInt(base.priceRaw);
+  if (prev === 0n) return null;
+  const bps = (cur - prev) * 10_000n / prev; // percent * 100
+  const pct = Number(bps) / 100;
+  return Number.isFinite(pct) ? pct : null;
+}
+
 function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket): TokenView {
   const meta = raw.meta.get(tokenId) ?? EMPTY_META;
   const s = raw.state.get(tokenId);
@@ -100,6 +122,8 @@ function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket): TokenView {
     poolTokens: a.poolTokens,
     price: a.priceRaw,
     marketCap: a.marketCapRaw,
+    change1h: changePct(a.series, 3600),
+    change24h: changePct(a.series, 86400),
     buyVolume: a.buyVolumeRaw,
     sellVolume: a.sellVolumeRaw,
     holders: a.holders.length,

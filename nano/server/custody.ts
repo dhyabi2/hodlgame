@@ -35,6 +35,26 @@ export function tokenPoolKeys(masterSeed: string, tokenId: string): PoolKeys {
   return poolKeysFromSeed(poolSeedForToken(masterSeed, tokenId));
 }
 
+/**
+ * Deterministic 2-of-3 cosigner shares for a token's pool. Two independent
+ * Nano keypairs derived via distinct HD paths from the master seed; any two of
+ * the three parties (pool key + 2 cosigners) can co-sign a payout block, which
+ * is submitted with a `signatures` array. No party ever sees the master seed or
+ * another party's share.
+ */
+export function cosignerSeeds(masterSeed: string, tokenId: string, n = 2): string[] {
+  const out: string[] = [];
+  for (let i = 1; i <= n; i++) {
+    const tag = i.toString(16).padStart(2, "0");
+    out.push(blake2bHex(Buffer.from(masterSeed + tokenId + tag, "hex"), undefined, 32));
+  }
+  return out;
+}
+
+export function cosignerPoolKeys(masterSeed: string, tokenId: string): PoolKeys[] {
+  return cosignerSeeds(masterSeed, tokenId).map(poolKeysFromSeed);
+}
+
 export interface Payout {
   to: string; // recipient nano_ address
   amountRaw: string; // XNO amount in raw

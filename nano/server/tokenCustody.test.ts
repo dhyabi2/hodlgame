@@ -1,5 +1,5 @@
 import { strict as assert } from "node:assert";
-import { poolSeedForToken, tokenPoolKeys } from "./custody";
+import { poolSeedForToken, tokenPoolKeys, cosignerSeeds, cosignerPoolKeys } from "./custody";
 
 const MASTER = "f".repeat(64);
 const TOKEN_A = "a".repeat(32);
@@ -33,6 +33,20 @@ const TOKEN_B = "b".repeat(32);
   const k = tokenPoolKeys(MASTER, TOKEN_A);
   assert.ok(k.address.startsWith("nano_"), "valid nano address");
   assert.equal(k.publicKey.length, 64, "public key is 32 bytes");
+}
+
+// 5. Cosigner shares are distinct, deterministic, and never equal the pool key.
+{
+  const seeds = cosignerSeeds(MASTER, TOKEN_A);
+  assert.equal(seeds.length, 2, "two cosigner shares");
+  const again = cosignerSeeds(MASTER, TOKEN_A);
+  assert.deepEqual(seeds, again, "cosigner shares are deterministic");
+  const pool = tokenPoolKeys(MASTER, TOKEN_A);
+  const cos = cosignerPoolKeys(MASTER, TOKEN_A);
+  const addrs = [pool.address, ...cos.map((c) => c.address)];
+  assert.equal(new Set(addrs).size, 3, "pool + 2 cosigners are 3 distinct accounts");
+  assert.notEqual(seeds[0], seeds[1], "shares differ");
+  assert.equal(seeds[0].length, 64, "share is 32-byte hex");
 }
 
 console.log("✅ per-token custody derivation tests passed");

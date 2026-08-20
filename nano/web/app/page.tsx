@@ -8,6 +8,7 @@ import { tokenIdFromLaunchHash } from "../../core/token";
 import { stringify } from "../../core/json";
 import type { Op } from "../../core/ops";
 import { Sparkline } from "./components/Sparkline";
+import { loadWallet, saveWallet, removeWallet, encryptSeed, decryptSeed } from "./lib/wallet";
 
 const PriceChart = dynamic(() => import("./components/PriceChart"), { ssr: false });
 
@@ -63,6 +64,8 @@ interface Token {
   poolTokens: string;
   price: string;
   marketCap: string;
+  change1h: number | null;
+  change24h: number | null;
   buyVolume: string;
   sellVolume: string;
   holders: number;
@@ -144,6 +147,7 @@ function timeAgo(ts: number) {
 }
 
 const short = (a: string) => (a ? a.slice(0, 6) + "…" + a.slice(-4) : "");
+const pctStr = (n: number | null) => (n == null ? "·" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`);
 
 const quoteBuy = (poolXno: string, poolTokens: string, xno: bigint): bigint => {
   const px = BigInt(poolXno);
@@ -177,8 +181,8 @@ const btn =
   "w-full rounded-xl bg-green-500 px-4 py-3 text-sm font-bold text-black hover:bg-green-400 disabled:opacity-40 transition";
 
 export default function Home() {
-  const [seed, setSeed] = useState("");
   const [keys, setKeys] = useState<Keys | null>(null);
+  const [hasWallet, setHasWallet] = useState(false);
   const [tokens, setTokens] = useState<Token[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Token | null>(null);
@@ -187,6 +191,21 @@ export default function Home() {
   const [showCreate, setShowCreate] = useState(false);
 
   const say = (s: string) => setLog((l) => [...l.slice(-9), s]);
+
+  const unlock = (k: Keys) => {
+    setKeys(k);
+    setHasWallet(true);
+  };
+  const lock = () => setKeys(null);
+  const remove = () => {
+    removeWallet();
+    setHasWallet(false);
+    setKeys(null);
+  };
+
+  useEffect(() => {
+    setHasWallet(Boolean(loadWallet()));
+  }, []);
 
   // Feed (SSE with polling fallback).
   useEffect(() => {
@@ -254,28 +273,6 @@ export default function Home() {
     };
   }, [selectedId]);
 
-  const connect = () => {
-    try {
-      const k = keysFromSeed(seed.trim());
-      setKeys(k);
-      localStorage.setItem("holdfun_seed", seed.trim());
-    } catch {
-      say("bad seed");
-    }
-  };
-
-  useEffect(() => {
-    const s = localStorage.getItem("holdfun_seed");
-    if (s) {
-      setSeed(s);
-      try {
-        setKeys(keysFromSeed(s));
-      } catch {
-        localStorage.removeItem("holdfun_seed");
-      }
-    }
-  }, []);
-
   async function submitBlock(link: string, balanceDelta: bigint): Promise<string> {
     if (!keys) throw new Error("connect first");
     const info = await rpc("account_info", { account: keys.address, representative: "true" });
@@ -335,13 +332,13 @@ export default function Home() {
               {short(keys.address)}
             </button>
           ) : (
-            <span className="text-xs text-zinc-500">connect wallet</span>
+            <span className="text-xs text-zinc-500">wallet locked</span>
           )}
         </div>
       </header>
 
       <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
-        <WalletPanel seed={seed} setSeed={setSeed} keys={keys} connect={connect} setKeys={setKeys} />
+        <WalletPanel keys={keys} hasWallet={hasWallet} unlock={unlock} lock={lock} remove={remove} />
 
         {detail ? (
           <TokenDetail
@@ -385,35 +382,129 @@ export default function Home() {
 }
 
 function WalletPanel({
-  seed,
-  setSeed,
   keys,
-  connect,
-  setKeys,
+  hasWallet,
+  unlock,
+  lock,
+  remove,
 }: {
-  seed: string;
-  setSeed: (s: string) => void;
   keys: Keys | null;
-  connect: () => void;
-  setKeys: (k: Keys) => void;
+  hasWallet: boolean;
+  unlock: (k: Keys) => void;
+  lock: () => void;
+  remove: () => void;
 }) {
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [seed, setSeed] = useState("");
+  const [mode, setMode] = useState<"create" | "import">("create");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function create() {
+    if (password.length < 6) return setErr("password must be ≥ 6 chars");
+    if (password !== confirm) return setErr("passwords do not match");
+    setBusy(true);
+    try {
+      const s = genSeed();
+      saveWallet(await encryptSeed(s, password));
+      unlock(keysFromSeed(s));
+      setPassword("");
+      setConfirm("");
+      setErr("");
+    } catch (e: any) {
+      setErr(e?.message ?? "encryption failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function open() {
+    setBusy(true);
+    try {
+      const w = loadWallet();
+      if (!w) return setErr("no wallet found");
+      const s = await decryptSeed(w, password);
+      if (!/^[0-9a-fA-F]{64}$/.test(s)) return setErr("wrong password");
+      unlock(keysFromSeed(s));
+      setPassword("");
+      setErr("");
+    } catch {
+      setErr("wrong password");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function importSeed() {
+    const s = seed.trim();
+    if (!/^[0-9a-fA-F]{64}$/.test(s)) return setErr("invalid 64-hex seed");
+    if (password.length < 6) return setErr("password must be ≥ 6 chars");
+    setBusy(true);
+    try {
+      saveWallet(await encryptSeed(s, password));
+      unlock(keysFromSeed(s));
+      setSeed("");
+      setPassword("");
+      setErr("");
+    } catch (e: any) {
+      setErr(e?.message ?? "encryption failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (keys) {
+    return (
+      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4 flex items-center gap-3">
+        <span className="text-sm font-mono text-zinc-300 truncate flex-1">{keys.address}</span>
+        <button className="rounded-xl border border-zinc-800 px-4 py-3 text-sm font-bold text-zinc-200 hover:border-red-500 shrink-0" onClick={lock}>
+          Lock
+        </button>
+      </div>
+    );
+  }
+
+  if (hasWallet) {
+    return (
+      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4 space-y-2">
+        <p className="text-sm font-bold text-zinc-300">Open wallet</p>
+        <input className={inputC} type="password" placeholder="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        {err && <p className="text-xs text-red-400">{err}</p>}
+        <div className="flex gap-2">
+          <button className={btn} disabled={busy} onClick={open}>
+            {busy ? "opening…" : "Open"}
+          </button>
+          <button className="rounded-xl border border-zinc-800 px-4 py-3 text-sm font-bold text-red-400 hover:border-red-500" onClick={remove}>
+            Delete
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4 flex gap-2 items-center">
-      <input className={inputC} placeholder="seed (64 hex)" value={seed} onChange={(e) => setSeed(e.target.value)} />
-      <button className="rounded-xl bg-zinc-800 px-4 py-3 text-sm font-bold hover:bg-zinc-700 shrink-0" onClick={connect}>
-        {keys ? "Reconnect" : "Connect"}
+    <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4 space-y-2">
+      <div className="flex gap-2">
+        <button className={"px-4 py-2 rounded-xl text-sm font-bold " + (mode === "create" ? "bg-zinc-800 text-white" : "text-zinc-500")} onClick={() => setMode("create")}>
+          Create
+        </button>
+        <button className={"px-4 py-2 rounded-xl text-sm font-bold " + (mode === "import" ? "bg-zinc-800 text-white" : "text-zinc-500")} onClick={() => setMode("import")}>
+          Import seed
+        </button>
+      </div>
+      {mode === "import" && (
+        <input className={inputC} placeholder="seed (64 hex)" value={seed} onChange={(e) => setSeed(e.target.value)} />
+      )}
+      <input className={inputC} type="password" placeholder="password (≥ 6 chars)" value={password} onChange={(e) => setPassword(e.target.value)} />
+      {mode === "create" && (
+        <input className={inputC} type="password" placeholder="confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+      )}
+      {err && <p className="text-xs text-red-400">{err}</p>}
+      <button className={btn} disabled={busy} onClick={mode === "create" ? create : importSeed}>
+        {busy ? "encrypting…" : mode === "create" ? "Create wallet" : "Encrypt & unlock"}
       </button>
-      <button
-        className="rounded-xl border border-zinc-800 px-4 py-3 text-sm font-bold text-zinc-300 hover:border-green-500 shrink-0"
-        onClick={() => {
-          const s = genSeed();
-          setSeed(s);
-          setKeys(keysFromSeed(s));
-          localStorage.setItem("holdfun_seed", s);
-        }}
-      >
-        New
-      </button>
+      <p className="text-[11px] text-zinc-600">seed is encrypted in your browser (PBKDF2 + AES-GCM) and never leaves it</p>
     </div>
   );
 }
@@ -453,6 +544,9 @@ function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id:
               </div>
             </div>
             <div className="mt-3 flex items-center justify-between text-[11px] text-zinc-500">
+              <span className={"font-bold " + (t.change24h == null ? "text-zinc-600" : t.change24h >= 0 ? "text-green-400" : "text-red-400")}>
+                {pctStr(t.change24h)} 24h
+              </span>
               <span>{t.holders} holders</span>
               <span>vol {fmtXno(t.buyVolume)}</span>
             </div>
@@ -604,7 +698,9 @@ function TokenDetail({
           </div>
           <div className="text-right">
             <p className="text-2xl font-black">{fmtXno(token.marketCap)} XNO</p>
-            <p className="text-[11px] text-zinc-500">market cap</p>
+            <p className="text-[11px] text-zinc-500">
+              market cap · <span className={token.change24h == null ? "text-zinc-600" : token.change24h >= 0 ? "text-green-400" : "text-red-400"}>{pctStr(token.change24h)}</span>
+            </p>
           </div>
         </div>
         {token.description && <p className="text-sm text-zinc-400 mt-3">{token.description}</p>}
