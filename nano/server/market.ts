@@ -24,6 +24,7 @@ export interface TokenView {
   creator: string;
   creatorShare: string;
   supply: string;
+  treasury: string;
   poolXno: string;
   poolTokens: string;
   price: string;
@@ -94,6 +95,7 @@ function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket): TokenView {
     creator: s?.creator ?? "",
     creatorShare: s?.creatorShare.toString() ?? "0",
     supply: a.supplyRaw,
+    treasury: s?.treasury.toString() ?? "0",
     poolXno: a.poolXno,
     poolTokens: a.poolTokens,
     price: a.priceRaw,

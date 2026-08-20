@@ -1,13 +1,12 @@
 // Commit-reveal registry. Ops that don't fit the compact op-link (two amounts:
-// buy.minTokens / sell.minXno) are committed on-chain and their full payload
-// registered off-chain so the indexer can resolve them. The indexer always
-// re-verifies `commitLink(tokenId, op) === link` before trusting a reveal.
+// sell.minXno / seedLiq / addLiq / transfer) are committed on-chain and their
+// full payload registered off-chain so the indexer can resolve them. The
+// indexer always re-verifies `commitLink(tokenId, op) === link` before trusting
+// a reveal.
 
-import * as fs from "node:fs";
-import * as path from "node:path";
 import type { Op } from "../core/ops";
 import { commitLink, verifyCommit } from "../core/commit";
-import { stringify, parse } from "../core/json";
+import { loadJson, saveJson } from "./store";
 
 export interface CommitEntry {
   tokenId: string;
@@ -16,17 +15,9 @@ export interface CommitEntry {
 
 export type CommitMap = Map<string, CommitEntry>;
 
-function commitsFile(): string {
-  return process.env.COMMITS_FILE ?? path.join(process.cwd(), ".commits.json");
-}
-
 export function loadCommits(): CommitMap {
-  try {
-    const list = parse<CommitEntry[]>(fs.readFileSync(commitsFile(), "utf-8"));
-    return new Map(list.map((e) => [commitLink(e.tokenId, e.op).toLowerCase(), e]));
-  } catch {
-    return new Map();
-  }
+  const list = loadJson<CommitEntry[]>("commits.json") ?? [];
+  return new Map(list.map((e) => [commitLink(e.tokenId, e.op).toLowerCase(), e]));
 }
 
 /** Register a reveal and return the on-chain commit link to broadcast. */
@@ -34,7 +25,7 @@ export function registerCommit(tokenId: string, op: Op): string {
   const link = commitLink(tokenId, op);
   const map = loadCommits();
   map.set(link.toLowerCase(), { tokenId, op });
-  fs.writeFileSync(commitsFile(), stringify([...map.values()]));
+  saveJson("commits.json", [...map.values()]);
   return link;
 }
 

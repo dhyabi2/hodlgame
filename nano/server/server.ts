@@ -17,6 +17,7 @@ import type { State } from "../core/state";
 import { tokenPoolKeys } from "./custody";
 import { receivePoolsMulti, payoutSellsMulti, readPoolDeposits, refundRejectedBuys } from "./sweep";
 import { creditedBuys, computeRefunds } from "./reconcile";
+import { analyze } from "./analytics";
 import { commitResolver } from "./commits";
 import { loadNanoRpcKey } from "../lib/rpc";
 
@@ -147,23 +148,15 @@ async function runSweep(onlyToken: string | null) {
     const idx = await indexer();
     const events = await idx.collectEvents(watched());
     const credits = creditedBuys(events);
-    const sells = events
-      .filter((e) => e.op.kind === "sell")
-      .map((e) => ({
-        tokenId: e.tokenId,
-        sender: e.sender,
-        tokens: e.op.kind === "sell" ? e.op.tokens : 0n,
-        minXno: e.op.kind === "sell" ? e.op.minXno : 0n,
-        hash: e.hash,
-      }));
+    const { sellPayouts } = analyze(events);
 
     const known = [...idx.getState().keys()];
     const targets = onlyToken ? (known.includes(onlyToken) ? [onlyToken] : []) : known;
 
     const received = await receivePoolsMulti(key, masterSeed, targets);
 
-    const filterFor = (s: typeof sells[number]) => !onlyToken || s.tokenId === onlyToken;
-    const { paid, skipped } = await payoutSellsMulti(key, masterSeed, idx.getState(), sells.filter(filterFor), []);
+    const payouts = onlyToken ? sellPayouts.filter((p) => p.tokenId === onlyToken) : sellPayouts;
+    const { paid, skipped } = await payoutSellsMulti(key, masterSeed, payouts, []);
 
     const refunds: string[] = [];
     for (const tokenId of targets) {

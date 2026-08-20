@@ -9,7 +9,7 @@ import { tokenIdFromLaunchHash } from "../core/token";
 const TOKEN = tokenIdFromLaunchHash("a".repeat(64));
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "commits-"));
-process.env.COMMITS_FILE = path.join(tmp, "commits.json");
+process.env.DATA_DIR = tmp;
 
 // 1. register returns a valid commit link and persists a resolvable entry.
 {

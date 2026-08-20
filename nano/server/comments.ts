@@ -1,7 +1,6 @@
-// Comments store — a tiny JSON-file-backed thread per token (off-chain).
+// Comments store — a durable thread per token (off-chain).
 
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { loadJson, saveJson } from "./store";
 
 export interface Comment {
   id: string;
@@ -11,21 +10,8 @@ export interface Comment {
   time: number;
 }
 
-function commentsFile(): string {
-  return process.env.COMMENTS_FILE ?? path.join(process.cwd(), ".comments.json");
-}
-
 export function loadComments(): Comment[] {
-  try {
-    const raw = JSON.parse(fs.readFileSync(commentsFile(), "utf-8"));
-    return Array.isArray(raw) ? raw : [];
-  } catch {
-    return [];
-  }
-}
-
-function save(comments: Comment[]): void {
-  fs.writeFileSync(commentsFile(), JSON.stringify(comments, null, 2));
+  return loadJson<Comment[]>("comments.json") ?? [];
 }
 
 export function commentsFor(tokenId: string): Comment[] {
@@ -45,6 +31,6 @@ export function addComment(tokenId: string, account: string, text: string): Comm
     time: Date.now(),
   };
   all.push(comment);
-  save(all);
+  saveJson("comments.json", all);
   return comment;
 }

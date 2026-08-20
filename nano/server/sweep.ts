@@ -1,36 +1,25 @@
 // Sweep: the operator's trading engine.
 //
-// 1. receivePoolPending — accept incoming XNO (buys) into the pool account.
-// 2. payoutSells — for each unpaid sell op, compute the AMM XNO out and
-//    broadcast a pool → user send.
+// 1. receivePoolPending — accept incoming XNO (buys) into a pool account.
+// 2. payoutSellsMulti — broadcast per-token sell payouts (XNO out is computed
+//    exactly at each sell's execution point by `analyze`).
+// 3. refundRejectedBuys — return uncredited XNO from rejected/over-sent buys.
 //
-// Paid sells are tracked in a local file so a crash doesn't double-pay.
+// Paid sells and deposits are tracked in a durable store so a crash doesn't
+// double-pay; ledger writes are atomic.
 
-import * as fs from "node:fs";
-import { poolKeysFromSeed, tokenPoolKeys, signPayout, broadcastPayout, type PoolKeys } from "./custody";
-import { replayState, readOps } from "./indexer";
-import { planSellPayouts } from "./plan";
+import { tokenPoolKeys, signPayout, broadcastPayout, type PoolKeys } from "./custody";
 import { computeRefunds } from "./reconcile";
-import { atomicWrite } from "./fsutil";
-import { applyOp, emptyState, type State } from "../core/state";
-import { decodeOpCompact } from "../core/compact";
-import type { MultiState } from "../core/multi";
-import type { SellRecord } from "../indexer/multiIndexer";
+import { loadJson, saveJson } from "./store";
+import type { SellPayout } from "./analytics";
 import { nanoRpc, SEND_DIFFICULTY } from "../lib/rpc";
 
-const PAID_FILE = ".paid.json";
-const DEPOSITS_FILE = ".deposits.json";
-
 function loadPaid(): Set<string> {
-  try {
-    return new Set(JSON.parse(fs.readFileSync(PAID_FILE, "utf-8")));
-  } catch {
-    return new Set();
-  }
+  return new Set(loadJson<string[]>("paid.json") ?? []);
 }
 
 function savePaid(set: Set<string>) {
-  atomicWrite(PAID_FILE, JSON.stringify([...set], null, 2));
+  saveJson("paid.json", [...set]);
 }
 
 // Pool deposits ledger: sourceHash → { sender, amount } for every XNO send the
@@ -38,15 +27,11 @@ function savePaid(set: Set<string>) {
 type DepositLedger = Record<string, { sender: string; amount: string }>;
 
 function loadDeposits(): DepositLedger {
-  try {
-    return JSON.parse(fs.readFileSync(DEPOSITS_FILE, "utf-8"));
-  } catch {
-    return {};
-  }
+  return loadJson<DepositLedger>("deposits.json") ?? {};
 }
 
 function saveDeposits(ledger: DepositLedger) {
-  atomicWrite(DEPOSITS_FILE, JSON.stringify(ledger, null, 2));
+  saveJson("deposits.json", ledger);
 }
 
 /** Accept all pending XNO into the pool account (buys). */
@@ -97,75 +82,6 @@ export async function receivePoolPending(
   return hashes;
 }
 
-/**
- * Replay state and pay out any unpaid sells. Returns the payouts broadcast.
- */
-export async function payoutSells(
-  rpcKey: string,
-  pool: PoolKeys,
-  meta: { name: string; symbol: string; decimals: number; image: string },
-  watchedAccounts: string[],
-  cosignerSeeds: string[] = []
-): Promise<{ paid: string[]; skipped: number }> {
-  const paid = loadPaid();
-  const paidOut: string[] = [];
-  let skipped = 0;
-
-  // Collect sell ops (with their block hash) across watched accounts.
-  const sells: { sender: string; tokens: bigint; minXno: bigint; hash: string }[] = [];
-  for (const acct of watchedAccounts) {
-    const hist = await nanoRpc(rpcKey, { action: "account_history", account: acct, count: 500, raw: true });
-    const history = (hist.history ?? []) as { hash: string; height: string }[];
-    const info = await nanoRpc(rpcKey, { action: "blocks_info", hashes: history.map((h) => h.hash), json_block: true });
-    for (const h of history) {
-      const link = info.blocks?.[h.hash]?.contents?.link;
-      if (!link) continue;
-      try {
-        const op = decodeOpCompact(link, meta);
-        if (op.kind === "sell") {
-          sells.push({ sender: acct, tokens: op.tokens, minXno: op.minXno, hash: h.hash });
-        }
-      } catch {
-        /* not an op */
-      }
-    }
-  }
-
-  // Recompute the AMM state up to each sell to get the exact XNO out.
-  const { state } = await replayState(rpcKey, meta, watchedAccounts);
-  let poolInfo = await nanoRpc(rpcKey, { action: "account_info", account: pool.address, representative: "true" }).catch(() => null);
-  if (!poolInfo?.frontier) return { paid: paidOut, skipped };
-
-  for (const s of sells) {
-    if (paid.has(s.hash)) continue;
-    const xnoReserve = state.poolXno;
-    const tokenReserve = state.poolTokens;
-    if (xnoReserve <= 0n || tokenReserve <= 0n) {
-      skipped++;
-      continue;
-    }
-    const out = (s.tokens * xnoReserve) / (tokenReserve + s.tokens);
-    if (out <= 0n || out >= xnoReserve) {
-      skipped++;
-      continue;
-    }
-    const payout = await signPayout(pool, {
-      to: s.sender,
-      amountRaw: out.toString(),
-      frontier: poolInfo.frontier,
-      balance: poolInfo.balance,
-      representative: poolInfo.representative,
-    }, rpcKey, cosignerSeeds);
-    const hash = await broadcastPayout(rpcKey, payout);
-    paidOut.push(hash);
-    paid.add(s.hash);
-    poolInfo = { ...poolInfo, frontier: hash, balance: (BigInt(poolInfo.balance) - out).toString() };
-  }
-
-  savePaid(paid);
-  return { paid: paidOut, skipped };
-}
-
 /** Receive pending XNO (buys) into every token's own pool account. */
 export async function receivePoolsMulti(
   rpcKey: string,
@@ -180,23 +96,16 @@ export async function receivePoolsMulti(
   return hashes;
 }
 
-/**
- * Payout sells per token, signing each from that token's own pool account.
- * Uses planSellPayouts (pure) then broadcasts the planned sends.
- */
+/** Broadcast sell payouts, signing each from that token's own pool account. */
 export async function payoutSellsMulti(
   rpcKey: string,
   masterSeed: string,
-  state: MultiState,
-  sells: SellRecord[],
+  payouts: SellPayout[],
   cosignerSeeds: string[] = []
 ): Promise<{ paid: string[]; skipped: number }> {
   const paid = loadPaid();
   const paidOut: string[] = [];
   let skipped = 0;
-
-  const { payouts, skipped: skippedPlan } = planSellPayouts(state, sells);
-  skipped += skippedPlan.length;
 
   for (const p of payouts) {
     if (paid.has(p.hash)) continue;
@@ -250,11 +159,7 @@ export async function readPoolDeposits(rpcKey: string, pool: PoolKeys): Promise<
   return out;
 }
 
-/**
- * Refund the uncredited XNO (rejected/over-sent buys) back to each sender from
- * the token's pool account. Idempotent: once refunded, the deposit ledger entry
- * is removed so it is not refunded twice.
- */
+/** Refund uncredited XNO (rejected buys) back to each sender, idempotently. */
 export async function refundRejectedBuys(
   rpcKey: string,
   pool: PoolKeys,

@@ -37,6 +37,8 @@ nano/.keys.json
 nano/web/.next/
 
 # Nano local runtime state
+nano/data/
+nano/web/data/
 nano/.paid.json
 nano/.tokens.json
 nano/web/.tokens.json

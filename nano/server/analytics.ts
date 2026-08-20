@@ -48,15 +48,24 @@ export function marketCapOf(priceRaw: bigint, supply: bigint, decimals: number):
   return (priceRaw * supply) / 10n ** BigInt(decimals);
 }
 
+export interface SellPayout {
+  tokenId: string;
+  to: string; // seller (recipient of XNO)
+  amountRaw: bigint; // exact XNO-out at the sell's execution point
+  hash: string; // sell block hash (idempotency key)
+}
+
 export interface Analytics {
   state: MultiState;
   byToken: Map<string, TokenAnalytics>;
+  sellPayouts: SellPayout[];
 }
 
 export function analyze(events: IndexedEvent[]): Analytics {
   let s = multiEmpty();
   const seriesMap = new Map<string, PricePoint[]>();
   const lastTimeMap = new Map<string, number>();
+  const sellPayouts: SellPayout[] = [];
   const tradesMap = new Map<string, TradeEvent[]>();
   const buyVol = new Map<string, bigint>();
   const sellVol = new Map<string, bigint>();
@@ -70,6 +79,14 @@ export function analyze(events: IndexedEvent[]): Analytics {
   };
 
   for (const ev of events) {
+    let out: bigint | null = null;
+    if (ev.op.kind === "sell") {
+      const pre = s.get(ev.tokenId);
+      if (pre && pre.poolXno > 0n && pre.poolTokens > 0n) {
+        out = (ev.op.tokens * pre.poolXno) / (pre.poolTokens + ev.op.tokens);
+      }
+    }
+
     let next;
     try {
       next = applyBlock(s, ev);
@@ -79,6 +96,12 @@ export function analyze(events: IndexedEvent[]): Analytics {
     s = next;
     const st = s.get(ev.tokenId);
     if (!st) continue;
+
+    // Exact XNO-out computed at the sell's execution point (pre-sell reserves),
+    // so a batch of sells is paid path-dependently, not against final reserves.
+    if (out !== null) {
+      sellPayouts.push({ tokenId: ev.tokenId, to: ev.sender, amountRaw: out, hash: ev.hash });
+    }
 
     if ((ev.op.kind === "buy" || ev.op.kind === "sell" || ev.op.kind === "seedLiq" || ev.op.kind === "addLiq") && st.poolTokens > 0n) {
       const price = priceOf(st.poolXno, st.poolTokens, st.decimals);
@@ -132,5 +155,5 @@ export function analyze(events: IndexedEvent[]): Analytics {
     });
   }
 
-  return { state: s, byToken };
+  return { state: s, byToken, sellPayouts };
 }

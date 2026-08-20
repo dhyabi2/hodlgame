@@ -58,6 +58,7 @@ interface Token {
   creator: string;
   creatorShare: string;
   supply: string;
+  treasury: string;
   poolXno: string;
   poolTokens: string;
   price: string;
@@ -255,11 +256,25 @@ export default function Home() {
 
   const connect = () => {
     try {
-      setKeys(keysFromSeed(seed.trim()));
+      const k = keysFromSeed(seed.trim());
+      setKeys(k);
+      localStorage.setItem("holdfun_seed", seed.trim());
     } catch {
       say("bad seed");
     }
   };
+
+  useEffect(() => {
+    const s = localStorage.getItem("holdfun_seed");
+    if (s) {
+      setSeed(s);
+      try {
+        setKeys(keysFromSeed(s));
+      } catch {
+        localStorage.removeItem("holdfun_seed");
+      }
+    }
+  }, []);
 
   async function submitBlock(link: string, balanceDelta: bigint): Promise<string> {
     if (!keys) throw new Error("connect first");
@@ -309,7 +324,16 @@ export default function Home() {
             + Start a new coin
           </button>
           {keys ? (
-            <span className="text-xs text-zinc-400 font-mono truncate max-w-[180px]">{short(keys.address)}</span>
+            <button
+              className="text-xs text-zinc-400 font-mono truncate max-w-[180px] hover:text-zinc-200"
+              title="copy address"
+              onClick={() => {
+                navigator.clipboard?.writeText(keys.address);
+                say(`copied ${short(keys.address)}`);
+              }}
+            >
+              {short(keys.address)}
+            </button>
           ) : (
             <span className="text-xs text-zinc-500">connect wallet</span>
           )}
@@ -385,6 +409,7 @@ function WalletPanel({
           const s = genSeed();
           setSeed(s);
           setKeys(keysFromSeed(s));
+          localStorage.setItem("holdfun_seed", s);
         }}
       >
         New
@@ -479,6 +504,8 @@ function TokenDetail({
   const [amount, setAmount] = useState("");
   const [tab, setTab] = useState<"trade" | "thread">("trade");
   const [slippage, setSlippage] = useState("0");
+  const [sendTo, setSendTo] = useState("");
+  const [sendAmount, setSendAmount] = useState("");
 
   const myHolding = keys ? token.topHolders.find((h) => h.account === keys.address) : undefined;
 
@@ -542,6 +569,22 @@ function TokenDetail({
       }
     } catch (e: any) {
       say("sell failed: " + e.message);
+    }
+  }
+
+  async function transfer() {
+    const to = sendTo.trim();
+    const raw = BigInt(Math.floor(Number(sendAmount || "0") * 10 ** token.decimals)) || 0n;
+    if (!to || raw <= 0n) return say("enter recipient address + amount");
+    if (!to.startsWith("nano_")) return say("recipient must be a nano_ address");
+    try {
+      const link = await registerCommit(token.tokenId, { kind: "transfer", to, amount: raw });
+      const hash = await submitBlock(link, 1n);
+      say(`sent ✓ ${hash.slice(0, 10)}…`);
+      setSendAmount("");
+      setSendTo("");
+    } catch (e: any) {
+      say("send failed: " + e.message);
     }
   }
 
@@ -626,6 +669,17 @@ function TokenDetail({
         )}
       </div>
 
+      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-5 space-y-2">
+        <p className="text-sm font-bold text-zinc-300">Send tokens</p>
+        <input className={inputC} placeholder="nano_… recipient" value={sendTo} onChange={(e) => setSendTo(e.target.value)} />
+        <div className="flex gap-2">
+          <input className={inputC} placeholder="amount" inputMode="decimal" value={sendAmount} onChange={(e) => setSendAmount(e.target.value)} />
+          <button className="rounded-xl bg-zinc-800 px-4 py-3 text-sm font-bold hover:bg-zinc-700 shrink-0 disabled:opacity-40" disabled={busy} onClick={transfer}>
+            Send
+          </button>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <TradesPanel trades={token.trades} />
         <HoldersPanel holders={token.topHolders} creator={token.creator} decimals={token.decimals} />
@@ -643,15 +697,17 @@ function SocialLink({ href, label }: { href: string; label: string }) {
 }
 
 function ProgressBar({ token }: { token: Token }) {
-  // Cosmetic bonding meter: market cap toward a ~69 XNO graduation target.
-  const target = 69n * 10n ** 30n;
-  const mc = BigInt(token.marketCap);
-  const pct = mc >= target ? 100 : Number((mc * 100n) / target);
+  // Honest "bonding" metric: how much of the creator's treasury has been seeded
+  // into the AMM pool. initialTreasury = supply - creatorShare (the 95%).
+  const initialTreasury = BigInt(token.supply) - BigInt(token.creatorShare);
+  const treasury = BigInt(token.treasury);
+  const graduated = initialTreasury > 0n && treasury === 0n;
+  const pct = initialTreasury > 0n ? Number(((initialTreasury - treasury) * 100n) / initialTreasury) : 100;
   return (
     <div className="mt-3">
       <div className="flex items-center justify-between text-[11px] text-zinc-500 mb-1">
-        <span>bonding curve progress</span>
-        <span>{pct.toFixed(2)}%</span>
+        <span>{graduated ? "graduated · liquidity locked" : "liquidity ramp"}</span>
+        <span>{graduated ? "100%" : `${pct.toFixed(2)}%`}</span>
       </div>
       <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
         <div className="h-full bg-gradient-to-r from-green-500 to-emerald-300" style={{ width: `${Math.min(100, pct)}%` }} />

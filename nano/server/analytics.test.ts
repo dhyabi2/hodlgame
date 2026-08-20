@@ -59,4 +59,34 @@ const { state, byToken } = analyze(events);
   }
 }
 
+// 5. sell payouts are computed at each sell's execution point (path-dependent).
+{
+  const flow: IndexedEvent[] = [
+    ev(TA, { kind: "launch", supply: 1_000_000_000_000n, name: "A", symbol: "A", decimals: 6, image: "" }, CREATOR, 1n),
+    ev(TA, { kind: "seedLiq", xno: 1_000_000_000n, tokens: 950_000_000_000n }, CREATOR, 2n),
+    ev(TA, { kind: "sell", tokens: 10_000_000_000n, minXno: 0n }, CREATOR, 3n),
+    ev(TA, { kind: "sell", tokens: 10_000_000_000n, minXno: 0n }, ALICE, 4n),
+  ];
+  // ALICE needs tokens: buy after the sells, or give her balance via transfer.
+  // Simpler: both sells from CREATOR.
+  flow[3] = ev(TA, { kind: "sell", tokens: 10_000_000_000n, minXno: 0n }, CREATOR, 4n);
+
+  const { sellPayouts } = analyze(flow);
+  assert.equal(sellPayouts.length, 2, "two sells recorded");
+
+  let xno = 1_000_000_000n;
+  let tokens = 950_000_000_000n;
+  const expected = sellPayouts.map((p) => {
+    const out = (10_000_000_000n * xno) / (tokens + 10_000_000_000n);
+    xno -= out;
+    tokens += 10_000_000_000n;
+    return out;
+  });
+
+  assert.equal(sellPayouts[0].amountRaw, expected[0], "first sell against seed reserves");
+  assert.equal(sellPayouts[1].amountRaw, expected[1], "second sell against post-first reserves");
+  assert.ok(sellPayouts[1].amountRaw < sellPayouts[0].amountRaw, "sequential sells pay decreasing XNO (slippage)");
+  assert.equal(sellPayouts[0].to, CREATOR, "payout goes to seller");
+}
+
 console.log("✅ analytics tests passed");

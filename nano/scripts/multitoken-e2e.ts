@@ -13,6 +13,7 @@ import { NanoRpcSource } from "../indexer/blockSource";
 import { encodeOpLink } from "../core/oplink";
 import { commitLink } from "../core/commit";
 import { tokenIdFromLaunchHash } from "../core/token";
+import { analyze } from "../server/analytics";
 import { loadNanoRpcKey, nanoRpc, SEND_DIFFICULTY } from "../lib/rpc";
 
 const SEED_XNO = "1000000000000000000000000000"; // 0.001 XNO raw
@@ -123,9 +124,10 @@ async function main() {
   }
   console.log("state:", s.name, "supply", s.supply.toString(), "poolXno", s.poolXno.toString(), "poolTokens", s.poolTokens.toString());
 
-  // 6. per-token payout.
-  const sells = await idx.collectSells([creator.address]);
-  const { paid, skipped } = await payoutSellsMulti(key, masterSeed, idx.getState(), sells, []);
+  // 6. per-token payout (exact XNO-out from the deterministic replay).
+  const events = await idx.collectEvents([creator.address]);
+  const { sellPayouts } = analyze(events);
+  const { paid, skipped } = await payoutSellsMulti(key, masterSeed, sellPayouts, []);
   console.log("sell payouts broadcast:", paid.length, "(skipped:", skipped + ")");
 
   const pending = await nanoRpc(key, { action: "pending", account: creator.address, count: 50, source: true });
