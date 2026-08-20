@@ -35,9 +35,9 @@ Directory, so pick one:
 
 | var | value |
 |---|---|
-| `STORE` | `postgres` |
-| `POSTGRES_URL` | from **Vercel Postgres** (Neon) |
-| `POSTGRES_URL_NON_POOLING` | from **Vercel Postgres** |
+| `STORE` | `kv` |
+| `KV_REST_API_URL` | from **Vercel KV** (auto on Vercel) |
+| `KV_REST_API_TOKEN` | from **Vercel KV** (auto on Vercel) |
 | `NANO_RPC_KEY` | rpc.nano.to API key |
 | `POOL_SEED` | 64-hex operator master seed (pool key derivation only) |
 | `WATCHED_ACCOUNTS` | comma-separated Nano accounts the indexer watches |
@@ -54,12 +54,12 @@ Directory, so pick one:
 | `GUARDIAN_SEED` | independent 64-hex key (NOT derived from the master) |
 | `GUARDIAN_KEY` | shared secret matching the operator's `GUARDIAN_KEYS` |
 | `GUARDED_POOLS` | comma-separated `nano_…` pool accounts it co-guards |
-| `STORE` | `postgres` + `POSTGRES_URL` (for durable nonce/replay protection) |
+| `STORE` | `kv` (durable nonce/replay protection) |
 
-## Database schema
+## Storage
 
-Auto-created on first use: `holdfun_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)`.
-For production you can pre-create it in the Vercel Postgres console.
+Each record is stored under a `holdfun:<name>` key in **Vercel KV** (Upstash),
+BigInt-safe via `core/json`. No schema needed.
 
 ## Cron
 

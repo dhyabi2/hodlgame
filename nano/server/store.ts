@@ -1,5 +1,5 @@
 // Durable store. Async API so the same code runs on a local filesystem (default,
-// for tests/self-host) or Vercel Postgres (STORE=postgres + POSTGRES_URL).
+// for tests/self-host) or Vercel KV (STORE=kv + KV_REST_API_URL/TOKEN).
 // BigInt-safe via core/json. Swap in another DB by reimplementing load/save.
 
 import * as fs from "node:fs";
@@ -11,30 +11,28 @@ function dir(): string {
   return process.env.DATA_DIR ?? path.join(process.cwd(), "data");
 }
 
-// --- Vercel Postgres backend ---
-let pgSql: any = null;
-let pgChecked = false;
+// --- Vercel KV backend ---
+let kvClient: any = null;
+let kvChecked = false;
 
-async function getPg(): Promise<any | null> {
-  if (pgChecked) return pgSql;
-  pgChecked = true;
-  if (process.env.STORE !== "postgres") return null;
+async function getKv(): Promise<any | null> {
+  if (kvChecked) return kvClient;
+  kvChecked = true;
+  if (process.env.STORE !== "kv") return null;
   try {
-    const { sql } = require("@vercel/postgres");
-    await sql`CREATE TABLE IF NOT EXISTS holdfun_kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)`;
-    pgSql = sql;
+    kvClient = require("@vercel/kv").kv;
   } catch {
-    pgSql = null;
+    kvClient = null;
   }
-  return pgSql;
+  return kvClient;
 }
 
 export async function loadJson<T>(name: string): Promise<T | null> {
-  const s = await getPg();
-  if (s) {
+  const kv = await getKv();
+  if (kv) {
     try {
-      const r = await s`SELECT value FROM holdfun_kv WHERE key = ${name}`;
-      return r.rowCount > 0 ? parse<T>(r.rows[0].value) : null;
+      const v = await kv.get(`holdfun:${name}`);
+      return typeof v === "string" ? parse<T>(v) : null;
     } catch {
       return null;
     }
@@ -47,12 +45,9 @@ export async function loadJson<T>(name: string): Promise<T | null> {
 }
 
 export async function saveJson(name: string, value: unknown): Promise<void> {
-  const s = await getPg();
-  if (s) {
-    await s`
-      INSERT INTO holdfun_kv (key, value) VALUES (${name}, ${stringify(value)})
-      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-    `;
+  const kv = await getKv();
+  if (kv) {
+    await kv.set(`holdfun:${name}`, stringify(value));
     return;
   }
   await fs.promises.mkdir(dir(), { recursive: true });
