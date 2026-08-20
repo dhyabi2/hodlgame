@@ -79,13 +79,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { account: acct, balance: bal.toString() });
     }
     if (url.pathname === "/sweep" && req.method === "POST") {
-      const key = loadNanoRpcKey();
-      const p = pool();
-      if (!p) return json(res, 400, { error: "POOL_SEED not set" });
-      const poolKeys = poolKeysFromSeed(process.env.POOL_SEED!);
-      const received = await receivePoolPending(key, poolKeys);
-      const { paid, skipped } = await payoutSells(key, poolKeys, meta(), watched(), []);
-      return json(res, 200, { received, paid, skipped });
+      return json(res, 200, await runSweep());
     }
     return json(res, 404, { error: "not found" });
   } catch (e: any) {
@@ -93,8 +87,40 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+async function runSweep() {
+  const key = loadNanoRpcKey();
+  const p = pool();
+  if (!p) return { error: "POOL_SEED not set" };
+  const poolKeys = poolKeysFromSeed(process.env.POOL_SEED!);
+  const received = await receivePoolPending(key, poolKeys);
+  const { paid, skipped } = await payoutSells(key, poolKeys, meta(), watched(), []);
+  return { received, paid, skipped };
+}
+
+/** Background loop: sweep every SWEEP_SECONDS (default 30s). */
+function startSweepLoop() {
+  const seconds = Number(process.env.SWEEP_SECONDS ?? 30);
+  if (!process.env.POOL_SEED) {
+    console.log("sweep loop disabled (no POOL_SEED)");
+    return;
+  }
+  const tick = async () => {
+    try {
+      const r = await runSweep();
+      if (r.received?.length || r.paid?.length) {
+        console.log("sweep:", JSON.stringify(r));
+      }
+    } catch (e: any) {
+      console.log("sweep error:", e?.message ?? e);
+    }
+  };
+  setInterval(tick, seconds * 1000);
+  tick();
+}
+
 server.listen(PORT, () => {
   console.log(`HoldFun operator listening on :${PORT}`);
   console.log("pool:", pool()?.address ?? "(not set — set POOL_SEED)");
   console.log("watched accounts:", watched());
+  startSweepLoop();
 });
