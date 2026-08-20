@@ -3,10 +3,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import * as nanocurrency from "nanocurrency";
 import dynamic from "next/dynamic";
-import { encodeOpLink } from "../../core/oplink";
-import { tokenIdFromLaunchHash } from "../../core/token";
-import { stringify } from "../../core/json";
-import type { Op } from "../../core/ops";
+import { encodeOpLink } from "../core/oplink";
+import { tokenIdFromLaunchHash } from "../core/token";
+import { stringify } from "../core/json";
+import type { Op } from "../core/ops";
 import { Sparkline } from "./components/Sparkline";
 import { loadWallet, saveWallet, removeWallet, encryptSeed, decryptSeed } from "./lib/wallet";
 
