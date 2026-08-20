@@ -22,8 +22,8 @@ Each operation is a Nano **state block** where:
 |---|---|
 | `account` | the sender (creator for launch, any holder for others) |
 | `previous` | per-account nonce → gives free double-spend rejection |
-| `link` (32B) | `op(1B) ‖ payload(31B)` |
-| `representative` (32B) | `token_id(32B)` — the mint account pubkey (or launch block hash) |
+| `link` (32B) | `opcode(1B) ‖ tokenId(16B) ‖ amount(15B)` (see §2.1) |
+| `representative` (32B) | ordinary Nano representative (self for data blocks) |
 | `balance` | 0 (data-only block; buys instead carry the XNO value) |
 
 Op codes: `launch=0x01, transfer=0x02, buy=0x03, sell=0x04, stake=0x05,
@@ -32,6 +32,37 @@ unstake=0x06, claim=0x07, seedLiq=0x08, addLiq=0x09`.
 Ops that don't fit 31 bytes (e.g. `launch` with name/IPFS CID) are encoded as
 **commit-reveal**: `link = blake2b(payload)`, and the payload is fetched from any
 indexer (who re-checks the commitment). BlackBird uses the same pattern.
+
+### 2.1 Multi-token identity & routing
+
+- **tokenId** = the first **16 bytes (128 bits)** of the token's `launch` block
+  hash — deterministic on-chain, derivable by any indexer, no registry needed.
+  (`core/token.ts` `tokenIdFromLaunchHash`.)
+- `launch` carries **no** tokenId in `link` (that slot is zero); the id exists
+  only after the launch block is signed/broadcast.
+- Every subsequent op (`buy`/`sell`/`stake`/…) carries its `tokenId` in the
+  `link` high bytes, so the indexer routes the op to that token's own `State`.
+- Compact ops carry **one** amount; `buy.minTokens` / `sell.minXno` (slippage)
+  are not representable and decode to `0` — reserved for commit-reveal.
+- Two-amount / string ops (`seedLiq`, `addLiq`, `transfer`) use **commit-reveal**
+  (`core/commit.ts`): `link = 0xFF ‖ blake2b(tokenId ‖ encodeOp(op))[0..30]`. The
+  `0xFF` prefix disambiguates from compact opcodes (`0x01..0x09`). The full op is
+  served off-chain and re-verified against the commitment.
+- Indexer state is a `MultiState = Map<tokenId, State>` (`core/multi.ts`); each
+  token has its own `supply`/`poolXno`/`poolTokens`/`balances`/`treasury` and its
+  own XNO pool account.
+
+### 2.2 Per-token custody (HD)
+
+A single master seed (`POOL_SEED`) derives every token's XNO pool key:
+
+```
+poolSeedForToken(master, tokenId) = blake2b-256(master ‖ tokenId)
+tokenPoolKeys(master, tokenId)    = keysFromSeed(poolSeedForToken(...))
+```
+
+No per-token secrets are stored; the operator can sign payouts for any token from
+the master seed alone (`core/../server/custody.ts`).
 
 ## 3. State
 

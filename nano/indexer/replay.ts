@@ -5,6 +5,7 @@
 // canonical state of everything that came before the bad block.
 
 import { applyOp, emptyState, type State } from "../core/state";
+import { applyBlock, multiEmpty, type MultiState, type MultiBlock } from "../core/multi";
 import type { Op } from "../core/ops";
 
 export interface ReplayEvent {
@@ -25,6 +26,24 @@ export function replay(events: ReplayEvent[]): ReplayResult {
     const e = events[i];
     try {
       state = applyOp(state, e.op, e.sender, e.height);
+    } catch (err) {
+      invalid.push({
+        index: i,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return { state, invalid };
+}
+
+/** Multi-token fold: each block carries its tokenId and routes to that token. */
+export function replayMulti(events: MultiBlock[]): { state: MultiState; invalid: { index: number; reason: string }[] } {
+  let state = multiEmpty();
+  const invalid: { index: number; reason: string }[] = [];
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    try {
+      state = applyBlock(state, e);
     } catch (err) {
       invalid.push({
         index: i,

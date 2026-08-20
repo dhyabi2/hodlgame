@@ -6,6 +6,7 @@
 // signature.
 
 import * as nanocurrency from "nanocurrency";
+import { blake2bHex } from "blakejs";
 import { keysFromSeed } from "../client/nano";
 import { nanoRpc } from "../lib/rpc";
 
@@ -18,6 +19,20 @@ export interface PoolKeys {
 export function poolKeysFromSeed(seed: string): PoolKeys {
   const k = keysFromSeed(seed);
   return { address: k.address, publicKey: k.publicKey, secretKey: k.secretKey };
+}
+
+/**
+ * Deterministically derive a distinct pool key for a token from a master seed.
+ * `poolSeedForToken(master, tokenId) = blake2b(master ‖ tokenId)` — so each
+ * token's XNO pool is its own Nano account, recoverable from the master seed
+ * alone (HD-style; no per-token secret storage).
+ */
+export function poolSeedForToken(masterSeed: string, tokenId: string): string {
+  return blake2bHex(Buffer.from(masterSeed + tokenId, "hex"), undefined, 32);
+}
+
+export function tokenPoolKeys(masterSeed: string, tokenId: string): PoolKeys {
+  return poolKeysFromSeed(poolSeedForToken(masterSeed, tokenId));
 }
 
 export interface Payout {

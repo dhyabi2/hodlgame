@@ -35,3 +35,9 @@ archive/solana/app/tsconfig.tsbuildinfo
 # Nano local secrets (account keys + rpc.nano.to API key)
 nano/.keys.json
 nano/web/.next/
+
+# Nano local runtime state
+nano/.paid.json
+nano/.tokens.json
+nano/web/.tokens.json
+nano/web/tsconfig.tsbuildinfo

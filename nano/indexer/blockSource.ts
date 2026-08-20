@@ -67,22 +67,21 @@ export class NanoRpcSource implements BlockSource {
       >;
     };
 
-    return hashes
-      .map((hash) => {
-        const b = info.blocks?.[hash];
-        if (!b) return null;
-        return {
-          account: b.block_account,
-          hash,
-          previous: b.contents?.previous ?? "",
-          link: b.contents?.link ?? "",
-          representative: b.contents?.representative ?? "",
-          height: BigInt(b.height),
-          timestamp: b.local_timestamp,
-        } satisfies NanoBlock;
-      })
-      .filter((b): b is NanoBlock => b !== null)
-      .sort((a, b) => (a.height < b.height ? -1 : 1));
+    const blocks: NanoBlock[] = [];
+    for (const hash of hashes) {
+      const b = info.blocks?.[hash];
+      if (!b) continue;
+      blocks.push({
+        account: b.block_account,
+        hash,
+        previous: b.contents?.previous ?? "",
+        link: b.contents?.link ?? "",
+        representative: b.contents?.representative ?? "",
+        height: BigInt(b.height),
+        timestamp: b.local_timestamp,
+      });
+    }
+    return blocks.sort((a, b) => (a.height < b.height ? -1 : 1));
   }
 }
 

@@ -1,57 +1,76 @@
-// Operator server: indexer + single-key custody behind a minimal HTTP API.
+// Operator server: multi-token indexer + per-token custody behind a minimal HTTP API.
 //
-//   NANO_RPC_KEY=... POOL_SEED=<32B hex> TOKEN_NAME=... TOKEN_SYMBOL=... \
-//   WATCHED_ACCOUNTS=comma,sep npm run operator
+//   NANO_RPC_KEY=... POOL_SEED=<64B hex master seed> WATCHED_ACCOUNTS=comma,sep \
+//   npm run operator
 //
 // Endpoints:
 //   GET  /health                 liveness
-//   GET  /state                  replayed token state
-//   GET  /balance/:account       a user's token balance
-//   POST /sweep                  process sells → sign + broadcast XNO payouts
+//   GET  /tokens                 all tokens (summary)
+//   GET  /state?token=<id>       one token's full state (omit token → summaries)
+//   GET  /balance?token=<id>&account=<nano_…>   a user's token balance
+//   POST /sweep?token=<id>       receive buys + pay sells (omit token → all)
 
 import * as http from "node:http";
-import { replayState } from "./indexer";
-import { poolKeysFromSeed } from "./custody";
-import { receivePoolPending, payoutSells } from "./sweep";
-import { loadNanoRpcKey, nanoRpc } from "../lib/rpc";
-import { keysFromSeed } from "../client/nano";
+import { MultiIndexer } from "../indexer/multiIndexer";
+import { NanoRpcSource } from "../indexer/blockSource";
+import type { State } from "../core/state";
+import { receivePoolsMulti, payoutSellsMulti } from "./sweep";
+import { loadNanoRpcKey } from "../lib/rpc";
 
 const PORT = Number(process.env.PORT ?? 8080);
-
-function meta() {
-  return {
-    name: process.env.TOKEN_NAME ?? "HoldFun",
-    symbol: process.env.TOKEN_SYMBOL ?? "HOLD",
-    decimals: Number(process.env.TOKEN_DECIMALS ?? 6),
-    image: process.env.TOKEN_IMAGE ?? "",
-  };
-}
 
 function watched(): string[] {
   const raw = process.env.WATCHED_ACCOUNTS ?? "";
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
-function pool(): { address: string; publicKey: string } | null {
-  const seed = process.env.POOL_SEED;
-  if (!seed) return null;
-  const k = poolKeysFromSeed(seed);
-  return { address: k.address, publicKey: k.publicKey };
+async function indexer(): Promise<MultiIndexer> {
+  const idx = new MultiIndexer(new NanoRpcSource(loadNanoRpcKey()));
+  await idx.sync(watched());
+  return idx;
 }
 
-async function state() {
-  const key = loadNanoRpcKey();
-  const { state } = await replayState(key, meta(), watched());
+function mapToObj(m: Map<string, bigint>): Record<string, string> {
+  const o: Record<string, string> = {};
+  for (const [k, v] of m) o[k] = v.toString();
+  return o;
+}
+
+function serializeState(s: State, tokenId: string): Record<string, unknown> {
   return {
-    launched: state.launched,
+    tokenId,
+    name: s.name,
+    symbol: s.symbol,
+    decimals: s.decimals,
+    image: s.image,
+    launched: s.launched,
+    supply: s.supply.toString(),
+    creator: s.creator,
+    creatorShare: s.creatorShare.toString(),
+    treasury: s.treasury.toString(),
+    rebateVault: s.rebateVault.toString(),
+    poolXno: s.poolXno.toString(),
+    poolTokens: s.poolTokens.toString(),
+    totalStaked: s.totalStaked.toString(),
+    totalPoints: s.totalPoints.toString(),
+    rewardPerPoint: s.rewardPerPoint.toString(),
+    height: s.height.toString(),
+    balances: mapToObj(s.balances),
+    staked: mapToObj(s.staked),
+    points: mapToObj(s.points),
+  };
+}
+
+function summary(state: State, tokenId: string): Record<string, unknown> {
+  return {
+    tokenId,
     name: state.name,
     symbol: state.symbol,
+    launched: state.launched,
     supply: state.supply.toString(),
     creator: state.creator,
     creatorShare: state.creatorShare.toString(),
     treasury: state.treasury.toString(),
-    rebateVault: state.rebateVault.toString(),
-    totalStaked: state.totalStaked.toString(),
     poolXno: state.poolXno.toString(),
     poolTokens: state.poolTokens.toString(),
   };
@@ -66,20 +85,35 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   try {
     if (url.pathname === "/health") {
-      return json(res, 200, { ok: true, pool: pool()?.address ?? null });
+      return json(res, 200, { ok: true, poolSeed: Boolean(process.env.POOL_SEED) });
+    }
+    if (url.pathname === "/tokens") {
+      const idx = await indexer();
+      const out = [...idx.getState()].map(([tokenId, s]) => summary(s, tokenId));
+      return json(res, 200, out);
     }
     if (url.pathname === "/state") {
-      return json(res, 200, await state());
+      const idx = await indexer();
+      const tokenId = url.searchParams.get("token");
+      if (!tokenId) {
+        return json(res, 200, [...idx.getState()].map(([id, s]) => summary(s, id)));
+      }
+      const s = idx.getState().get(tokenId);
+      return s
+        ? json(res, 200, serializeState(s, tokenId))
+        : json(res, 404, { error: "unknown token" });
     }
-    if (url.pathname.startsWith("/balance/")) {
-      const acct = url.pathname.slice("/balance/".length);
-      const key = loadNanoRpcKey();
-      const { state } = await replayState(key, meta(), watched());
-      const bal = state.balances.get(acct) ?? 0n;
-      return json(res, 200, { account: acct, balance: bal.toString() });
+    if (url.pathname === "/balance") {
+      const tokenId = url.searchParams.get("token");
+      const account = url.searchParams.get("account");
+      if (!tokenId || !account) return json(res, 400, { error: "token and account required" });
+      const idx = await indexer();
+      const s = idx.getState().get(tokenId);
+      if (!s) return json(res, 404, { error: "unknown token" });
+      return json(res, 200, { tokenId, account, balance: (s.balances.get(account) ?? 0n).toString() });
     }
     if (url.pathname === "/sweep" && req.method === "POST") {
-      return json(res, 200, await runSweep());
+      return json(res, 200, await runSweep(url.searchParams.get("token")));
     }
     return json(res, 404, { error: "not found" });
   } catch (e: any) {
@@ -87,13 +121,16 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-async function runSweep() {
-  const key = loadNanoRpcKey();
-  const p = pool();
-  if (!p) return { error: "POOL_SEED not set" };
-  const poolKeys = poolKeysFromSeed(process.env.POOL_SEED!);
-  const received = await receivePoolPending(key, poolKeys);
-  const { paid, skipped } = await payoutSells(key, poolKeys, meta(), watched(), []);
+async function runSweep(onlyToken: string | null) {
+  const masterSeed = process.env.POOL_SEED;
+  if (!masterSeed) return { error: "POOL_SEED not set" };
+  const idx = await indexer();
+  const known = [...idx.getState().keys()];
+  const targets = onlyToken ? (known.includes(onlyToken) ? [onlyToken] : []) : known;
+  const received = await receivePoolsMulti(loadNanoRpcKey(), masterSeed, targets);
+  const sells = await idx.collectSells(watched());
+  const filt = onlyToken ? sells.filter((s) => s.tokenId === onlyToken) : sells;
+  const { paid, skipped } = await payoutSellsMulti(loadNanoRpcKey(), masterSeed, idx.getState(), filt, []);
   return { received, paid, skipped };
 }
 
@@ -106,7 +143,7 @@ function startSweepLoop() {
   }
   const tick = async () => {
     try {
-      const r = await runSweep();
+      const r = await runSweep(null);
       if (r.received?.length || r.paid?.length) {
         console.log("sweep:", JSON.stringify(r));
       }
@@ -119,8 +156,7 @@ function startSweepLoop() {
 }
 
 server.listen(PORT, () => {
-  console.log(`HoldFun operator listening on :${PORT}`);
-  console.log("pool:", pool()?.address ?? "(not set — set POOL_SEED)");
+  console.log(`HoldFun multi-token operator listening on :${PORT}`);
   console.log("watched accounts:", watched());
   startSweepLoop();
 });

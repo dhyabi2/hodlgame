@@ -7,10 +7,13 @@
 // Paid sells are tracked in a local file so a crash doesn't double-pay.
 
 import * as fs from "node:fs";
-import { poolKeysFromSeed, signPayout, broadcastPayout, type PoolKeys } from "./custody";
+import { poolKeysFromSeed, tokenPoolKeys, signPayout, broadcastPayout, type PoolKeys } from "./custody";
 import { replayState, readOps } from "./indexer";
+import { planSellPayouts } from "./plan";
 import { applyOp, emptyState, type State } from "../core/state";
 import { decodeOpCompact } from "../core/compact";
+import type { MultiState } from "../core/multi";
+import type { SellRecord } from "../indexer/multiIndexer";
 import { nanoRpc, SEND_DIFFICULTY } from "../lib/rpc";
 
 const PAID_FILE = ".paid.json";
@@ -130,6 +133,62 @@ export async function payoutSells(
     paidOut.push(hash);
     paid.add(s.hash);
     poolInfo = { ...poolInfo, frontier: hash, balance: (BigInt(poolInfo.balance) - out).toString() };
+  }
+
+  savePaid(paid);
+  return { paid: paidOut, skipped };
+}
+
+/** Receive pending XNO (buys) into every token's own pool account. */
+export async function receivePoolsMulti(
+  rpcKey: string,
+  masterSeed: string,
+  tokenIds: string[]
+): Promise<string[]> {
+  const hashes: string[] = [];
+  for (const tokenId of tokenIds) {
+    const pool = tokenPoolKeys(masterSeed, tokenId);
+    hashes.push(...(await receivePoolPending(rpcKey, pool)));
+  }
+  return hashes;
+}
+
+/**
+ * Payout sells per token, signing each from that token's own pool account.
+ * Uses planSellPayouts (pure) then broadcasts the planned sends.
+ */
+export async function payoutSellsMulti(
+  rpcKey: string,
+  masterSeed: string,
+  state: MultiState,
+  sells: SellRecord[],
+  cosignerSeeds: string[] = []
+): Promise<{ paid: string[]; skipped: number }> {
+  const paid = loadPaid();
+  const paidOut: string[] = [];
+  let skipped = 0;
+
+  const { payouts, skipped: skippedPlan } = planSellPayouts(state, sells);
+  skipped += skippedPlan.length;
+
+  for (const p of payouts) {
+    if (paid.has(p.hash)) continue;
+    const pool = tokenPoolKeys(masterSeed, p.tokenId);
+    const poolInfo = await nanoRpc(rpcKey, { action: "account_info", account: pool.address, representative: "true" }).catch(() => null);
+    if (!poolInfo?.frontier) {
+      skipped++;
+      continue;
+    }
+    const payout = await signPayout(pool, {
+      to: p.to,
+      amountRaw: p.amountRaw.toString(),
+      frontier: poolInfo.frontier,
+      balance: poolInfo.balance,
+      representative: poolInfo.representative,
+    }, rpcKey, cosignerSeeds);
+    const hash = await broadcastPayout(rpcKey, payout);
+    paidOut.push(hash);
+    paid.add(p.hash);
   }
 
   savePaid(paid);
