@@ -4,7 +4,7 @@
   "private": true,
   "description": "HoldFun Nano (XNO) Layer-2 — deterministic token ledger, indexer, client",
   "scripts": {
-    "test": "tsx core/state.test.ts && tsx core/encoding.test.ts && tsx core/compact.test.ts && tsx core/commit.test.ts && tsx core/multi.test.ts && tsx core/oplink.test.ts && tsx indexer/indexer.test.ts && tsx indexer/multiIndexer.test.ts && tsx server/tokenCustody.test.ts && tsx server/plan.test.ts && tsx server/analytics.test.ts && tsx server/commits.test.ts && tsx client/nano.test.ts",
+    "test": "tsx core/state.test.ts && tsx core/encoding.test.ts && tsx core/compact.test.ts && tsx core/commit.test.ts && tsx core/multi.test.ts && tsx core/oplink.test.ts && tsx indexer/indexer.test.ts && tsx indexer/multiIndexer.test.ts && tsx server/tokenCustody.test.ts && tsx server/plan.test.ts && tsx server/analytics.test.ts && tsx server/commits.test.ts && tsx server/reconcile.test.ts && tsx client/nano.test.ts",
     "live-smoke": "tsx scripts/live-smoke.ts",
     "e2e-blocks": "tsx scripts/e2e-blocks.ts",
     "sell-e2e": "tsx scripts/sell-e2e.ts",

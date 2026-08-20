@@ -14,7 +14,9 @@ import * as http from "node:http";
 import { MultiIndexer } from "../indexer/multiIndexer";
 import { NanoRpcSource } from "../indexer/blockSource";
 import type { State } from "../core/state";
-import { receivePoolsMulti, payoutSellsMulti } from "./sweep";
+import { tokenPoolKeys } from "./custody";
+import { receivePoolsMulti, payoutSellsMulti, readPoolDeposits, refundRejectedBuys } from "./sweep";
+import { creditedBuys, computeRefunds } from "./reconcile";
 import { commitResolver } from "./commits";
 import { loadNanoRpcKey } from "../lib/rpc";
 
@@ -125,14 +127,37 @@ const server = http.createServer(async (req, res) => {
 async function runSweep(onlyToken: string | null) {
   const masterSeed = process.env.POOL_SEED;
   if (!masterSeed) return { error: "POOL_SEED not set" };
+  const key = loadNanoRpcKey();
   const idx = await indexer();
+  const events = await idx.collectEvents(watched());
+  const credits = creditedBuys(events);
+  const sells = events
+    .filter((e) => e.op.kind === "sell")
+    .map((e) => ({
+      tokenId: e.tokenId,
+      sender: e.sender,
+      tokens: e.op.kind === "sell" ? e.op.tokens : 0n,
+      minXno: e.op.kind === "sell" ? e.op.minXno : 0n,
+      hash: e.hash,
+    }));
+
   const known = [...idx.getState().keys()];
   const targets = onlyToken ? (known.includes(onlyToken) ? [onlyToken] : []) : known;
-  const received = await receivePoolsMulti(loadNanoRpcKey(), masterSeed, targets);
-  const sells = await idx.collectSells(watched());
-  const filt = onlyToken ? sells.filter((s) => s.tokenId === onlyToken) : sells;
-  const { paid, skipped } = await payoutSellsMulti(loadNanoRpcKey(), masterSeed, idx.getState(), filt, []);
-  return { received, paid, skipped };
+
+  const received = await receivePoolsMulti(key, masterSeed, targets);
+
+  const filterFor = (s: typeof sells[number]) => !onlyToken || s.tokenId === onlyToken;
+  const { paid, skipped } = await payoutSellsMulti(key, masterSeed, idx.getState(), sells.filter(filterFor), []);
+
+  const refunds: string[] = [];
+  for (const tokenId of targets) {
+    const pool = tokenPoolKeys(masterSeed, tokenId);
+    const poolReceived = await readPoolDeposits(key, pool);
+    const owed = computeRefunds(poolReceived, credits.get(tokenId) ?? new Map());
+    refunds.push(...(await refundRejectedBuys(key, pool, owed)));
+  }
+
+  return { received, paid, skipped, refunds };
 }
 
 /** Background loop: sweep every SWEEP_SECONDS (default 30s). */
@@ -145,7 +170,7 @@ function startSweepLoop() {
   const tick = async () => {
     try {
       const r = await runSweep(null);
-      if (r.received?.length || r.paid?.length) {
+      if (r.received?.length || r.paid?.length || r.refunds?.length) {
         console.log("sweep:", JSON.stringify(r));
       }
     } catch (e: any) {

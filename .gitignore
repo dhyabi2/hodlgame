@@ -44,5 +44,7 @@ nano/.comments.json
 nano/web/.comments.json
 nano/.commits.json
 nano/web/.commits.json
+nano/.deposits.json
+nano/web/.deposits.json
 nano/web/public/uploads/
 nano/web/tsconfig.tsbuildinfo
