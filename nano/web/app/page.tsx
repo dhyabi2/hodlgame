@@ -67,6 +67,7 @@ interface Token {
   change1h: number | null;
   change24h: number | null;
   createdAt: number;
+  myBalance: string;
   buyVolume: string;
   sellVolume: string;
   holders: number;
@@ -189,7 +190,7 @@ export default function Home() {
   const [detail, setDetail] = useState<Token | null>(null);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<string[]>([]);
-  const [showCreate, setShowCreate] = useState(false);
+  const [tab, setTab] = useState<"explore" | "portfolio" | "create" | "wallet">("explore");
 
   const say = (s: string) => setLog((l) => [...l.slice(-9), s]);
 
@@ -208,19 +209,20 @@ export default function Home() {
     setHasWallet(Boolean(loadWallet()));
   }, []);
 
-  // Feed (SSE with polling fallback).
+  // Feed (SSE with polling fallback) — includes my balance when unlocked.
   useEffect(() => {
+    const acct = keys?.address ?? "";
     let es: EventSource | null = null;
     let poll: ReturnType<typeof setInterval> | null = null;
     const load = async () => {
       try {
-        const j = await (await fetch("/api/state")).json();
+        const j = await (await fetch(`/api/state?account=${acct}`)).json();
         setTokens(j.tokens ?? []);
       } catch {}
     };
     load();
     try {
-      es = new EventSource("/api/stream");
+      es = new EventSource(`/api/stream?account=${acct}`);
       es.onmessage = (e) => {
         const j = JSON.parse(e.data);
         if (j.tokens) setTokens(j.tokens);
@@ -237,10 +239,11 @@ export default function Home() {
       es?.close();
       if (poll) clearInterval(poll);
     };
-  }, []);
+  }, [keys?.address]);
 
   // Detail (SSE with polling fallback).
   useEffect(() => {
+    const acct = keys?.address ?? "";
     if (!selectedId) {
       setDetail(null);
       return;
@@ -249,13 +252,13 @@ export default function Home() {
     let poll: ReturnType<typeof setInterval> | null = null;
     const load = async () => {
       try {
-        const j = await (await fetch(`/api/token?token=${selectedId}`)).json();
+        const j = await (await fetch(`/api/token?token=${selectedId}&account=${acct}`)).json();
         if (j.token) setDetail(j.token);
       } catch {}
     };
     load();
     try {
-      es = new EventSource(`/api/stream?token=${selectedId}`);
+      es = new EventSource(`/api/stream?token=${selectedId}&account=${acct}`);
       es.onmessage = (e) => {
         const j = JSON.parse(e.data);
         if (j.token) setDetail(j.token);
@@ -272,7 +275,7 @@ export default function Home() {
       es?.close();
       if (poll) clearInterval(poll);
     };
-  }, [selectedId]);
+  }, [selectedId, keys?.address]);
 
   async function submitBlock(link: string, balanceDelta: bigint): Promise<string> {
     if (!keys) throw new Error("connect first");
@@ -305,43 +308,34 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-[#050505] text-white">
-      <header className="border-b border-zinc-900 px-6 py-4 flex items-center justify-between sticky top-0 bg-[#050505]/90 backdrop-blur z-10">
+    <main className="min-h-screen bg-[#050505] text-white pb-20">
+      <header className="sticky top-0 z-20 border-b border-zinc-900 px-4 py-3 flex items-center justify-between bg-[#050505]/90 backdrop-blur">
         <div className="flex items-center gap-2">
-          <span className="text-2xl">🎉</span>
-          <span className="text-xl font-black tracking-tight bg-gradient-to-r from-green-400 to-emerald-300 bg-clip-text text-transparent">
+          <span className="text-xl">🎉</span>
+          <span className="text-lg font-black tracking-tight bg-gradient-to-r from-green-400 to-emerald-300 bg-clip-text text-transparent">
             HoldFun
           </span>
-          <span className="text-[11px] text-zinc-500 ml-1">Nano</span>
         </div>
-        <div className="flex items-center gap-2">
+        {keys ? (
           <button
-            className="rounded-xl bg-green-500 px-3 py-2 text-xs font-bold text-black hover:bg-green-400"
-            onClick={() => setShowCreate(true)}
+            className="text-xs text-zinc-300 font-mono hover:text-white"
+            title="copy address"
+            onClick={() => {
+              navigator.clipboard?.writeText(keys.address);
+              say(`copied ${short(keys.address)}`);
+            }}
           >
-            + Start a new coin
+            {short(keys.address)}
           </button>
-          {keys ? (
-            <button
-              className="text-xs text-zinc-400 font-mono truncate max-w-[180px] hover:text-zinc-200"
-              title="copy address"
-              onClick={() => {
-                navigator.clipboard?.writeText(keys.address);
-                say(`copied ${short(keys.address)}`);
-              }}
-            >
-              {short(keys.address)}
-            </button>
-          ) : (
-            <span className="text-xs text-zinc-500">wallet locked</span>
-          )}
-        </div>
+        ) : (
+          <button className="text-xs text-amber-400 font-bold" onClick={() => setTab("wallet")}>
+            🔒 unlock
+          </button>
+        )}
       </header>
 
-      <div className="max-w-5xl mx-auto px-4 py-8 space-y-6">
-        <WalletPanel keys={keys} hasWallet={hasWallet} unlock={unlock} lock={lock} remove={remove} />
-
-        {detail ? (
+      <div className="max-w-2xl mx-auto px-4 py-5">
+        {selectedId && detail ? (
           <TokenDetail
             token={detail}
             keys={keys}
@@ -351,12 +345,28 @@ export default function Home() {
             sendOp={sendOp}
             onBack={() => setSelectedId(null)}
           />
-        ) : (
+        ) : tab === "explore" ? (
           <Feed tokens={tokens} onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} />
+        ) : tab === "portfolio" ? (
+          <Portfolio tokens={tokens} onSelect={(id) => setSelectedId(id)} account={keys?.address} />
+        ) : tab === "create" ? (
+          <CreateToken
+            busy={busy}
+            setBusy={setBusy}
+            say={say}
+            keys={keys}
+            submitBlock={submitBlock}
+            onCreated={(id) => {
+              setTab("explore");
+              setSelectedId(id);
+            }}
+          />
+        ) : (
+          <WalletPanel keys={keys} hasWallet={hasWallet} unlock={unlock} lock={lock} remove={remove} />
         )}
 
         {log.length > 0 && (
-          <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4 text-xs space-y-1">
+          <div className="mt-4 rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-3 text-xs space-y-1">
             {log.map((l, i) => (
               <p key={i} className="text-zinc-400">{l}</p>
             ))}
@@ -364,20 +374,7 @@ export default function Home() {
         )}
       </div>
 
-      {showCreate && (
-        <CreateToken
-          busy={busy}
-          setBusy={setBusy}
-          say={say}
-          keys={keys}
-          submitBlock={submitBlock}
-          onClose={() => setShowCreate(false)}
-          onCreated={(id) => {
-            setShowCreate(false);
-            setSelectedId(id);
-          }}
-        />
-      )}
+      <TabBar tab={tab} setTab={setTab} />
     </main>
   );
 }
@@ -1038,7 +1035,6 @@ function CreateToken({
   say,
   keys,
   submitBlock,
-  onClose,
   onCreated,
 }: {
   busy: boolean;
@@ -1046,7 +1042,6 @@ function CreateToken({
   say: (s: string) => void;
   keys: Keys | null;
   submitBlock: (link: string, delta: bigint) => Promise<string>;
-  onClose: () => void;
   onCreated: (id: string) => void;
 }) {
   const [name, setName] = useState("");
@@ -1100,37 +1095,107 @@ function CreateToken({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-20 p-4" onClick={onClose}>
-      <div className="rounded-2xl border border-zinc-800 bg-[#0a0a0a] p-6 w-full max-w-lg space-y-3" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between">
-          <h3 className="font-black text-lg">Start a new coin</h3>
-          <button className="text-zinc-500 hover:text-zinc-300" onClick={onClose}>✕</button>
-        </div>
-        <div className="flex items-center gap-3">
-          <Avatar image={image} symbol={symbol} size={56} />
-          <label className="text-xs text-green-400 cursor-pointer">
-            {uploading ? "uploading…" : "upload image"}
-            <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
-          </label>
-          <span className="text-[11px] text-zinc-600">or a URL below</span>
-        </div>
-        <input className={inputC} placeholder="image URL (optional)" value={image} onChange={(e) => setImage(e.target.value)} />
-        <div className="grid grid-cols-2 gap-2">
-          <input className={inputC} placeholder="name" value={name} onChange={(e) => setName(e.target.value)} />
-          <input className={inputC} placeholder="symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)} />
-        </div>
-        <input className={inputC} placeholder="supply (whole tokens)" inputMode="decimal" value={supply} onChange={(e) => setSupply(e.target.value)} />
-        <textarea className={inputC} placeholder="description" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
-        <div className="grid grid-cols-1 gap-2">
-          <input className={inputC} placeholder="website (optional)" value={website} onChange={(e) => setWebsite(e.target.value)} />
-          <input className={inputC} placeholder="https://x.com/… (optional)" value={twitter} onChange={(e) => setTwitter(e.target.value)} />
-          <input className={inputC} placeholder="https://t.me/… (optional)" value={telegram} onChange={(e) => setTelegram(e.target.value)} />
-        </div>
-        <button className={btn} disabled={busy} onClick={launch}>
-          {busy ? "launching…" : "Create coin (0.000002 XNO)"}
-        </button>
-        <p className="text-[11px] text-zinc-600">creator keeps 5% · 1 raw data fee per op</p>
+    <div className="rounded-2xl border border-zinc-800 bg-[#0a0a0a] p-5 space-y-3">
+      <h3 className="font-black text-lg">Start a new coin</h3>
+      <div className="flex items-center gap-3">
+        <Avatar image={image} symbol={symbol} size={56} />
+        <label className="text-xs text-green-400 cursor-pointer">
+          {uploading ? "uploading…" : "upload image"}
+          <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+        </label>
+        <span className="text-[11px] text-zinc-600">or a URL below</span>
+      </div>
+      <input className={inputC} placeholder="image URL (optional)" value={image} onChange={(e) => setImage(e.target.value)} />
+      <div className="grid grid-cols-2 gap-2">
+        <input className={inputC} placeholder="name" value={name} onChange={(e) => setName(e.target.value)} />
+        <input className={inputC} placeholder="symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)} />
+      </div>
+      <input className={inputC} placeholder="supply (whole tokens)" inputMode="decimal" value={supply} onChange={(e) => setSupply(e.target.value)} />
+      <textarea className={inputC} placeholder="description" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+      <div className="grid grid-cols-1 gap-2">
+        <input className={inputC} placeholder="website (optional)" value={website} onChange={(e) => setWebsite(e.target.value)} />
+        <input className={inputC} placeholder="https://x.com/… (optional)" value={twitter} onChange={(e) => setTwitter(e.target.value)} />
+        <input className={inputC} placeholder="https://t.me/… (optional)" value={telegram} onChange={(e) => setTelegram(e.target.value)} />
+      </div>
+      <button className={btn} disabled={busy} onClick={launch}>
+        {busy ? "launching…" : "Create coin (0.000002 XNO)"}
+      </button>
+      <p className="text-[11px] text-zinc-600">creator keeps 5% · 1 raw data fee per op</p>
+    </div>
+  );
+}
+
+function Portfolio({ tokens, onSelect, account }: { tokens: Token[]; onSelect: (id: string) => void; account?: string }) {
+  const mine = tokens.filter((t) => BigInt(t.myBalance) > 0n);
+  if (!account) {
+    return (
+      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-10 text-center text-zinc-500">
+        <p className="text-3xl mb-2">🔒</p>
+        <p className="font-bold text-zinc-300">Unlock your wallet</p>
+        <p className="text-sm mt-1">to see your tokens.</p>
+      </div>
+    );
+  }
+  if (mine.length === 0) {
+    return (
+      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-10 text-center text-zinc-500">
+        <p className="text-3xl mb-2">💼</p>
+        <p className="font-bold text-zinc-300">No holdings yet</p>
+        <p className="text-sm mt-1">Buy a coin to add it here.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-2">
+      <h2 className="text-sm font-bold text-zinc-400">Your holdings</h2>
+      <div className="space-y-2">
+        {mine.map((t) => {
+          const valueRaw = (BigInt(t.myBalance) * BigInt(t.price)) / 10n ** BigInt(t.decimals);
+          return (
+            <button
+              key={t.tokenId}
+              onClick={() => onSelect(t.tokenId)}
+              className="w-full rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-3 flex items-center gap-3 text-left hover:border-green-500/60"
+            >
+              <Avatar image={t.image} symbol={t.symbol} size={40} />
+              <div className="min-w-0 flex-1">
+                <p className="font-bold text-sm truncate">{t.symbol}</p>
+                <p className="text-[11px] text-zinc-500">{fmtTok(t.myBalance, t.decimals)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm font-bold">{fmtXno(valueRaw.toString())} XNO</p>
+                <p className={"text-[11px] " + (t.change24h == null ? "text-zinc-600" : t.change24h >= 0 ? "text-green-400" : "text-red-400")}>{pctStr(t.change24h)}</p>
+              </div>
+            </button>
+          );
+        })}
       </div>
     </div>
+  );
+}
+
+const TABS: { id: "explore" | "portfolio" | "create" | "wallet"; label: string; icon: string }[] = [
+  { id: "explore", label: "Explore", icon: "🏠" },
+  { id: "portfolio", label: "Holdings", icon: "💼" },
+  { id: "create", label: "Create", icon: "✨" },
+  { id: "wallet", label: "Wallet", icon: "👛" },
+];
+
+function TabBar({ tab, setTab }: { tab: "explore" | "portfolio" | "create" | "wallet"; setTab: (t: "explore" | "portfolio" | "create" | "wallet") => void }) {
+  return (
+    <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-zinc-900 bg-[#0a0a0a]/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
+      <div className="max-w-2xl mx-auto grid grid-cols-4">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={"flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-bold " + (tab === t.id ? "text-green-400" : "text-zinc-500")}
+          >
+            <span className="text-lg leading-none">{t.icon}</span>
+            {t.label}
+          </button>
+        ))}
+      </div>
+    </nav>
   );
 }

@@ -5,10 +5,12 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
-  const tokenId = new URL(req.url).searchParams.get("token");
+  const u = new URL(req.url);
+  const tokenId = u.searchParams.get("token");
+  const account = u.searchParams.get("account") ?? "";
   if (!tokenId) return NextResponse.json({ error: "token required" }, { status: 400 });
   try {
-    const token = await detail(tokenId);
+    const token = await detail(tokenId, account);
     return token
       ? NextResponse.json({ token })
       : NextResponse.json({ error: "unknown token" }, { status: 404 });

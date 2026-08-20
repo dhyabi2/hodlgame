@@ -32,6 +32,7 @@ export interface TokenView {
   change1h: number | null;
   change24h: number | null;
   createdAt: number;
+  myBalance: string;
   buyVolume: string;
   sellVolume: string;
   holders: number;
@@ -102,7 +103,7 @@ function changePct(series: PricePoint[], secondsAgo: number): number | null {
   return Number.isFinite(pct) ? pct : null;
 }
 
-function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket): TokenView {
+function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, account = ""): TokenView {
   const meta = raw.meta.get(tokenId) ?? EMPTY_META;
   const s = raw.state.get(tokenId);
   return {
@@ -126,6 +127,7 @@ function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket): TokenView {
     change1h: changePct(a.series, 3600),
     change24h: changePct(a.series, 86400),
     createdAt: a.launchTime,
+    myBalance: account ? (a.holders.find((h) => h.account === account)?.balanceRaw ?? "0") : "0",
     buyVolume: a.buyVolumeRaw,
     sellVolume: a.sellVolumeRaw,
     holders: a.holders.length,
@@ -139,11 +141,11 @@ function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket): TokenView {
 }
 
 /** Feed view: all tokens, trimmed (spark only, no full series/trades). */
-export async function feed(): Promise<TokenView[]> {
+export async function feed(account = ""): Promise<TokenView[]> {
   const raw = await compute();
   const out: TokenView[] = [];
   for (const [tokenId, a] of raw.byToken) {
-    const v = toView(tokenId, a, raw);
+    const v = toView(tokenId, a, raw, account);
     v.series = [];
     v.trades = [];
     v.topHolders = [];
@@ -154,9 +156,9 @@ export async function feed(): Promise<TokenView[]> {
 }
 
 /** Detail view: a single token with full series, trades, holders, comments. */
-export async function detail(tokenId: string): Promise<TokenView | null> {
+export async function detail(tokenId: string, account = ""): Promise<TokenView | null> {
   const raw = await compute();
   const a = raw.byToken.get(tokenId);
   if (!a) return null;
-  return toView(tokenId, a, raw);
+  return toView(tokenId, a, raw, account);
 }
