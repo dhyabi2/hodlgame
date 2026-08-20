@@ -34,15 +34,21 @@ export class MemorySource implements BlockSource {
 /**
  * Reads blocks from a Nano node's JSON-RPC API (e.g. `https://rpc.nano.to`).
  * Uses `account_history` + `blocks_info` — both are read-only and work on
- * public nodes.
+ * public nodes. Pass an `apiKey` to use rpc.nano.to's keyed endpoint.
  */
 export class NanoRpcSource implements BlockSource {
-  constructor(private endpoint: string) {}
+  constructor(
+    private endpoint: string,
+    private apiKey?: string
+  ) {}
 
   private async rpc(body: Record<string, unknown>) {
     const res = await fetch(this.endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(this.apiKey ? { "x-api-key": this.apiKey } : {}),
+      },
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`nano rpc ${res.status}`);

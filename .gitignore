@@ -31,3 +31,6 @@ yarn-error.log*
 
 # TypeScript incremental build info
 archive/solana/app/tsconfig.tsbuildinfo
+
+# Nano local secrets (account keys + rpc.nano.to API key)
+nano/.keys.json
