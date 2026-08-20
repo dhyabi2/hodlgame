@@ -15,6 +15,7 @@ import { MultiIndexer } from "../indexer/multiIndexer";
 import { NanoRpcSource } from "../indexer/blockSource";
 import type { State } from "../core/state";
 import { receivePoolsMulti, payoutSellsMulti } from "./sweep";
+import { commitResolver } from "./commits";
 import { loadNanoRpcKey } from "../lib/rpc";
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -25,7 +26,7 @@ function watched(): string[] {
 }
 
 async function indexer(): Promise<MultiIndexer> {
-  const idx = new MultiIndexer(new NanoRpcSource(loadNanoRpcKey()));
+  const idx = new MultiIndexer(new NanoRpcSource(loadNanoRpcKey()), () => ({ name: "", symbol: "", decimals: 6, image: "" }), commitResolver());
   await idx.sync(watched());
   return idx;
 }

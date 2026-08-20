@@ -8,6 +8,7 @@ import { analyze, type PricePoint, type TokenAnalytics } from "./analytics";
 import { tokenPoolKeys } from "./custody";
 import { loadRegistry, EMPTY_META } from "./tokens";
 import { commentsFor, type Comment } from "./comments";
+import { commitResolver } from "./commits";
 import { loadNanoRpcKey } from "../lib/rpc";
 
 export interface TokenView {
@@ -52,12 +53,27 @@ interface RawMarket {
   master: string;
 }
 
-async function compute(): Promise<RawMarket> {
+let cache: { at: number; value: RawMarket } | null = null;
+const TTL_MS = 2000;
+
+async function computeFresh(): Promise<RawMarket> {
   const reg = loadRegistry();
-  const idx = new MultiIndexer(new NanoRpcSource(loadNanoRpcKey()), (id) => reg.get(id) ?? EMPTY_META);
+  const idx = new MultiIndexer(new NanoRpcSource(loadNanoRpcKey()), (id) => reg.get(id) ?? EMPTY_META, commitResolver());
   const events = await idx.collectEvents(watched());
   const { state, byToken } = analyze(events);
   return { state, byToken, meta: reg, master: process.env.POOL_SEED ?? "" };
+}
+
+/** Shared in-memory cache so burst requests (feed + detail + SSE) share one index. */
+async function compute(): Promise<RawMarket> {
+  if (cache && Date.now() - cache.at < TTL_MS) return cache.value;
+  const value = await computeFresh();
+  cache = { at: Date.now(), value };
+  return value;
+}
+
+export function bustCache(): void {
+  cache = null;
 }
 
 function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket): TokenView {

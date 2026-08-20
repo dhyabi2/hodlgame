@@ -5,6 +5,7 @@ import * as nanocurrency from "nanocurrency";
 import dynamic from "next/dynamic";
 import { encodeOpLink } from "../../core/oplink";
 import { tokenIdFromLaunchHash } from "../../core/token";
+import { stringify } from "../../core/json";
 import type { Op } from "../../core/ops";
 import { Sparkline } from "./components/Sparkline";
 
@@ -142,6 +143,32 @@ function timeAgo(ts: number) {
 }
 
 const short = (a: string) => (a ? a.slice(0, 6) + "…" + a.slice(-4) : "");
+
+const quoteBuy = (poolXno: string, poolTokens: string, xno: bigint): bigint => {
+  const px = BigInt(poolXno);
+  const pt = BigInt(poolTokens);
+  if (px <= 0n || pt <= 0n) return 0n;
+  const afterFee = (xno * 9900n) / 10000n;
+  return (afterFee * pt) / (px + afterFee);
+};
+
+const quoteSell = (poolXno: string, poolTokens: string, tokens: bigint): bigint => {
+  const px = BigInt(poolXno);
+  const pt = BigInt(poolTokens);
+  if (px <= 0n || pt <= 0n) return 0n;
+  return (tokens * px) / (pt + tokens);
+};
+
+async function registerCommit(tokenId: string, op: Op): Promise<string> {
+  const res = await fetch("/api/commits", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: stringify({ tokenId, op }),
+  });
+  const j = await res.json();
+  if (!j.link) throw new Error(j.error ?? "commit registration failed");
+  return j.link as string;
+}
 
 const inputC =
   "w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-green-500";
@@ -451,6 +478,7 @@ function TokenDetail({
 }) {
   const [amount, setAmount] = useState("");
   const [tab, setTab] = useState<"trade" | "thread">("trade");
+  const [slippage, setSlippage] = useState("0");
 
   const myHolding = keys ? token.topHolders.find((h) => h.account === keys.address) : undefined;
 
@@ -459,7 +487,15 @@ function TokenDetail({
     const raw = BigInt(Math.floor(Number(amount || "0") * 1e30)) || 0n;
     if (raw <= 0n) return say("enter XNO amount");
     try {
-      await submitBlock(encodeOpLink(token.tokenId, { kind: "buy", xno: raw, minTokens: 0n }), 1n);
+      const slip = Number(slippage || "0");
+      if (slip > 0) {
+        const expected = quoteBuy(token.poolXno, token.poolTokens, raw);
+        const minTokens = (expected * BigInt(Math.round((100 - slip) * 100))) / 10000n;
+        const link = await registerCommit(token.tokenId, { kind: "buy", xno: raw, minTokens });
+        await submitBlock(link, 1n);
+      } else {
+        await submitBlock(encodeOpLink(token.tokenId, { kind: "buy", xno: raw, minTokens: 0n }), 1n);
+      }
       const hash = await submitBlock(token.pool!, raw);
       say(`buy ✓ ${hash.slice(0, 10)}…`);
       setAmount("");
@@ -472,7 +508,20 @@ function TokenDetail({
     const raw = BigInt(Math.floor(Number(amount || "0") * 10 ** token.decimals)) || 0n;
     if (raw <= 0n) return say("enter token amount");
     setAmount("");
-    await sendOp(token.tokenId, { kind: "sell", tokens: raw, minXno: 0n }, "sell");
+    const slip = Number(slippage || "0");
+    try {
+      if (slip > 0) {
+        const expected = quoteSell(token.poolXno, token.poolTokens, raw);
+        const minXno = (expected * BigInt(Math.round((100 - slip) * 100))) / 10000n;
+        const link = await registerCommit(token.tokenId, { kind: "sell", tokens: raw, minXno });
+        await submitBlock(link, 1n);
+        say("sell ✓");
+      } else {
+        await sendOp(token.tokenId, { kind: "sell", tokens: raw, minXno: 0n }, "sell");
+      }
+    } catch (e: any) {
+      say("sell failed: " + e.message);
+    }
   }
 
   return (
@@ -544,6 +593,8 @@ function TokenDetail({
             myHolding={myHolding}
             amount={amount}
             setAmount={setAmount}
+            slippage={slippage}
+            setSlippage={setSlippage}
             busy={busy}
             buy={buy}
             sell={sell}
@@ -593,6 +644,8 @@ function TradePanel({
   myHolding,
   amount,
   setAmount,
+  slippage,
+  setSlippage,
   busy,
   buy,
   sell,
@@ -602,18 +655,30 @@ function TradePanel({
   myHolding: Holder | undefined;
   amount: string;
   setAmount: (s: string) => void;
+  slippage: string;
+  setSlippage: (s: string) => void;
   busy: boolean;
   buy: () => Promise<void>;
   sell: () => Promise<void>;
   sendOp: (tokenId: string, op: Op, label: string) => Promise<void>;
 }) {
   const [side, setSide] = useState<"buy" | "sell">("buy");
+  const slip = Number(slippage || "0");
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between text-[11px] text-zinc-500">
         <span>your balance: {fmtTok(myHolding?.balanceRaw, token.decimals)}</span>
-        <span className="text-zinc-600">slippage not encoded in compact ops</span>
+        <label className="flex items-center gap-1.5">
+          <span className="text-zinc-600">slippage %</span>
+          <input
+            className="w-14 rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-1 text-xs text-white text-right"
+            inputMode="decimal"
+            value={slippage}
+            onChange={(e) => setSlippage(e.target.value)}
+          />
+        </label>
       </div>
+      {slip > 0 && <p className="text-[10px] text-zinc-600">slippage protected via commit-reveal</p>}
       <div className="grid grid-cols-2 gap-2">
         <button
           className={"rounded-xl py-2 text-sm font-bold " + (side === "buy" ? "bg-green-500 text-black" : "bg-zinc-800 text-zinc-400")}

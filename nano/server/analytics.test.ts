@@ -8,7 +8,7 @@ const CREATOR = "nano_creator";
 const ALICE = "nano_alice";
 
 function ev(tokenId: string, op: any, sender: string, height: bigint, time?: number): IndexedEvent {
-  return { tokenId, op, sender, height, time, hash: "h" + height };
+  return { tokenId, op, sender, height, timestamp: time, hash: "h" + height };
 }
 
 // seedLiq=commit-reveal op is represented directly here (analytics only folds).
