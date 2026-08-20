@@ -1,0 +1,165 @@
+// Market presentation layer: enrich the deterministic multi-token state with
+// analytics (price/market-cap/holders/trades/series), off-chain metadata, and
+// per-token pool addresses.
+
+import { MultiIndexer } from "../indexer/multiIndexer";
+import { NanoRpcSource } from "../indexer/blockSource";
+import { analyze, type PricePoint, type TokenAnalytics } from "./analytics";
+import { tokenPoolKeys } from "./custody";
+import { loadRegistry, EMPTY_META } from "./tokens";
+import { commentsFor, type Comment } from "./comments";
+import { commitResolver } from "./commits";
+import { loadNanoRpcKey } from "../lib/rpc";
+
+export interface TokenView {
+  tokenId: string;
+  name: string;
+  symbol: string;
+  decimals: number;
+  image: string;
+  description: string;
+  website: string;
+  twitter: string;
+  telegram: string;
+  creator: string;
+  creatorShare: string;
+  supply: string;
+  treasury: string;
+  poolXno: string;
+  poolTokens: string;
+  price: string;
+  marketCap: string;
+  change1h: number | null;
+  change24h: number | null;
+  createdAt: number;
+  myBalance: string;
+  buyVolume: string;
+  sellVolume: string;
+  holders: number;
+  pool: string | null;
+  spark: PricePoint[];
+  series: PricePoint[];
+  trades: TokenAnalytics["trades"];
+  topHolders: TokenAnalytics["holders"];
+  comments: Comment[];
+}
+
+function watched(): string[] {
+  return (process.env.WATCHED_ACCOUNTS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+interface RawMarket {
+  state: ReturnType<typeof analyze>["state"];
+  byToken: Map<string, TokenAnalytics>;
+  meta: Map<string, any>;
+  master: string;
+}
+
+let cache: { at: number; value: RawMarket } | null = null;
+const TTL_MS = 2000;
+
+async function computeFresh(): Promise<RawMarket> {
+  const reg = await loadRegistry();
+  const commit = await commitResolver();
+  const master = process.env.POOL_SEED ?? "";
+  const poolKey = (tokenId: string) => (master ? tokenPoolKeys(master, tokenId).publicKey : null);
+  const idx = new MultiIndexer(new NanoRpcSource(loadNanoRpcKey()), (id) => reg.get(id) ?? EMPTY_META, commit, poolKey);
+  const events = await idx.collectEvents(watched());
+  const { state, byToken } = analyze(events);
+  return { state, byToken, meta: reg, master };
+}
+
+/** Shared in-memory cache so burst requests (feed + detail + SSE) share one index. */
+async function compute(): Promise<RawMarket> {
+  if (cache && Date.now() - cache.at < TTL_MS) return cache.value;
+  const value = await computeFresh();
+  cache = { at: Date.now(), value };
+  return value;
+}
+
+export function bustCache(): void {
+  cache = null;
+}
+
+/** Percent change vs the last price at or before `now - secondsAgo` (step fn). */
+function changePct(series: PricePoint[], secondsAgo: number): number | null {
+  if (series.length < 2) return null;
+  const last = series[series.length - 1];
+  const target = last.time - secondsAgo;
+  let base = series[0];
+  for (const p of series) {
+    if (p.time >= target) {
+      base = p;
+      break;
+    }
+  }
+  const cur = BigInt(last.priceRaw);
+  const prev = BigInt(base.priceRaw);
+  if (prev === 0n) return null;
+  const bps = (cur - prev) * 10_000n / prev; // percent * 100
+  const pct = Number(bps) / 100;
+  return Number.isFinite(pct) ? pct : null;
+}
+
+async function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, account = ""): Promise<TokenView> {
+  const meta = raw.meta.get(tokenId) ?? EMPTY_META;
+  const s = raw.state.get(tokenId);
+  return {
+    tokenId,
+    name: meta.name ?? "",
+    symbol: meta.symbol ?? "",
+    decimals: meta.decimals ?? 6,
+    image: meta.image ?? "",
+    description: meta.description ?? "",
+    website: meta.website ?? "",
+    twitter: meta.twitter ?? "",
+    telegram: meta.telegram ?? "",
+    creator: s?.creator ?? "",
+    creatorShare: s?.creatorShare.toString() ?? "0",
+    supply: a.supplyRaw,
+    treasury: s?.treasury.toString() ?? "0",
+    poolXno: a.poolXno,
+    poolTokens: a.poolTokens,
+    price: a.priceRaw,
+    marketCap: a.marketCapRaw,
+    change1h: changePct(a.series, 3600),
+    change24h: changePct(a.series, 86400),
+    createdAt: a.launchTime,
+    myBalance: account ? (a.holders.find((h) => h.account === account)?.balanceRaw ?? "0") : "0",
+    buyVolume: a.buyVolumeRaw,
+    sellVolume: a.sellVolumeRaw,
+    holders: a.holders.length,
+    pool: raw.master ? tokenPoolKeys(raw.master, tokenId).address : null,
+    spark: a.series.slice(-48),
+    series: a.series,
+    trades: a.trades,
+    topHolders: a.holders,
+    comments: await commentsFor(tokenId),
+  };
+}
+
+/** Feed view: all tokens, trimmed (spark only, no full series/trades). */
+export async function feed(account = ""): Promise<TokenView[]> {
+  const raw = await compute();
+  const out: TokenView[] = [];
+  for (const [tokenId, a] of raw.byToken) {
+    const v = await toView(tokenId, a, raw, account);
+    v.series = [];
+    v.trades = [];
+    v.topHolders = [];
+    v.comments = [];
+    out.push(v);
+  }
+  return out.sort((x, y) => (BigInt(y.marketCap) > BigInt(x.marketCap) ? 1 : -1));
+}
+
+/** Detail view: a single token with full series, trades, holders, comments. */
+export async function detail(tokenId: string, account = ""): Promise<TokenView | null> {
+  const raw = await compute();
+  const a = raw.byToken.get(tokenId);
+  if (!a) return null;
+  return toView(tokenId, a, raw, account);
+}
