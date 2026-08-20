@@ -1,6 +1,7 @@
 // Durable store. Async API so the same code runs on a local filesystem (default,
-// for tests/self-host) or Vercel KV (STORE=kv + KV_REST_API_URL/TOKEN).
-// BigInt-safe via core/json. Swap in another DB by reimplementing load/save.
+// for tests/self-host) or Upstash Redis over plain fetch (STORE=upstash +
+// UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN). BigInt-safe via core/json.
+// No npm SDK / native modules — works on Vercel serverless.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -11,27 +12,32 @@ function dir(): string {
   return process.env.DATA_DIR ?? path.join(process.cwd(), "data");
 }
 
-// --- Vercel KV backend ---
-let kvClient: any = null;
-let kvChecked = false;
+function upstash(): { url: string; token: string } | null {
+  if (process.env.STORE !== "upstash") return null;
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  return url && token ? { url: url.replace(/\/$/, ""), token } : null;
+}
 
-async function getKv(): Promise<any | null> {
-  if (kvChecked) return kvClient;
-  kvChecked = true;
-  if (process.env.STORE !== "kv") return null;
-  try {
-    kvClient = require(/* webpackIgnore: true */ "@vercel/kv").kv;
-  } catch {
-    kvClient = null;
-  }
-  return kvClient;
+async function upstashGet(key: string, u: { url: string; token: string }): Promise<string | null> {
+  const res = await fetch(`${u.url}/get/${key}`, { headers: { Authorization: `Bearer ${u.token}` } });
+  if (!res.ok) return null;
+  const j = (await res.json()) as { result?: string | null };
+  return j.result ?? null;
+}
+
+async function upstashSet(key: string, value: string, u: { url: string; token: string }): Promise<void> {
+  await fetch(`${u.url}/set/${key}/${encodeURIComponent(value)}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${u.token}` },
+  });
 }
 
 export async function loadJson<T>(name: string): Promise<T | null> {
-  const kv = await getKv();
-  if (kv) {
+  const u = upstash();
+  if (u) {
     try {
-      const v = await kv.get(`holdfun:${name}`);
+      const v = await upstashGet(`holdfun:${name}`, u);
       return typeof v === "string" ? parse<T>(v) : null;
     } catch {
       return null;
@@ -45,9 +51,9 @@ export async function loadJson<T>(name: string): Promise<T | null> {
 }
 
 export async function saveJson(name: string, value: unknown): Promise<void> {
-  const kv = await getKv();
-  if (kv) {
-    await kv.set(`holdfun:${name}`, stringify(value));
+  const u = upstash();
+  if (u) {
+    await upstashSet(`holdfun:${name}`, stringify(value), u);
     return;
   }
   await fs.promises.mkdir(dir(), { recursive: true });

@@ -35,16 +35,15 @@ Directory, so pick one:
 
 | var | value |
 |---|---|
-| `STORE` | `kv` |
-| `KV_REST_API_URL` | from **Vercel KV** (auto on Vercel) |
-| `KV_REST_API_TOKEN` | from **Vercel KV** (auto on Vercel) |
+| `STORE` | `upstash` |
+| `UPSTASH_REDIS_REST_URL` | from **Upstash Redis** (REST) |
+| `UPSTASH_REDIS_REST_TOKEN` | from **Upstash Redis** (REST) |
 | `NANO_RPC_KEY` | rpc.nano.to API key |
 | `POOL_SEED` | 64-hex operator master seed (pool key derivation only) |
 | `WATCHED_ACCOUNTS` | comma-separated Nano accounts the indexer watches |
 | `CRON_SECRET` | any random string (guards `/api/cron/sweep`) |
 | `GUARDIAN_URLS` | `https://<g1>.vercel.app/api/guardian/sign,https://<g2>.vercel.app/api/guardian/sign` |
 | `GUARDIAN_KEYS` | `g1Key,g2Key` (must match each guardian's `GUARDIAN_KEY`) |
-| `BLOB_READ_WRITE_TOKEN` | from **Vercel Blob** (image uploads) |
 | `PINATA_JWT` | optional fallback |
 
 **Each guardian project**
@@ -54,7 +53,7 @@ Directory, so pick one:
 | `GUARDIAN_SEED` | independent 64-hex key (NOT derived from the master) |
 | `GUARDIAN_KEY` | shared secret matching the operator's `GUARDIAN_KEYS` |
 | `GUARDED_POOLS` | comma-separated `nano_…` pool accounts it co-guards |
-| `STORE` | `kv` (durable nonce/replay protection) |
+| `STORE` | `upstash` (durable nonce/replay protection) |
 
 ## Storage
 
