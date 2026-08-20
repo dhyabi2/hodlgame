@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import * as nanocurrency from "nanocurrency";
-import { poolSeedForToken, tokenPoolKeys, cosignerSeeds, cosignerPoolKeys, payoutBlockHash, cosignHash } from "./custody";
+import { poolSeedForToken, tokenPoolKeys, guardianKeys, payoutBlockHash, cosignHash } from "./custody";
 
 const MASTER = "f".repeat(64);
 const TOKEN_A = "a".repeat(32);
@@ -36,18 +36,17 @@ const TOKEN_B = "b".repeat(32);
   assert.equal(k.publicKey.length, 64, "public key is 32 bytes");
 }
 
-// 5. Cosigner shares are distinct, deterministic, and never equal the pool key.
+// 5. Guardian keys are independent (not master-derived) and 2-of-3 distinct.
 {
-  const seeds = cosignerSeeds(MASTER, TOKEN_A);
-  assert.equal(seeds.length, 2, "two cosigner shares");
-  const again = cosignerSeeds(MASTER, TOKEN_A);
-  assert.deepEqual(seeds, again, "cosigner shares are deterministic");
+  const g1Seed = "1".repeat(64);
+  const g2Seed = "2".repeat(64);
   const pool = tokenPoolKeys(MASTER, TOKEN_A);
-  const cos = cosignerPoolKeys(MASTER, TOKEN_A);
-  const addrs = [pool.address, ...cos.map((c) => c.address)];
-  assert.equal(new Set(addrs).size, 3, "pool + 2 cosigners are 3 distinct accounts");
-  assert.notEqual(seeds[0], seeds[1], "shares differ");
-  assert.equal(seeds[0].length, 64, "share is 32-byte hex");
+  const g1 = guardianKeys(g1Seed);
+  const g2 = guardianKeys(g2Seed);
+  assert.notEqual(g1.address, pool.address, "guardian key != pool key");
+  assert.notEqual(g1.address, g2.address, "guardian keys are distinct");
+  assert.notEqual(g1.secretKey, g2.secretKey, "guardian secrets independent");
+  assert.ok(g1.address.startsWith("nano_"), "guardian key is a valid account");
 }
 
 // 6. Payout block hash is deterministic; a cosigner signature verifies.

@@ -36,23 +36,13 @@ export function tokenPoolKeys(masterSeed: string, tokenId: string): PoolKeys {
 }
 
 /**
- * Deterministic 2-of-3 cosigner shares for a token's pool. Two independent
- * Nano keypairs derived via distinct HD paths from the master seed; any two of
- * the three parties (pool key + 2 cosigners) can co-sign a payout block, which
- * is submitted with a `signatures` array. No party ever sees the master seed or
- * another party's share.
+ * A guardian's own key. Unlike the pool key (HD-derived from the master seed),
+ * each guardian key MUST be an independently generated seed held only on that
+ * guardian's machine. The master seed cannot derive it, so no single party
+ * holds a quorum of the 2-of-3 (operator key + guardian-1 key + guardian-2 key).
  */
-export function cosignerSeeds(masterSeed: string, tokenId: string, n = 2): string[] {
-  const out: string[] = [];
-  for (let i = 1; i <= n; i++) {
-    const tag = i.toString(16).padStart(2, "0");
-    out.push(blake2bHex(Buffer.from(masterSeed + tokenId + tag, "hex"), undefined, 32));
-  }
-  return out;
-}
-
-export function cosignerPoolKeys(masterSeed: string, tokenId: string): PoolKeys[] {
-  return cosignerSeeds(masterSeed, tokenId).map(poolKeysFromSeed);
+export function guardianKeys(seed: string): PoolKeys {
+  return poolKeysFromSeed(seed);
 }
 
 export interface Payout {

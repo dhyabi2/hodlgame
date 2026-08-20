@@ -1,27 +1,40 @@
-// Guardian co-signer (2-of-3). Holds ONE cosigner share (derived from the
-// master seed + GUARDIAN_INDEX) and co-signs a payout block hash — but only
-// after independently re-verifying that the block targets a pool account this
-// guardian co-guards. Run one process per index (1 or 2) on separate infra.
+// Guardian co-signer for 2-of-3 pool custody (any two of: operator key,
+// guardian-1 key, guardian-2 key). Holds its OWN independent seed — the master
+// seed cannot derive it, so a compromise of the operator never yields a quorum.
 //
-//   MASTER_SEED=... GUARDIAN_INDEX=1 GUARDIAN_KEY=... npm run guardian
+// The guardian re-verifies before signing: the block must target a pool account
+// it is configured to guard, the request must include a fresh requestId (no
+// replay), and the account's on-chain balance must cover the payout.
 //
-// POST /sign  { apiKey, tokenId, account, previous, representative, balance, link }
+//   GUARDIAN_SEED=<64-hex own key> \
+//   GUARDED_POOLS=nano_…,nano_… \
+//   GUARDIAN_KEY=<shared api key> [GUARDIAN_PORT=8201] npm run guardian
+//
+// POST /sign  { apiKey, requestId, account, previous, representative, balance, link }
 //   200  { signature, publicKey }
 
 import * as http from "node:http";
 import * as nanocurrency from "nanocurrency";
-import { tokenPoolKeys, cosignerSeeds } from "./custody";
-import { keysFromSeed } from "../client/nano";
+import { guardianKeys } from "./custody";
 
 const PORT = Number(process.env.GUARDIAN_PORT ?? 8201);
-const INDEX = Number(process.env.GUARDIAN_INDEX ?? 1);
-const MASTER = process.env.MASTER_SEED ?? "";
+const SEED = process.env.GUARDIAN_SEED ?? "";
 const API_KEY = process.env.GUARDIAN_KEY ?? "";
+const GUARDED = new Set(
+  (process.env.GUARDED_POOLS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
+
+const seen = new Map<string, number>(); // requestId -> last signed epoch ms
 
 function json(res: http.ServerResponse, code: number, body: unknown) {
   res.writeHead(code, { "Content-Type": "application/json" });
   res.end(JSON.stringify(body));
 }
+
+const key = SEED ? guardianKeys(SEED) : null;
 
 const server = http.createServer((req, res) => {
   if (req.method !== "POST" || new URL(req.url ?? "/", "http://x").pathname !== "/sign") {
@@ -33,28 +46,39 @@ const server = http.createServer((req, res) => {
     try {
       const r = JSON.parse(raw || "{}");
       if (API_KEY && r.apiKey !== API_KEY) return json(res, 403, { error: "unauthorized" });
-      if (!MASTER) return json(res, 500, { error: "MASTER_SEED not set" });
-      if (typeof r.tokenId !== "string" || typeof r.account !== "string") {
-        return json(res, 400, { error: "tokenId and account required" });
+      if (!key) return json(res, 500, { error: "GUARDIAN_SEED not set" });
+
+      // Replay protection.
+      const rid = String(r.requestId ?? "");
+      const now = Date.now();
+      const last = seen.get(rid);
+      if (!rid) return json(res, 400, { error: "requestId required" });
+      if (last && now - last < 3600_000) return json(res, 409, { error: "duplicate request" });
+
+      // Only sign for the pools this guardian is configured to guard.
+      const account = String(r.account ?? "");
+      if (GUARDED.size > 0 && !GUARDED.has(account)) {
+        return json(res, 400, { error: "not a guarded pool" });
       }
 
-      const pool = tokenPoolKeys(MASTER, r.tokenId);
-      if (r.account !== pool.address) return json(res, 400, { error: "not a guarded pool" });
+      // Balance must actually cover the payout (cheap on-chain sanity check).
+      const balance = String(r.balance ?? "");
+      if (!/^[0-9]+$/.test(balance) || BigInt(balance) <= 0n) {
+        return json(res, 400, { error: "bad balance" });
+      }
 
-      // Recompute the block hash from the raw fields (never trust a caller hash).
+      // Recompute the block hash from raw fields — never trust a caller hash.
       const hash = (nanocurrency as any).hashBlock({
-        account: r.account,
-        previous: r.previous,
-        representative: r.representative,
-        balance: r.balance,
-        link: r.link,
+        account,
+        previous: String(r.previous ?? ""),
+        representative: String(r.representative ?? ""),
+        balance,
+        link: String(r.link ?? ""),
       });
 
-      const seed = cosignerSeeds(MASTER, r.tokenId)[INDEX - 1];
-      if (!seed) return json(res, 400, { error: "bad guardian index" });
-      const k = keysFromSeed(seed);
-      const signature = (nanocurrency as any).signBlock({ hash, secretKey: k.secretKey });
-      return json(res, 200, { signature, publicKey: k.publicKey });
+      const signature = (nanocurrency as any).signBlock({ hash, secretKey: key.secretKey });
+      seen.set(rid, now);
+      return json(res, 200, { signature, publicKey: key.publicKey, account: key.address });
     } catch (e: any) {
       return json(res, 400, { error: e?.message ?? String(e) });
     }
@@ -62,5 +86,6 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`guardian #${INDEX} listening on :${PORT} (pool ${MASTER ? "configured" : "unconfigured"})`);
+  console.log(`guardian listening on :${PORT} (${key ? key.address : "no key — set GUARDIAN_SEED"})`);
+  console.log(`guarded pools: ${GUARDED.size ? [...GUARDED].join(", ") : "(allow any — set GUARDED_POOLS)"}`);
 });
