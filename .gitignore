@@ -32,21 +32,40 @@ yarn-error.log*
 # TypeScript incremental build info
 archive/solana/app/tsconfig.tsbuildinfo
 
-# Nano local secrets (account keys + rpc.nano.to API key)
+###############################################################################
+# STRICT: SECRETS / KEYS — INTERNAL ONLY. NEVER COMMIT, NEVER PUSH.
+#
+# Private keys, seeds, and API keys are INTERNAL ONLY and must NEVER leave the
+# local machine. This includes (but is not limited to):
+#   - Nano account seeds / secret keys (POOL_SEED, GUARDIAN_SEED, custody keys)
+#   - rpc.nano.to API keys (NANO_RPC_KEY)
+#   - guardian shared API keys (GUARDIAN_KEY)
+#   - any *.keys.json, keypair, wallet, or seed file
+#
+# If you rename a key file or add a new secret, update this block BEFORE
+# committing. Do not rely on the file extension alone.
+###############################################################################
+*.keys.json
+**/*.keys.json
 nano/.keys.json
-nano/web/.next/
+nano/web/.keys.json
+*.keypair.json
+*.seed
+*.secrets.json
 
-# Nano local runtime state
-nano/data/
-nano/web/data/
+# Nano local runtime state (contains addresses/amounts, treated as private)
 nano/.paid.json
+nano/.deposits.json
+nano/web/.paid.json
+nano/web/.deposits.json
 nano/.tokens.json
 nano/web/.tokens.json
 nano/.comments.json
 nano/web/.comments.json
 nano/.commits.json
 nano/web/.commits.json
-nano/.deposits.json
-nano/web/.deposits.json
+nano/data/
+nano/web/data/
 nano/web/public/uploads/
+nano/web/.next/
 nano/web/tsconfig.tsbuildinfo
