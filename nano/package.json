@@ -1,0 +1,12 @@
+{
+  "name": "holdfun-nano-l2",
+  "version": "0.1.0",
+  "private": true,
+  "description": "HoldFun Nano (XNO) Layer-2 — deterministic token state machine",
+  "scripts": {
+    "test": "tsx core/state.test.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0"
+  }
+}
