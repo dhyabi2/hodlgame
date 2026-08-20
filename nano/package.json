@@ -2,9 +2,14 @@
   "name": "holdfun-nano-l2",
   "version": "0.1.0",
   "private": true,
-  "description": "HoldFun Nano (XNO) Layer-2 — deterministic token state machine",
+  "description": "HoldFun Nano (XNO) Layer-2 — deterministic token ledger, indexer, client",
   "scripts": {
-    "test": "tsx core/state.test.ts"
+    "test": "tsx core/state.test.ts && tsx core/encoding.test.ts && tsx indexer/indexer.test.ts && tsx client/nano.test.ts",
+    "live-smoke": "tsx scripts/live-smoke.ts"
+  },
+  "dependencies": {
+    "blakejs": "^1.2.1",
+    "nanocurrency": "^2.5.0"
   },
   "devDependencies": {
     "tsx": "^4.19.0"
