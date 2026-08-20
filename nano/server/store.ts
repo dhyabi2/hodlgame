@@ -20,7 +20,7 @@ async function getKv(): Promise<any | null> {
   kvChecked = true;
   if (process.env.STORE !== "kv") return null;
   try {
-    kvClient = require("@vercel/kv").kv;
+    kvClient = require(/* webpackIgnore: true */ "@vercel/kv").kv;
   } catch {
     kvClient = null;
   }

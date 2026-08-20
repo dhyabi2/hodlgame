@@ -16,7 +16,7 @@ const EXTS: Record<string, string> = {
 };
 
 async function putToBlob(file: File): Promise<string> {
-  const { put } = require("@vercel/blob");
+  const { put } = require(/* webpackIgnore: true */ "@vercel/blob");
   const ext = EXTS[file.type] ?? "png";
   const name = `${crypto.randomBytes(16).toString("hex")}.${ext}`;
   const blob = await put(`uploads/${name}`, file, { access: "public" });
