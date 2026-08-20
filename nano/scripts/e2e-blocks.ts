@@ -1,6 +1,11 @@
-// End-to-end Nano test (rpc.nano.to only): open a funded account, then
-// broadcast L2 data blocks (launch / buy / stake / unstake / sell), confirm
-// them, read them back, and replay into the deterministic token state.
+// End-to-end Nano test (rpc.nano.to only): open the funded account (if needed),
+// then broadcast L2 data blocks (launch / buy / stake / unstake / sell) as real
+// Nano state blocks, confirm them, read them back, and replay into the
+// deterministic token state.
+//
+// Data blocks are SEND blocks (balance decreases by 1 raw per block) so the op
+// commitment can ride in `link` — the same pattern the reference uses to carry
+// its ZK commitment on-chain.
 //
 //   cd nano && npm run e2e-blocks
 
@@ -12,6 +17,7 @@ import { replay } from "../indexer/replay";
 import { NANO_RPC, loadNanoRpcKey, nanoRpc } from "../lib/rpc";
 
 const RAW_01_XNO = "100000000000000000000000000000"; // 0.1 XNO in raw
+const SEND_DIFFICULTY = "fffffff800000000";
 
 interface Keys {
   seed: string;
@@ -21,32 +27,60 @@ interface Keys {
   nanoRpcKey?: string;
 }
 
-// Work generation: prefer server-side GPU PoW (rpc.nano.to work_generate);
-// fall back to client-side computeWork if the tier doesn't include it.
 async function getWork(key: string, hash: string): Promise<string> {
-  try {
-    const r = await nanoRpc(key, { action: "work_generate", hash });
-    return r.work as string;
-  } catch {
-    return nanocurrency.computeWork(hash);
+  const r = await nanoRpc(key, {
+    action: "work_generate",
+    hash,
+    difficulty: SEND_DIFFICULTY,
+  });
+  return r.work as string;
+}
+
+/** Build a state block with the correct on-chain JSON (nano_ prefix, no
+ *  link_as_account; link = raw 32-byte hex). */
+function buildBlock(
+  secretKey: string,
+  opts: {
+    work: string;
+    previous: string | null;
+    representative: string;
+    balance: string;
+    link: string;
   }
+) {
+  const b = nanocurrency.createBlock(secretKey, {
+    work: opts.work,
+    previous: opts.previous,
+    representative: opts.representative,
+    balance: opts.balance,
+    link: opts.link,
+  });
+  const blk: any = { ...b.block };
+  blk.account = blk.account.replace(/^xrb_/, "nano_");
+  delete blk.link_as_account;
+  return blk;
+}
+
+async function broadcast(key: string, blk: any) {
+  return nanoRpc(key, { action: "process", json_block: "true", block: blk });
 }
 
 async function main() {
   const keys: Keys = JSON.parse(fs.readFileSync(".keys.json", "utf-8"));
   const key = loadNanoRpcKey();
+  const REP = keys.address; // self-representative (fine for a test account)
   console.log("Account:", keys.address, "| RPC:", NANO_RPC);
 
   let info: any;
   try {
-    info = await nanoRpc(key, { action: "account_info", account: keys.address, representative: true, pending: true });
+    info = await nanoRpc(key, { action: "account_info", account: keys.address, representative: "true" });
   } catch {
     info = {};
   }
 
-  // 1. Open the account (receive the pending funds).
+  // 1. Open the account if it has no frontier.
   let frontier: string;
-  let balance = RAW_01_XNO;
+  let balance = BigInt(RAW_01_XNO);
   if (!info.frontier) {
     const pending = await nanoRpc(key, { action: "pending", account: keys.address, count: 1 });
     const blocks: string[] = pending.blocks ?? [];
@@ -56,27 +90,25 @@ async function main() {
       return;
     }
     const work = await getWork(key, keys.publicKey);
-    const open = nanocurrency.createBlock(keys.secretKey, {
+    const open = buildBlock(keys.secretKey, {
       work,
       previous: null,
-      representative: keys.address,
+      representative: REP,
       balance: RAW_01_XNO,
       link: blocks[0],
     });
-    const blk: any = { ...open.block };
-    blk.account = blk.account.replace(/^xrb_/, "nano_");
-    blk.link_as_account = "0";
-    const r = await nanoRpc(key, { action: "process", block: blk });
+    const r = await broadcast(key, open);
     frontier = r.hash;
     console.log("Opened account:", frontier);
   } else {
     frontier = info.frontier;
-    balance = info.balance;
+    balance = BigInt(info.balance);
   }
 
-  // 2. Broadcast L2 data blocks (each carries an op commitment in `link`).
+  // 2. Broadcast L2 data blocks (each a SEND carrying the op commitment).
   const ops: { op: Op; label: string }[] = [
     { op: { kind: "launch", supply: 1_000_000_000_000n, name: "E2E Coin", symbol: "E2E", decimals: 6, image: "" }, label: "launch" },
+    { op: { kind: "seedLiq", xno: 10n ** 28n, tokens: 950_000_000_000n }, label: "seedLiq" },
     { op: { kind: "buy", xno: 10n ** 28n, minTokens: 0n }, label: "buy" },
     { op: { kind: "stake", amount: 50_000_000_000n }, label: "stake" },
     { op: { kind: "unstake", amount: 10_000_000_000n }, label: "unstake" },
@@ -87,17 +119,15 @@ async function main() {
   for (const { op, label } of ops) {
     const link = opCommitment(op);
     const work = await getWork(key, frontier);
-    const blk = nanocurrency.createBlock(keys.secretKey, {
+    balance = balance - 1n; // send: spend 1 raw to carry the data
+    const blk = buildBlock(keys.secretKey, {
       work,
       previous: frontier,
-      representative: keys.address,
-      balance,
+      representative: REP,
+      balance: balance.toString(),
       link,
     });
-    const b: any = { ...blk.block };
-    b.account = b.account.replace(/^xrb_/, "nano_");
-    b.link_as_account = "0";
-    const r = await nanoRpc(key, { action: "process", block: b });
+    const r = await broadcast(key, blk);
     frontier = r.hash;
     console.log(`Broadcast ${label.padEnd(8)} -> ${frontier.slice(0, 12)}…`);
     sent.push({ sender: keys.address, op, hash: frontier });

@@ -20,13 +20,17 @@ export async function nanoRpc(
   key: string,
   body: Record<string, unknown>
 ): Promise<any> {
+  const payload = { ...body };
+  // rpc.nano.to accepts the key in the body and as an Authorization header
+  // (no "Bearer" prefix) — per the reference implementation.
+  if (key) payload.key = key;
   const res = await fetch(NANO_RPC, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-api-key": key,
+      ...(key ? { Authorization: key } : {}),
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
   const json = (await res.json()) as any;
   if (json.error) {
