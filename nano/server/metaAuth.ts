@@ -33,19 +33,24 @@ export interface SignedMetaUpdate {
   action: string;
 }
 
-/** Pure signature check: does `signature` sign this exact update by `account`? */
-export function verifyMetaSignature(u: SignedMetaUpdate): boolean {
-  if (!isNanoAddress(u.account)) return false;
-  if (typeof u.signature !== "string" || !/^[0-9a-fA-F]{128}$/.test(u.signature)) return false;
-  if (!Number.isSafeInteger(u.seq) || u.seq <= 0) return false;
-  if (typeof u.action !== "string" || u.action.length > 80) return false;
-  const digest = metaSignDigest(u.tokenId, u.seq, u.action, metaFieldsHash(u.meta));
+/** ed25519-blake2b check: does `signature` by `account` sign `digest` (64 hex)? */
+export function verifyAccountSignature(account: string, signature: string, digest: string): boolean {
+  if (!isNanoAddress(account)) return false;
+  if (typeof signature !== "string" || !/^[0-9a-fA-F]{128}$/.test(signature)) return false;
   try {
-    const publicKey = nanocurrency.derivePublicKey(u.account);
-    return (nanocurrency as any).verifyBlock({ hash: digest, signature: u.signature.toUpperCase(), publicKey });
+    const publicKey = nanocurrency.derivePublicKey(account);
+    return (nanocurrency as any).verifyBlock({ hash: digest, signature: signature.toUpperCase(), publicKey });
   } catch {
     return false;
   }
+}
+
+/** Pure signature check: does `signature` sign this exact update by `account`? */
+export function verifyMetaSignature(u: SignedMetaUpdate): boolean {
+  if (!Number.isSafeInteger(u.seq) || u.seq <= 0) return false;
+  if (typeof u.action !== "string" || u.action.length > 80) return false;
+  const digest = metaSignDigest(u.tokenId, u.seq, u.action, metaFieldsHash(u.meta));
+  return verifyAccountSignature(u.account, u.signature, digest);
 }
 
 export type MetaDecision =

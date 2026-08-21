@@ -11,6 +11,8 @@ export async function GET(req: Request) {
   return NextResponse.json({ comments: await commentsFor(tokenId) });
 }
 
+/** Signed-only: the author signs blake2b("holdfun-comment-v1"‖tokenId‖time‖text)
+ * with their wallet key; authorship is cryptographic, not claimed. */
 export async function POST(req: Request) {
   let body: any;
   try {
@@ -20,13 +22,16 @@ export async function POST(req: Request) {
   }
   const tokenId = body?.tokenId;
   const account = body?.account;
-  const text = typeof body?.text === "string" ? body.text.trim() : "";
-  // NOTE: `account` is only format-checked here — the comment author is not
-  // cryptographically proven. The UI must not treat it as an authenticated
-  // identity (see the dev-badge note in page.tsx).
-  if (!isTokenId(tokenId) || !isNanoAddress(account) || !text) {
-    return NextResponse.json({ error: "valid tokenId, account and text required" }, { status: 400 });
+  if (!isTokenId(tokenId) || !isNanoAddress(account)) {
+    return NextResponse.json({ error: "valid tokenId and account required" }, { status: 400 });
   }
-  const comment = await addComment(tokenId, account, text);
-  return NextResponse.json({ comment });
+  const r = await addComment(
+    tokenId,
+    account,
+    String(body?.text ?? ""),
+    Number(body?.time ?? 0),
+    String(body?.signature ?? "")
+  );
+  if (!r.ok) return NextResponse.json({ error: r.error }, { status: 401 });
+  return NextResponse.json({ comment: r.comment });
 }

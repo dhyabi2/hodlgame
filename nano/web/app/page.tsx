@@ -7,6 +7,7 @@ import { encodeOpLink } from "../core/oplink";
 import { tokenIdFromLaunchHash } from "../core/token";
 import { stringify } from "../core/json";
 import { metaFieldsHash, metaSignDigest } from "../core/metaAuth";
+import { commentSignDigest } from "../core/commentAuth";
 import { sanitizeMeta } from "../server/validate";
 import type { Op } from "../core/ops";
 import { Sparkline } from "./components/Sparkline";
@@ -804,7 +805,7 @@ function TokenDetail({
             sendOp={sendOp}
           />
         ) : (
-          <CommentThread tokenId={token.tokenId} comments={token.comments} account={keys?.address ?? ""} isDev={keys?.address === token.creator} />
+          <CommentThread tokenId={token.tokenId} comments={token.comments} keys={keys} isDev={keys?.address === token.creator} />
         )}
       </div>
 
@@ -1008,16 +1009,21 @@ function HoldersPanel({ holders, creator, decimals }: { holders: Holder[]; creat
   );
 }
 
-function CommentThread({ tokenId, comments, account, isDev }: { tokenId: string; comments: Comment[]; account: string; isDev: boolean }) {
+function CommentThread({ tokenId, comments, keys, isDev }: { tokenId: string; comments: Comment[]; keys: Keys | null; isDev: boolean }) {
   const [text, setText] = useState("");
   const [local, setLocal] = useState<Comment[]>([]);
 
   async function post() {
-    if (!account || !text.trim()) return;
+    const clean = text.trim().slice(0, 280);
+    if (!keys || !clean) return;
+    // Sign the exact text + timestamp: authorship is cryptographic.
+    const time = Date.now();
+    const digest = commentSignDigest(tokenId, time, clean);
+    const signature = nanocurrency.signBlock({ hash: digest, secretKey: keys.secretKey });
     const res = await fetch("/api/comments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ tokenId, account, text }),
+      body: JSON.stringify({ tokenId, account: keys.address, text: clean, time, signature }),
     });
     const j = await res.json();
     if (j.comment) setLocal((l) => [...l, j.comment]);
