@@ -101,4 +101,23 @@ indexer balance alone.
 | Headless idempotent withdrawal | **Exists** (`client/exchangeWithdraw.ts`) |
 | token-info / balance read API | **Exists** (`/api/exchange`) |
 | Docker verifying indexer | recipe above (package as needed) |
-| Per-balance Merkle proofs (light verify without full replay) | **Roadmap** — today, verify the whole root (cheap at current scale) |
+| Per-balance Merkle proofs (light verify without full replay) | **Exists** (`core/merkle.ts`, `/api/exchange?view=balance-proof`) |
+
+## 6. Light balance verification (Merkle proofs)
+
+For a busy exchange that doesn't want to replay for every balance check:
+`GET /api/exchange?view=balance-proof&token=<id>&account=<nano_>` returns
+`{ balanceRaw, balanceRoot, proof, stateRoot }`. Establish the `balanceRoot`
+once (recompute it from a periodic full verify, or trust its on-chain anchor),
+then verify each customer's balance in O(log N) with no replay:
+
+```ts
+import { verifyMerkleProof } from "core/merkle";
+// proof.leaf is `${tokenId}|${account}|${balanceRaw}` — check it matches your
+// request, then:
+if (verifyMerkleProof(proof) && proof.root === trustedBalanceRoot) creditVerified();
+```
+
+The `balanceRoot` is a pure function of the same ledger the `stateRoot`
+commits to, so anyone who replays confirms both — light clients get succinct
+proofs, full clients get end-to-end verification.

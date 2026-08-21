@@ -9,6 +9,7 @@ import { blake2bHex } from "blakejs";
 import * as nanocurrency from "nanocurrency";
 import { raw } from "./market";
 import { stateRoot } from "../core/canonical";
+import { balanceRoot, proveBalance, type MerkleProof } from "../core/merkle";
 
 /**
  * Deterministic per-customer deposit account, HD-derived from the exchange's
@@ -87,6 +88,33 @@ export async function tokenBalance(tokenId: string, account: string): Promise<Ba
     account,
     balanceRaw: (s?.balances.get(account) ?? 0n).toString(),
     decimals: s?.decimals ?? 6,
+    stateRoot: stateRoot(m.state),
+  };
+}
+
+export interface BalanceProofInfo {
+  tokenId: string;
+  account: string;
+  balanceRaw: string;
+  balanceRoot: string; // Merkle root over all holdings — establish once, reuse
+  proof: MerkleProof | null; // null if the account holds none of this token
+  stateRoot: string;
+}
+
+/** A Merkle inclusion proof of one holding against the balance root. Lets a
+ * light exchange verify this balance in O(log N) with core/merkle
+ * verifyMerkleProof — no full replay — after it has established the balance
+ * root once (recompute it from a periodic replay, or trust its on-chain
+ * anchor). */
+export async function balanceProof(tokenId: string, account: string): Promise<BalanceProofInfo> {
+  const m = await raw();
+  const s = m.state.get(tokenId);
+  return {
+    tokenId,
+    account,
+    balanceRaw: (s?.balances.get(account) ?? 0n).toString(),
+    balanceRoot: balanceRoot(m.state),
+    proof: proveBalance(m.state, tokenId, account),
     stateRoot: stateRoot(m.state),
   };
 }

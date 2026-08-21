@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { tokenInfo, tokenBalance } from "../../../server/exchange";
+import { tokenInfo, tokenBalance, balanceProof } from "../../../server/exchange";
 import { isTokenId, isNanoAddress } from "../../../server/validate";
 
 export const runtime = "nodejs";
@@ -29,6 +29,14 @@ export async function GET(req: Request) {
         return NextResponse.json({ error: "valid token and account required" }, { status: 400 });
       }
       return NextResponse.json(await tokenBalance(token, account));
+    }
+    if (view === "balance-proof") {
+      const token = (url.searchParams.get("token") ?? "").toLowerCase();
+      const account = url.searchParams.get("account") ?? "";
+      if (!isTokenId(token) || !isNanoAddress(account)) {
+        return NextResponse.json({ error: "valid token and account required" }, { status: 400 });
+      }
+      return NextResponse.json(await balanceProof(token, account));
     }
     return NextResponse.json({ error: "unknown view" }, { status: 400 });
   } catch (e: any) {
