@@ -45,9 +45,9 @@ assert.equal(lb.tokens.newest[0].tokenId, "cc", "newest ranks the latest FUNDED 
 assert.equal(lb.creators[0].account, A, "creator A ranks first (more holders/tokens)");
 assert.equal(lb.creators[0].tokenCount, 2);
 assert.equal(lb.creators[0].holders, 48);
-assert.ok(lb.creators[0].badges.includes("👥 Community"), "A earns Community badge (>=25 holders)");
-assert.ok(!lb.creators[0].badges.includes("🚀 Serial"), "A has only 2 tokens, no Serial badge");
-assert.ok(lb.creators.find((c) => c.account === A)!.badges.includes("💎 Blue Chip"), "A holds the most real pooled liquidity");
+assert.ok(lb.creators[0].badges.includes("Community"), "A earns Community badge (>=25 holders)");
+assert.ok(!lb.creators[0].badges.includes("Serial"), "A has only 2 tokens, no Serial badge");
+assert.ok(lb.creators.find((c) => c.account === A)!.badges.includes("Blue chip"), "A holds the most real pooled liquidity");
 
 // ── manipulation resistance: the zero-liquidity SPAM token is inert ──────────
 assert.ok(!lb.tokens.byVolume.some((t) => t.tokenId === "dd"), "zero-liq token cannot reach the volume board");
@@ -63,7 +63,7 @@ assert.deepEqual(computeLeaderboards(tokens, 123, 10), lb, "recompute is byte-id
 // holders: pool account excluded; h2 (9 in CCC + 3 in AAA) tops the value board
 assert.ok(!lb.holders.some((h) => h.account === "nano_poolcc"), "pool account is never ranked as a holder");
 assert.equal(lb.holders[0].account, "nano_h2", "h2 has the most aggregate holdings value");
-assert.ok(lb.holders[0].badges.includes("🐋 Whale"), "top holder gets the Whale badge");
+assert.ok(lb.holders[0].badges.includes("Whale"), "top holder gets the Whale badge");
 
 // creatorReputation scopes to one account
 assert.equal(creatorReputation(tokens, B)!.tokenCount, 1);

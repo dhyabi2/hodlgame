@@ -50,20 +50,20 @@ const fmtTok = (raw: string, dec: number) => {
   return `${neg ? "-" : ""}${whole}${frac ? "." + frac : ""}`;
 };
 const pctStr = (n: number | null | undefined) => (n == null ? "·" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`);
-const pctColor = (n: number | null | undefined) => (n == null ? "text-zinc-500" : n >= 0 ? "text-green-400" : "text-red-400");
+const pctColor = (n: number | null | undefined) => (n == null ? "text-neutral-500" : n >= 0 ? "text-black" : "text-black");
 
 const KIND_COLOR: Record<string, string> = {
-  launch: "bg-purple-900/60 text-purple-300", buy: "bg-green-900/60 text-green-300", sell: "bg-red-900/60 text-red-300",
+  launch: "bg-purple-900/60 text-purple-300", buy: "bg-neutral-100/60 text-black", sell: "bg-neutral-100/60 text-black",
   transfer: "bg-blue-900/60 text-blue-300", seedLiq: "bg-teal-900/60 text-teal-300", addLiq: "bg-teal-900/60 text-teal-300",
-  stake: "bg-amber-900/60 text-amber-300", unstake: "bg-amber-900/60 text-amber-300", claim: "bg-zinc-800 text-zinc-300",
+  stake: "bg-neutral-100/60 text-black", unstake: "bg-neutral-100/60 text-black", claim: "bg-neutral-100 text-neutral-700",
 };
 const ALL_KINDS = ["launch", "buy", "sell", "transfer", "seedLiq", "addLiq", "stake", "unstake", "claim"];
 
-const card = "rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4";
-const th = "text-left text-[10px] uppercase tracking-wider text-zinc-600 pb-1 pr-3";
+const card = "rounded-none border border-neutral-300 bg-white p-4";
+const th = "text-left text-[10px] uppercase tracking-wider text-neutral-400 pb-1 pr-3";
 const td = "py-1 pr-3 text-xs";
 const mono = "font-mono text-[11px]";
-const linkC = "text-green-400 hover:underline cursor-pointer";
+const linkC = "text-black hover:underline cursor-pointer";
 
 async function api(params: Record<string, string>) {
   const qs = new URLSearchParams(params).toString();
@@ -77,7 +77,7 @@ function Copy({ text }: { text: string }) {
     <button
       title="copy"
       onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1000); }); }}
-      className="ml-1 text-[10px] text-zinc-600 hover:text-green-400 align-middle"
+      className="ml-1 text-[10px] text-neutral-400 hover:text-black align-middle"
     >
       {done ? "✓" : "⧉"}
     </button>
@@ -85,12 +85,12 @@ function Copy({ text }: { text: string }) {
 }
 
 function KindBadge({ kind, valid }: { kind: string; valid?: boolean }) {
-  return <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${KIND_COLOR[kind] ?? "bg-zinc-800 text-zinc-300"}`}>{kind}{valid === false ? " ✕" : ""}</span>;
+  return <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${KIND_COLOR[kind] ?? "bg-neutral-100 text-neutral-700"}`}>{kind}{valid === false ? " ✕" : ""}</span>;
 }
 
 /** Inline SVG price line chart from a real analytics series. */
 function MiniChart({ series }: { series: { time: number; priceRaw: string }[] }) {
-  if (!series || series.length < 2) return <p className="text-xs text-zinc-600">not enough price points yet</p>;
+  if (!series || series.length < 2) return <p className="text-xs text-neutral-400">not enough price points yet</p>;
   const pts = series.map((p) => Number(BigInt(p.priceRaw)) / 1e30);
   const min = Math.min(...pts), max = Math.max(...pts), range = max - min || 1;
   const W = 560, H = 120;
@@ -99,15 +99,15 @@ function MiniChart({ series }: { series: { time: number; priceRaw: string }[] })
   return (
     <div className="overflow-x-auto">
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-28" preserveAspectRatio="none">
-        <polyline points={path} fill="none" stroke={up ? "#22c55e" : "#ef4444"} strokeWidth="1.5" />
-        <polyline points={`0,${H} ${path} ${W},${H}`} fill={up ? "#22c55e18" : "#ef444418"} stroke="none" />
+        <polyline points={path} fill="none" stroke={up ? "#000000" : "#666666"} strokeWidth="1.5" />
+        <polyline points={`0,${H} ${path} ${W},${H}`} fill={up ? "#00000018" : "#66666618"} stroke="none" />
       </svg>
     </div>
   );
 }
 
 function OpsTable({ items, go }: { items: any[]; go: (v: View) => void }) {
-  if (!items?.length) return <p className="text-xs text-zinc-600">no ops</p>;
+  if (!items?.length) return <p className="text-xs text-neutral-400">no ops</p>;
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -118,13 +118,13 @@ function OpsTable({ items, go }: { items: any[]; go: (v: View) => void }) {
               ? `${fmtXno((BigInt(it.fields.poolXno.after) - BigInt(it.fields.poolXno.before)).toString())} XNO`
               : it.balances?.length ? `${it.balances.length} balance change${it.balances.length > 1 ? "s" : ""}` : "";
             return (
-              <tr key={it.hash} className="border-t border-zinc-900 hover:bg-zinc-900/40">
+              <tr key={it.hash} className="border-t border-neutral-300 hover:bg-neutral-50">
                 <td className={td}><KindBadge kind={it.kind} valid={it.valid} /></td>
                 <td className={td}><span className={linkC} onClick={() => go({ kind: "token", q: it.tokenId })}>{it.symbol || short(it.tokenId, 6)}</span></td>
                 <td className={`${td} ${mono}`}><span className={linkC} onClick={() => go({ kind: "account", q: it.sender })}>{short(it.sender, 10)}</span></td>
-                <td className={`${td} text-zinc-400`}>{it.valid === false ? <span className="text-red-400">{it.reason}</span> : sum}</td>
+                <td className={`${td} text-neutral-600`}>{it.valid === false ? <span className="text-black">{it.reason}</span> : sum}</td>
                 <td className={`${td} ${mono}`}><span className={linkC} onClick={() => go({ kind: "op", q: it.hash })}>{short(it.hash, 8)}</span></td>
-                <td className={`${td} text-zinc-500`} title={absTime(it.timestamp)}>{ago(it.timestamp)}</td>
+                <td className={`${td} text-neutral-500`} title={absTime(it.timestamp)}>{ago(it.timestamp)}</td>
               </tr>
             );
           })}
@@ -135,11 +135,11 @@ function OpsTable({ items, go }: { items: any[]; go: (v: View) => void }) {
 }
 
 function Row({ k, children }: { k: any; children: any }) {
-  return <div className="flex gap-3 py-1 border-t border-zinc-900/60 text-xs"><span className="w-36 shrink-0 text-zinc-500">{k}</span><span className="min-w-0 break-all">{children}</span></div>;
+  return <div className="flex gap-3 py-1 border-t border-neutral-300/60 text-xs"><span className="w-36 shrink-0 text-neutral-500">{k}</span><span className="min-w-0 break-all">{children}</span></div>;
 }
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: any }) {
-  return <div className="rounded-xl border border-zinc-900 bg-[#0a0a0a] p-3"><p className="text-[10px] uppercase tracking-wider text-zinc-600">{label}</p><p className="text-lg font-black">{value}</p>{sub && <p className="text-[11px] text-zinc-500">{sub}</p>}</div>;
+  return <div className="rounded-none border border-neutral-300 bg-white p-3"><p className="text-[10px] uppercase tracking-wider text-neutral-400">{label}</p><p className="text-lg font-black">{value}</p>{sub && <p className="text-[11px] text-neutral-500">{sub}</p>}</div>;
 }
 
 export default function Explorer() {
@@ -185,33 +185,33 @@ export default function Explorer() {
   return (
     <div className="space-y-4">
       <div className="flex gap-2">
-        <input className="w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-green-500 font-mono"
+        <input className="w-full rounded-none border border-neutral-300 bg-white px-4 py-3 text-sm text-black placeholder-neutral-400 focus:outline-none focus:border-black font-mono"
           placeholder="search: token / tokenId / nano_ address / block hash" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
-        <button className="shrink-0 rounded-xl bg-green-500 px-4 py-3 text-sm font-bold text-black hover:bg-green-400" onClick={submit}>Search</button>
+        <button className="shrink-0 rounded-none bg-black px-4 py-3 text-sm font-bold text-white hover:bg-neutral-800" onClick={submit}>Search</button>
       </div>
       <div className="flex gap-2 text-xs flex-wrap">
         {(["stats", "feed", "trust"] as const).map((k) => (
-          <button key={k} onClick={() => go({ kind: k })} className={`px-3 py-1.5 rounded-full font-bold ${view.kind === k ? "bg-green-500 text-black" : "bg-zinc-900 text-zinc-400 hover:text-zinc-200"}`}>
+          <button key={k} onClick={() => go({ kind: k })} className={`px-3 py-1.5 rounded-full font-bold ${view.kind === k ? "bg-black text-white" : "bg-white text-neutral-600 hover:text-neutral-800"}`}>
             {k === "stats" ? "overview" : k === "feed" ? "ops feed" : "trust"}
           </button>
         ))}
-        {!["stats", "feed", "trust"].includes(view.kind) && <span className="px-3 py-1.5 rounded-full bg-zinc-800 text-zinc-300 font-mono">{view.kind}: {short((view as any).q ?? "", 10)}</span>}
+        {!["stats", "feed", "trust"].includes(view.kind) && <span className="px-3 py-1.5 rounded-full bg-neutral-100 text-neutral-700 font-mono">{view.kind}: {short((view as any).q ?? "", 10)}</span>}
       </div>
 
-      {loading && <p className="text-xs text-zinc-600">loading…</p>}
-      {err && <p className="text-xs text-red-400">{err}</p>}
+      {loading && <p className="text-xs text-neutral-400">loading…</p>}
+      {err && <p className="text-xs text-black">{err}</p>}
       {!loading && !err && data && (
         <>
           {view.kind === "stats" && <StatsPanel d={data} go={go} />}
           {view.kind === "feed" && (
             <div className={card}>
               <div className="flex gap-1.5 flex-wrap mb-3">
-                <button onClick={() => setKindFilter("")} className={`px-2 py-1 rounded-full text-[10px] font-bold ${!kindFilter ? "bg-green-500 text-black" : "bg-zinc-900 text-zinc-400"}`}>all</button>
-                {ALL_KINDS.map((k) => <button key={k} onClick={() => setKindFilter(k)} className={`px-2 py-1 rounded-full text-[10px] font-bold ${kindFilter === k ? "bg-green-500 text-black" : "bg-zinc-900 text-zinc-400"}`}>{k}</button>)}
+                <button onClick={() => setKindFilter("")} className={`px-2 py-1 rounded-full text-[10px] font-bold ${!kindFilter ? "bg-black text-white" : "bg-white text-neutral-600"}`}>all</button>
+                {ALL_KINDS.map((k) => <button key={k} onClick={() => setKindFilter(k)} className={`px-2 py-1 rounded-full text-[10px] font-bold ${kindFilter === k ? "bg-black text-white" : "bg-white text-neutral-600"}`}>{k}</button>)}
               </div>
-              <p className="text-[11px] text-zinc-600 mb-2">{data.total} ops · newest first{kindFilter ? ` · ${kindFilter}` : " · live"}</p>
+              <p className="text-[11px] text-neutral-400 mb-2">{data.total} ops · newest first{kindFilter ? ` · ${kindFilter}` : " · live"}</p>
               <OpsTable items={feedItems} go={go} />
-              {feedNext != null && <button onClick={loadMoreFeed} className="mt-3 w-full rounded-xl bg-zinc-900 py-2 text-xs font-bold text-zinc-300 hover:bg-zinc-800">Load more</button>}
+              {feedNext != null && <button onClick={loadMoreFeed} className="mt-3 w-full rounded-none bg-white py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-100">Load more</button>}
             </div>
           )}
           {view.kind === "results" && <Results data={data} go={go} />}
@@ -238,24 +238,24 @@ function StatsPanel({ d, go }: { d: any; go: (v: View) => void }) {
       </div>
       <div className={card}>
         <h3 className="font-black text-sm mb-2">Top tokens by market cap</h3>
-        {d.topByMcap.length === 0 && <p className="text-xs text-zinc-600">no tokens yet</p>}
+        {d.topByMcap.length === 0 && <p className="text-xs text-neutral-400">no tokens yet</p>}
         {d.topByMcap.map((t: any) => (
-          <div key={t.tokenId} className="flex items-center justify-between text-xs py-1.5 border-t border-zinc-900/60">
-            <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{t.name || short(t.tokenId, 8)} <span className="text-zinc-600">{t.symbol}</span></span>
-            <span className="flex gap-3"><span>{fmtXno(t.marketCapRaw)} mcap</span><span className={pctColor(t.change24h)}>{pctStr(t.change24h)}</span><span className="text-zinc-500">{t.holders}h</span></span>
+          <div key={t.tokenId} className="flex items-center justify-between text-xs py-1.5 border-t border-neutral-300/60">
+            <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{t.name || short(t.tokenId, 8)} <span className="text-neutral-400">{t.symbol}</span></span>
+            <span className="flex gap-3"><span>{fmtXno(t.marketCapRaw)} mcap</span><span className={pctColor(t.change24h)}>{pctStr(t.change24h)}</span><span className="text-neutral-500">{t.holders}h</span></span>
           </div>
         ))}
       </div>
       <div className={card}>
         <h3 className="font-black text-sm mb-2">Latest launches</h3>
         {d.latest.map((t: any) => (
-          <div key={t.tokenId} className="flex items-center justify-between text-xs py-1.5 border-t border-zinc-900/60">
-            <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{t.name || short(t.tokenId, 8)} <span className="text-zinc-600">{t.symbol}</span></span>
-            <span className="text-zinc-500" title={absTime(t.createdAt)}>{ago(t.createdAt)}</span>
+          <div key={t.tokenId} className="flex items-center justify-between text-xs py-1.5 border-t border-neutral-300/60">
+            <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{t.name || short(t.tokenId, 8)} <span className="text-neutral-400">{t.symbol}</span></span>
+            <span className="text-neutral-500" title={absTime(t.createdAt)}>{ago(t.createdAt)}</span>
           </div>
         ))}
       </div>
-      <p className="text-[11px] text-zinc-600">state root <span className={mono}>{short(d.stateRoot, 12)}</span><Copy text={d.stateRoot} /> · verify with <span className={mono}>npx tsx scripts/verify.ts</span></p>
+      <p className="text-[11px] text-neutral-400">state root <span className={mono}>{short(d.stateRoot, 12)}</span><Copy text={d.stateRoot} /> · verify with <span className={mono}>npx tsx scripts/verify.ts</span></p>
     </div>
   );
 }
@@ -265,10 +265,10 @@ function Results({ data, go }: { data: any; go: (v: View) => void }) {
   if (data.type === "account") return <AccountDetail d={data.data} go={go} />;
   if (data.type === "token") return <TokenDetailX d={data.data} go={go} />;
   if (data.type === "tokens")
-    return <div className={card}>{data.data.length === 0 ? <p className="text-xs text-zinc-600">no matches</p> : data.data.map((t: any) => (
-      <div key={t.tokenId} className="flex items-center justify-between text-sm py-1 border-t border-zinc-900/60">
+    return <div className={card}>{data.data.length === 0 ? <p className="text-xs text-neutral-400">no matches</p> : data.data.map((t: any) => (
+      <div key={t.tokenId} className="flex items-center justify-between text-sm py-1 border-t border-neutral-300/60">
         <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{t.name || short(t.tokenId, 8)} ({t.symbol})</span>
-        <span className="text-xs text-zinc-500">{fmtXno(t.marketCapRaw)} mcap · {t.holders}h</span>
+        <span className="text-xs text-neutral-500">{fmtXno(t.marketCapRaw)} mcap · {t.holders}h</span>
       </div>))}</div>;
   if (data.type === "block")
     return <div className={card}>
@@ -280,19 +280,19 @@ function Results({ data, go }: { data: any; go: (v: View) => void }) {
       <Row k="classified as">{data.data.classification?.kind}{data.data.classification?.tokenId ? ` · token ${short(data.data.classification.tokenId, 8)}` : ""}</Row>
       <Hexdump ann={data.data.annotation} />
     </div>;
-  return <p className="text-xs text-zinc-600">nothing found</p>;
+  return <p className="text-xs text-neutral-400">nothing found</p>;
 }
 
 function Hexdump({ ann }: { ann: any }) {
   if (!ann?.segments) return null;
   return (
     <div className="mt-2">
-      <p className="text-[10px] uppercase tracking-wider text-zinc-600 mb-1">link decode ({ann.kind})</p>
+      <p className="text-[10px] uppercase tracking-wider text-neutral-400 mb-1">link decode ({ann.kind})</p>
       <div className="space-y-0.5">
         {ann.segments.map((s: any, i: number) => (
           <div key={i} className="flex gap-2 text-[11px]">
-            <span className={`${mono} text-green-400 break-all w-1/2`}>{s.bytes}</span>
-            <span className="text-zinc-500">{s.label}{s.value ? `: ${s.value}` : ""}</span>
+            <span className={`${mono} text-black break-all w-1/2`}>{s.bytes}</span>
+            <span className="text-neutral-500">{s.label}{s.value ? `: ${s.value}` : ""}</span>
           </div>
         ))}
       </div>
@@ -307,13 +307,13 @@ function OpDetail({ d, go }: { d: any; go: (v: View) => void }) {
         <div className="flex items-center gap-2 mb-2 flex-wrap">
           <KindBadge kind={d.kind} valid={d.valid} />
           <span className={linkC} onClick={() => go({ kind: "token", q: d.tokenId })}>{d.symbol || short(d.tokenId, 8)}</span>
-          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${d.confirmed ? "bg-green-900/60 text-green-300" : "bg-amber-900/60 text-amber-300"}`}>{d.confirmed ? "confirmed" : "pending"}</span>
-          <span className="text-zinc-600 text-xs" title={absTime(d.timestamp)}>{ago(d.timestamp)}</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${d.confirmed ? "bg-neutral-100/60 text-black" : "bg-neutral-100/60 text-black"}`}>{d.confirmed ? "confirmed" : "pending"}</span>
+          <span className="text-neutral-400 text-xs" title={absTime(d.timestamp)}>{ago(d.timestamp)}</span>
         </div>
         <Row k="hash"><span className={mono}>{d.hash}</span><Copy text={d.hash} /></Row>
         {d.carriers && <Row k="carrier blocks"><span className={mono}>{d.carriers.map((c: string) => short(c, 10)).join(" + ")} (fragment pair)</span></Row>}
         <Row k="signer"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.sender })}>{d.sender}</span><Copy text={d.sender} /></Row>
-        {!d.valid && <Row k="rejected"><span className="text-red-400">{d.reason}</span></Row>}
+        {!d.valid && <Row k="rejected"><span className="text-black">{d.reason}</span></Row>}
         {d.depositEdge && <Row k="funded by deposit"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "op", q: d.depositEdge.deposit })}>{short(d.depositEdge.deposit, 12)}</span> · {fmtXno(d.depositEdge.amountRaw)} XNO</Row>}
         <Row k="on Nano L1"><a className={linkC} href={`https://nanexplorer.com/nano/block/${d.hash}`} target="_blank" rel="noreferrer">nanexplorer ↗</a></Row>
       </div>
@@ -325,13 +325,13 @@ function OpDetail({ d, go }: { d: any; go: (v: View) => void }) {
       )}
       {d.balances?.length > 0 && (
         <div className={card}><h3 className="font-black text-sm mb-2">Balance movements</h3>
-          {d.balances.map((b: any) => <Row key={b.account} k={short(b.account, 10)}><span className={b.delta.startsWith("-") ? "text-red-400" : "text-green-400"}>{b.delta}</span> raw tokens</Row>)}
+          {d.balances.map((b: any) => <Row key={b.account} k={short(b.account, 10)}><span className={b.delta.startsWith("-") ? "text-black" : "text-black"}>{b.delta}</span> raw tokens</Row>)}
         </div>
       )}
       {d.payoutCoverage?.length > 0 && (
         <div className={card}><h3 className="font-black text-sm mb-2">Payout story</h3>
           {d.payoutCoverage.map((c: any) => (
-            <div key={c.sendHash} className="text-xs py-1 border-t border-zinc-900/60">pool send <span className={mono}>{short(c.sendHash, 10)}</span> → {fmtXno(c.amountRaw)} XNO to {short(c.recipient, 10)}, covering {c.covers.map((x: any, i: number) => <span key={i}>{x.kind} {x.hash ? short(x.hash, 8) : ""} ({fmtXno(x.amountRaw)} XNO){i < c.covers.length - 1 ? " + " : ""}</span>)}</div>
+            <div key={c.sendHash} className="text-xs py-1 border-t border-neutral-300/60">pool send <span className={mono}>{short(c.sendHash, 10)}</span> → {fmtXno(c.amountRaw)} XNO to {short(c.recipient, 10)}, covering {c.covers.map((x: any, i: number) => <span key={i}>{x.kind} {x.hash ? short(x.hash, 8) : ""} ({fmtXno(x.amountRaw)} XNO){i < c.covers.length - 1 ? " + " : ""}</span>)}</div>
           ))}
         </div>
       )}
@@ -377,7 +377,7 @@ function AccountDetail({ d, go }: { d: any; go: (v: View) => void }) {
       )}
       <div className={card}><h3 className="font-black text-sm mb-2">Ops ({d.opsTotal})</h3>
         <OpsTable items={ops} go={go} />
-        {next != null && <button onClick={more} className="mt-3 w-full rounded-xl bg-zinc-900 py-2 text-xs font-bold text-zinc-300 hover:bg-zinc-800">Load more</button>}
+        {next != null && <button onClick={more} className="mt-3 w-full rounded-none bg-white py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-100">Load more</button>}
       </div>
     </div>
   );
@@ -399,11 +399,11 @@ function TokenDetailX({ d, go }: { d: any; go: (v: View) => void }) {
         <div className="flex items-center gap-3">
           {d.image ? <img src={d.image} alt="" className="w-12 h-12 rounded-full object-cover" onError={(e) => ((e.target as HTMLImageElement).style.display = "none")} /> : null}
           <div className="min-w-0">
-            <h3 className="font-black">{d.name || short(d.tokenId, 8)} <span className="text-zinc-500">({d.symbol})</span> {d.authority?.immutable && <span className="px-2 py-0.5 rounded-full bg-purple-900/60 text-purple-300 text-[10px] font-bold">immutable</span>}</h3>
+            <h3 className="font-black">{d.name || short(d.tokenId, 8)} <span className="text-neutral-500">({d.symbol})</span> {d.authority?.immutable && <span className="px-2 py-0.5 rounded-full bg-purple-900/60 text-purple-300 text-[10px] font-bold">immutable</span>}</h3>
             <p className="text-sm">{fmtXno(d.priceRaw)} XNO <span className={pctColor(d.change24h)}>{pctStr(d.change24h)} 24h</span> · mcap {fmtXno(d.marketCapRaw)}</p>
           </div>
         </div>
-        {d.description && <p className="text-xs text-zinc-400 mt-2">{d.description}</p>}
+        {d.description && <p className="text-xs text-neutral-600 mt-2">{d.description}</p>}
         <div className="flex gap-3 mt-2 text-xs">
           {d.website && <a className={linkC} href={d.website} target="_blank" rel="noreferrer">website ↗</a>}
           {d.twitter && <a className={linkC} href={d.twitter} target="_blank" rel="noreferrer">twitter ↗</a>}
@@ -419,7 +419,7 @@ function TokenDetailX({ d, go }: { d: any; go: (v: View) => void }) {
         {d.authority && <Row k="metadata authority"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.authority.authority })}>{short(d.authority.authority, 12)}</span></Row>}
         {d.launchHash && <Row k="launch block"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "op", q: d.launchHash })}>{short(d.launchHash, 12)}</span></Row>}
         <Row k="created" >{absTime(d.createdAt)}</Row>
-        <Row k="decimals">{d.decimals} <span className="text-zinc-600">(consensus-bound, immutable)</span></Row>
+        <Row k="decimals">{d.decimals} <span className="text-neutral-400">(consensus-bound, immutable)</span></Row>
         <Row k="supply">{fmtTok(d.supply, d.decimals)}</Row>
         <Row k="treasury">{fmtTok(d.treasury, d.decimals)}</Row>
         <Row k="pool tokens">{fmtTok(d.poolTokens, d.decimals)}</Row>
@@ -430,7 +430,7 @@ function TokenDetailX({ d, go }: { d: any; go: (v: View) => void }) {
 
       {d.reserves && (
         <div className={card}>
-          <h3 className="font-black text-sm mb-2">Proof of reserves <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${reservesMatch ? "bg-green-900/60 text-green-300" : "bg-red-900/60 text-red-300"}`}>{reservesMatch ? "backed" : "check"}</span></h3>
+          <h3 className="font-black text-sm mb-2">Proof of reserves <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${reservesMatch ? "bg-neutral-100/60 text-black" : "bg-neutral-100/60 text-black"}`}>{reservesMatch ? "backed" : "check"}</span></h3>
           <Row k="pool account"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.reserves.poolAddress })}>{short(d.reserves.poolAddress, 12)}</span><Copy text={d.reserves.poolAddress} /></Row>
           <Row k="indexed pool XNO">{fmtXno(d.reserves.indexedPoolXno)} XNO</Row>
           <Row k="on-chain balance">{fmtXno(d.reserves.onchainBalance)} XNO</Row>
@@ -442,22 +442,22 @@ function TokenDetailX({ d, go }: { d: any; go: (v: View) => void }) {
         <div className={card}><h3 className="font-black text-sm mb-2">Recent trades</h3>
           <div className="overflow-x-auto"><table className="w-full"><thead><tr><th className={th}></th><th className={th}>account</th><th className={th}>amount</th><th className={th}>price</th><th className={th}>age</th></tr></thead>
             <tbody>{d.trades.map((t: any, i: number) => (
-              <tr key={i} className="border-t border-zinc-900"><td className={td}><KindBadge kind={t.kind} /></td>
+              <tr key={i} className="border-t border-neutral-300"><td className={td}><KindBadge kind={t.kind} /></td>
                 <td className={`${td} ${mono}`}><span className={linkC} onClick={() => go({ kind: "account", q: t.account })}>{short(t.account, 10)}</span></td>
                 <td className={td}>{fmtTok(t.amountRaw, d.decimals)}</td><td className={td}>{fmtXno(t.priceRaw)}</td>
-                <td className={`${td} text-zinc-500`} title={absTime(t.time)}>{ago(t.time)}</td></tr>))}</tbody></table></div>
+                <td className={`${td} text-neutral-500`} title={absTime(t.time)}>{ago(t.time)}</td></tr>))}</tbody></table></div>
         </div>
       )}
 
       <div className={card}>
-        <h3 className="font-black text-sm mb-2">Holders ({d.holdersTotal}) <span className="text-[11px] font-normal text-zinc-500">top-10 hold {d.concentration.top10Pct.toFixed(1)}%</span></h3>
+        <h3 className="font-black text-sm mb-2">Holders ({d.holdersTotal}) <span className="text-[11px] font-normal text-neutral-500">top-10 hold {d.concentration.top10Pct.toFixed(1)}%</span></h3>
         {holders.map((h: any) => (
-          <div key={h.account} className="flex items-center justify-between text-xs py-1 border-t border-zinc-900/60">
+          <div key={h.account} className="flex items-center justify-between text-xs py-1 border-t border-neutral-300/60">
             <span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: h.account })}>{short(h.account, 12)}</span>
-            <span>{fmtTok(h.balance, d.decimals)} <span className="text-zinc-600">({h.pct.toFixed(2)}%)</span></span>
+            <span>{fmtTok(h.balance, d.decimals)} <span className="text-neutral-400">({h.pct.toFixed(2)}%)</span></span>
           </div>
         ))}
-        {hnext != null && <button onClick={moreHolders} className="mt-3 w-full rounded-xl bg-zinc-900 py-2 text-xs font-bold text-zinc-300 hover:bg-zinc-800">Load more</button>}
+        {hnext != null && <button onClick={moreHolders} className="mt-3 w-full rounded-none bg-white py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-100">Load more</button>}
       </div>
 
       <div className={card}><h3 className="font-black text-sm mb-2">History</h3><OpsTable items={d.ops} go={go} /></div>
@@ -476,12 +476,12 @@ function VerifyButton({ serverRoot }: { serverRoot: string }) {
   }
   return (
     <div className="mt-2">
-      <button onClick={run} disabled={state === "running"} className="rounded-xl bg-green-500 px-4 py-2 text-xs font-bold text-black hover:bg-green-400 disabled:opacity-40">
+      <button onClick={run} disabled={state === "running"} className="rounded-none bg-black px-4 py-2 text-xs font-bold text-white hover:bg-neutral-800 disabled:opacity-40">
         {state === "running" ? "recomputing in your browser…" : "Verify in your browser"}
       </button>
       {res && <div className="mt-2 text-xs">
-        {res.error ? <p className="text-amber-400">verify error: {res.error}</p> : <>
-          <p className={res.ok ? "text-green-400 font-bold" : "text-red-400 font-bold"}>{res.ok ? "✓ VERIFIED — your browser reproduced the server's root" : "✗ MISMATCH — server root differs from your recomputation"}</p>
+        {res.error ? <p className="text-black">verify error: {res.error}</p> : <>
+          <p className={res.ok ? "text-black font-bold" : "text-black font-bold"}>{res.ok ? "✓ VERIFIED — your browser reproduced the server's root" : "✗ MISMATCH — server root differs from your recomputation"}</p>
           <Row k="your root"><span className={mono}>{res.localRoot || "—"}</span></Row>
           <Row k="server root"><span className={mono}>{res.serverRoot || "—"}</span></Row>
           <Row k="replayed">{res.accounts} accounts · {res.tokens} tokens · {res.ops} ops (no secrets)</Row>
@@ -502,9 +502,9 @@ function TrustPanel({ d, go }: { d: any; go: (v: View) => void }) {
         <VerifyButton serverRoot={d.stateRoot} />
       </div>
       <div className={card}><h3 className="font-black text-sm mb-2">Proof of reserves — all pools</h3>
-        {d.pools.length === 0 && <p className="text-xs text-zinc-600">no pools yet</p>}
+        {d.pools.length === 0 && <p className="text-xs text-neutral-400">no pools yet</p>}
         {d.pools.map((p: any) => (
-          <div key={p.tokenId} className="text-xs py-1.5 border-t border-zinc-900/60">
+          <div key={p.tokenId} className="text-xs py-1.5 border-t border-neutral-300/60">
             <span className={linkC} onClick={() => go({ kind: "token", q: p.tokenId })}>{p.symbol || short(p.tokenId, 8)}</span> · indexed {fmtXno(p.indexedPoolXno)} · on-chain {fmtXno(p.onchainBalance)} · owed {p.outstandingObligations === "rpc-error" ? "?" : fmtXno(p.outstandingObligations)} XNO
           </div>
         ))}

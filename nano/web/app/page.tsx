@@ -177,9 +177,9 @@ const quoteSell = (poolXno: string, poolTokens: string, tokens: bigint): bigint 
 
 
 const inputC =
-  "w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-green-500";
+  "w-full rounded-none border border-neutral-300 bg-white px-4 py-3 text-sm text-black placeholder-neutral-400 focus:outline-none focus:border-black";
 const btn =
-  "w-full rounded-xl bg-green-500 px-4 py-3 text-sm font-bold text-black hover:bg-green-400 disabled:opacity-40 transition";
+  "w-full rounded-none bg-black px-4 py-3 text-sm font-bold text-white hover:bg-neutral-800 disabled:opacity-40 transition";
 
 export default function Home() {
   const [keys, setKeys] = useState<Keys | null>(null);
@@ -332,18 +332,17 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-[#050505] text-white pb-20">
-      <header className="sticky top-0 z-20 border-b border-zinc-900 bg-[#050505]/90 backdrop-blur">
-        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+    <main className="min-h-screen bg-white text-black pb-20">
+      <header className="sticky top-0 z-20 border-b border-neutral-300 bg-white/90 backdrop-blur">
+        <div className="w-full px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xl">🎉</span>
-          <span className="text-lg font-black tracking-tight bg-gradient-to-r from-green-400 to-emerald-300 bg-clip-text text-transparent">
+          <span className="text-lg font-black tracking-tight text-black">
             HoldFun
           </span>
         </div>
         {keys ? (
           <button
-            className="text-xs text-zinc-300 font-mono hover:text-white"
+            className="text-xs text-neutral-700 font-mono hover:text-black"
             title="copy address"
             onClick={() => {
               navigator.clipboard?.writeText(keys.address);
@@ -353,16 +352,16 @@ export default function Home() {
             {short(keys.address)}
           </button>
         ) : (
-          <button className="text-xs text-amber-400 font-bold" onClick={promptUnlock}>
-            🔒 unlock
+          <button className="text-xs text-black font-bold" onClick={promptUnlock}>
+            unlock
           </button>
         )}
         </div>
       </header>
 
-      <div className="max-w-6xl mx-auto px-4 py-5">
+      <div className="w-full px-4 py-5">
         {selectedId && detail ? (
-          <div className="max-w-3xl mx-auto">
+          <div className="w-full">
             <TokenDetail
               token={detail}
               keys={keys}
@@ -381,11 +380,11 @@ export default function Home() {
         ) : tab === "scan" ? (
           <Explorer />
         ) : tab === "portfolio" ? (
-          <div className="max-w-3xl mx-auto">
+          <div className="w-full">
             <Portfolio tokens={tokens} onSelect={(id) => setSelectedId(id)} account={keys?.address} />
           </div>
         ) : tab === "create" ? (
-          <div className="max-w-xl mx-auto">
+          <div className="w-full">
             <CreateToken
               busy={busy}
               setBusy={setBusy}
@@ -400,15 +399,15 @@ export default function Home() {
             />
           </div>
         ) : (
-          <div className="max-w-xl mx-auto">
+          <div className="w-full">
             <WalletPanel keys={keys} hasWallet={hasWallet} unlock={unlock} lock={lock} remove={remove} say={say} />
           </div>
         )}
 
         {log.length > 0 && (
-          <div className="mt-4 rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-3 text-xs space-y-1">
+          <div className="mt-4 rounded-none border border-neutral-300 bg-white p-3 text-xs space-y-1">
             {log.map((l, i) => (
-              <p key={i} className="text-zinc-400">{l}</p>
+              <p key={i} className="text-neutral-600">{l}</p>
             ))}
           </div>
         )}
@@ -459,10 +458,10 @@ function UnlockModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border border-zinc-800 bg-[#0a0a0a] p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full rounded-none sm:rounded-none border border-neutral-300 bg-white p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <p className="text-sm font-bold text-zinc-200">{hasWallet ? "Unlock wallet" : "Set up your wallet"}</p>
-          <button className="text-zinc-500 hover:text-zinc-300 text-lg leading-none" onClick={onClose}>×</button>
+          <p className="text-sm font-bold text-neutral-800">{hasWallet ? "Unlock wallet" : "Set up your wallet"}</p>
+          <button className="text-neutral-500 hover:text-neutral-700 text-lg leading-none" onClick={onClose}>×</button>
         </div>
         {hasWallet ? (
           <>
@@ -475,13 +474,13 @@ function UnlockModal({
               onChange={(e) => setPw(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && unlock()}
             />
-            {err && <p className="text-xs text-red-400">{err}</p>}
+            {err && <p className="text-xs text-black">{err}</p>}
             <button className={btn} disabled={busy} onClick={unlock}>{busy ? "unlocking…" : "Unlock"}</button>
-            <p className="text-[11px] text-zinc-600">decrypted in your browser — your seed never leaves it</p>
+            <p className="text-[11px] text-neutral-400">decrypted in your browser — your seed never leaves it</p>
           </>
         ) : (
           <>
-            <p className="text-xs text-zinc-400">You need a wallet to trade. It’s created and encrypted right in your browser — takes a few seconds.</p>
+            <p className="text-xs text-neutral-600">You need a wallet to trade. It’s created and encrypted right in your browser — takes a few seconds.</p>
             <button className={btn} onClick={goSetup}>Create / import wallet →</button>
           </>
         )}
@@ -609,17 +608,17 @@ function ConnectedWallet({
   };
 
   return (
-    <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-5 space-y-4">
+    <div className="rounded-none border border-neutral-300 bg-white p-5 space-y-4">
       <div>
-        <p className="text-[11px] text-zinc-500 mb-1">balance</p>
-        <p className="text-3xl font-black">{balance == null ? "…" : fmtXno(balance)} <span className="text-lg text-zinc-500">XNO</span></p>
+        <p className="text-[11px] text-neutral-500 mb-1">balance</p>
+        <p className="text-3xl font-black">{balance == null ? "…" : fmtXno(balance)} <span className="text-lg text-neutral-500">XNO</span></p>
       </div>
 
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
-        <p className="text-[11px] text-zinc-500 mb-1">your address · send XNO here to fund</p>
+      <div className="rounded-none border border-neutral-300 bg-neutral-50 p-3">
+        <p className="text-[11px] text-neutral-500 mb-1">your address · send XNO here to fund</p>
         <div className="flex items-center gap-2">
-          <span className="text-xs font-mono text-zinc-300 break-all flex-1">{keys.address}</span>
-          <button className="shrink-0 rounded-lg bg-zinc-800 px-2.5 py-1.5 text-[11px] font-bold text-zinc-300 hover:bg-zinc-700" onClick={copy}>
+          <span className="text-xs font-mono text-neutral-700 break-all flex-1">{keys.address}</span>
+          <button className="shrink-0 rounded-none bg-neutral-100 px-2.5 py-1.5 text-[11px] font-bold text-neutral-700 hover:bg-neutral-200" onClick={copy}>
             {copied ? "copied" : "copy"}
           </button>
         </div>
@@ -627,14 +626,14 @@ function ConnectedWallet({
 
       <div className="grid grid-cols-2 gap-2">
         <button
-          className="rounded-xl border border-zinc-800 py-3 text-sm font-bold text-zinc-200 hover:border-green-500 disabled:opacity-40"
+          className="rounded-none border border-neutral-300 py-3 text-sm font-bold text-neutral-800 hover:border-black disabled:opacity-40"
           disabled={receiving}
           onClick={() => receiveAll(true)}
         >
           {receiving ? "receiving…" : "Receive pending"}
         </button>
         <button
-          className="rounded-xl border border-zinc-800 py-3 text-sm font-bold text-zinc-200 hover:border-amber-500"
+          className="rounded-none border border-neutral-300 py-3 text-sm font-bold text-neutral-800 hover:border-black"
           onClick={() => setReveal((v) => !v)}
         >
           Back up seed
@@ -642,28 +641,28 @@ function ConnectedWallet({
       </div>
 
       {reveal && (
-        <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 space-y-2">
-          <p className="text-[11px] text-amber-400 font-bold">⚠ Your seed is full control of this wallet. Never share it. Anyone with it can drain your funds.</p>
+        <div className="rounded-none border border-neutral-400 bg-neutral-100 p-3 space-y-2">
+          <p className="text-[11px] text-black font-bold">Your seed is full control of this wallet. Never share it. Anyone with it can drain your funds.</p>
           {!revealed ? (
             <>
               <input className={inputC} type="password" placeholder="wallet password" value={revealPw} onChange={(e) => setRevealPw(e.target.value)} />
-              {revealErr && <p className="text-xs text-red-400">{revealErr}</p>}
+              {revealErr && <p className="text-xs text-black">{revealErr}</p>}
               <div className="flex gap-2">
                 <button className={btn} onClick={doReveal}>Reveal seed</button>
-                <button className="rounded-xl border border-zinc-800 px-4 py-3 text-sm font-bold text-zinc-400" onClick={closeReveal}>Cancel</button>
+                <button className="rounded-none border border-neutral-300 px-4 py-3 text-sm font-bold text-neutral-600" onClick={closeReveal}>Cancel</button>
               </div>
             </>
           ) : (
             <>
-              <p className="text-xs font-mono text-amber-200 break-all select-all bg-black/40 rounded-lg p-2">{revealed}</p>
+              <p className="text-xs font-mono text-black break-all select-all bg-neutral-100 rounded-none p-2">{revealed}</p>
               <div className="flex gap-2">
                 <button
-                  className="rounded-xl bg-zinc-800 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-700"
+                  className="rounded-none bg-neutral-100 px-4 py-2 text-sm font-bold text-neutral-800 hover:bg-neutral-200"
                   onClick={() => navigator.clipboard.writeText(revealed).catch(() => {})}
                 >
                   Copy seed
                 </button>
-                <button className="rounded-xl border border-zinc-800 px-4 py-2 text-sm font-bold text-zinc-400" onClick={closeReveal}>Hide</button>
+                <button className="rounded-none border border-neutral-300 px-4 py-2 text-sm font-bold text-neutral-600" onClick={closeReveal}>Hide</button>
               </div>
             </>
           )}
@@ -671,10 +670,10 @@ function ConnectedWallet({
       )}
 
       <div className="flex gap-2">
-        <button className="flex-1 rounded-xl border border-zinc-800 px-4 py-3 text-sm font-bold text-zinc-200 hover:border-red-500" onClick={lock}>
+        <button className="flex-1 rounded-none border border-neutral-300 px-4 py-3 text-sm font-bold text-neutral-800 hover:border-black" onClick={lock}>
           Lock
         </button>
-        <button className="rounded-xl border border-zinc-800 px-4 py-3 text-sm font-bold text-red-400 hover:border-red-500" onClick={remove}>
+        <button className="rounded-none border border-neutral-300 px-4 py-3 text-sm font-bold text-black hover:border-black" onClick={remove}>
           Delete
         </button>
       </div>
@@ -763,15 +762,15 @@ function WalletPanel({
 
   if (hasWallet) {
     return (
-      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4 space-y-2">
-        <p className="text-sm font-bold text-zinc-300">Open wallet</p>
+      <div className="rounded-none border border-neutral-300 bg-white p-4 space-y-2">
+        <p className="text-sm font-bold text-neutral-700">Open wallet</p>
         <input className={inputC} type="password" placeholder="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        {err && <p className="text-xs text-red-400">{err}</p>}
+        {err && <p className="text-xs text-black">{err}</p>}
         <div className="flex gap-2">
           <button className={btn} disabled={busy} onClick={open}>
             {busy ? "opening…" : "Open"}
           </button>
-          <button className="rounded-xl border border-zinc-800 px-4 py-3 text-sm font-bold text-red-400 hover:border-red-500" onClick={remove}>
+          <button className="rounded-none border border-neutral-300 px-4 py-3 text-sm font-bold text-black hover:border-black" onClick={remove}>
             Delete
           </button>
         </div>
@@ -780,12 +779,12 @@ function WalletPanel({
   }
 
   return (
-    <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4 space-y-2">
+    <div className="rounded-none border border-neutral-300 bg-white p-4 space-y-2">
       <div className="flex gap-2">
-        <button className={"px-4 py-2 rounded-xl text-sm font-bold " + (mode === "create" ? "bg-zinc-800 text-white" : "text-zinc-500")} onClick={() => setMode("create")}>
+        <button className={"px-4 py-2 rounded-none text-sm font-bold " + (mode === "create" ? "bg-black text-white" : "text-neutral-500")} onClick={() => setMode("create")}>
           Create
         </button>
-        <button className={"px-4 py-2 rounded-xl text-sm font-bold " + (mode === "import" ? "bg-zinc-800 text-white" : "text-zinc-500")} onClick={() => setMode("import")}>
+        <button className={"px-4 py-2 rounded-none text-sm font-bold " + (mode === "import" ? "bg-black text-white" : "text-neutral-500")} onClick={() => setMode("import")}>
           Import seed
         </button>
       </div>
@@ -796,11 +795,11 @@ function WalletPanel({
       {mode === "create" && (
         <input className={inputC} type="password" placeholder="confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
       )}
-      {err && <p className="text-xs text-red-400">{err}</p>}
+      {err && <p className="text-xs text-black">{err}</p>}
       <button className={btn} disabled={busy} onClick={mode === "create" ? create : importSeed}>
         {busy ? "encrypting…" : mode === "create" ? "Create wallet" : "Encrypt & unlock"}
       </button>
-      <p className="text-[11px] text-zinc-600">seed is encrypted in your browser (PBKDF2 + AES-GCM) and never leaves it</p>
+      <p className="text-[11px] text-neutral-400">seed is encrypted in your browser (PBKDF2 + AES-GCM) and never leaves it</p>
     </div>
   );
 }
@@ -833,19 +832,18 @@ function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddr
   const empty = lb.tokens.byVolume.length === 0;
   if (empty) {
     return (
-      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-10 text-center text-zinc-500">
-        <p className="text-4xl mb-3">🏆</p>
-        <p className="font-bold text-zinc-300">No ranks yet</p>
+      <div className="rounded-none border border-neutral-300 bg-white p-10 text-center text-neutral-500">
+        <p className="font-bold text-neutral-700">No ranks yet</p>
         <p className="text-sm mt-1">Launch and trade coins to climb the boards.</p>
       </div>
     );
   }
 
   const boards: { k: typeof board; label: string }[] = [
-    { k: "byVolume", label: "🔥 Volume" },
-    { k: "byGainers", label: "📈 Gainers" },
-    { k: "byHolders", label: "👥 Holders" },
-    { k: "newest", label: "✨ New" },
+    { k: "byVolume", label: "Volume" },
+    { k: "byGainers", label: "Gainers" },
+    { k: "byHolders", label: "Holders" },
+    { k: "newest", label: "New" },
   ];
   const rows = lb.tokens[board];
 
@@ -853,72 +851,72 @@ function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddr
     <div className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-2">
         {/* token leaderboard */}
-        <section className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4">
+        <section className="rounded-none border border-neutral-300 bg-white p-4">
           <div className="flex items-center gap-1 mb-3 overflow-x-auto">
             {boards.map((b) => (
               <button key={b.k}
-                className={"rounded-lg px-2.5 py-1 text-xs font-bold whitespace-nowrap " + (board === b.k ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300")}
+                className={"rounded-none px-2.5 py-1 text-xs font-bold whitespace-nowrap " + (board === b.k ? "bg-black text-white" : "text-neutral-500 hover:text-neutral-700")}
                 onClick={() => setBoard(b.k)}>{b.label}</button>
             ))}
           </div>
           <div className="space-y-1">
             {rows.map((t, i) => (
               <button key={t.tokenId} onClick={() => onSelect(t.tokenId)}
-                className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-zinc-900/60">
+                className="flex w-full items-center gap-3 rounded-none px-2 py-2 text-left hover:bg-neutral-50">
                 <span className={"w-5 text-center text-xs font-black " + medal(i)}>{i + 1}</span>
                 <Avatar image={t.image} symbol={t.symbol} size={30} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold truncate">{t.symbol} <span className="text-[11px] font-normal text-zinc-500">{t.name}</span></p>
-                  <p className="text-[11px] text-zinc-500 truncate">mc {fmtXno(t.marketCap)} · {t.holders} hodl · vol {fmtXno(t.volume)}</p>
+                  <p className="text-sm font-bold truncate">{t.symbol} <span className="text-[11px] font-normal text-neutral-500">{t.name}</span></p>
+                  <p className="text-[11px] text-neutral-500 truncate">mc {fmtXno(t.marketCap)} · {t.holders} hodl · vol {fmtXno(t.volume)}</p>
                 </div>
-                <span className={"text-xs font-bold tabular-nums shrink-0 " + (t.change24h == null ? "text-zinc-600" : t.change24h >= 0 ? "text-green-400" : "text-red-400")}>{pctStr(t.change24h)}</span>
+                <span className={"text-xs font-bold tabular-nums shrink-0 " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-black" : "text-black")}>{pctStr(t.change24h)}</span>
               </button>
             ))}
           </div>
         </section>
 
         {/* creators */}
-        <section className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4">
-          <p className="text-sm font-bold text-zinc-300 mb-3">👑 Top creators</p>
+        <section className="rounded-none border border-neutral-300 bg-white p-4">
+          <p className="text-sm font-bold text-neutral-700 mb-3">Top creators</p>
           <div className="space-y-1">
             {lb.creators.map((c, i) => (
-              <div key={c.account} className={"flex items-center gap-3 rounded-xl px-2 py-2 " + (c.account === myAddress ? "bg-green-500/10" : "")}>
+              <div key={c.account} className={"flex items-center gap-3 rounded-none px-2 py-2 " + (c.account === myAddress ? "bg-neutral-100" : "")}>
                 <span className={"w-5 text-center text-xs font-black " + medal(i)}>{i + 1}</span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-mono text-zinc-300 truncate">{short(c.account)}{c.account === myAddress && <span className="text-green-400"> · you</span>}</p>
-                  <p className="text-[11px] text-zinc-500 truncate">{c.tokenCount} coins · {c.holders} holders · {c.topSymbols.join(" ")}</p>
+                  <p className="text-sm font-mono text-neutral-700 truncate">{short(c.account)}{c.account === myAddress && <span className="text-black"> · you</span>}</p>
+                  <p className="text-[11px] text-neutral-500 truncate">{c.tokenCount} coins · {c.holders} holders · {c.topSymbols.join(" ")}</p>
                 </div>
                 <div className="flex flex-col items-end gap-0.5 shrink-0">
-                  <span className="text-xs font-black text-amber-300 tabular-nums">{c.score.toLocaleString()}</span>
+                  <span className="text-xs font-black text-black tabular-nums">{c.score.toLocaleString()}</span>
                   {c.badges.length > 0 && <span className="text-[10px]">{c.badges.join(" ")}</span>}
                 </div>
               </div>
             ))}
-            {lb.creators.length === 0 && <p className="text-xs text-zinc-600 py-4 text-center">no creators yet</p>}
+            {lb.creators.length === 0 && <p className="text-xs text-neutral-400 py-4 text-center">no creators yet</p>}
           </div>
         </section>
       </div>
 
       {/* holders */}
-      <section className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4">
-        <p className="text-sm font-bold text-zinc-300 mb-3">🐋 Top holders</p>
+      <section className="rounded-none border border-neutral-300 bg-white p-4">
+        <p className="text-sm font-bold text-neutral-700 mb-3">Top holders</p>
         <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
           {lb.holders.map((h, i) => (
-            <div key={h.account} className={"flex items-center gap-3 rounded-xl px-2 py-1.5 " + (h.account === myAddress ? "bg-green-500/10" : "")}>
+            <div key={h.account} className={"flex items-center gap-3 rounded-none px-2 py-1.5 " + (h.account === myAddress ? "bg-neutral-100" : "")}>
               <span className={"w-5 text-center text-xs font-black " + medal(i)}>{i + 1}</span>
-              <p className="min-w-0 flex-1 text-sm font-mono text-zinc-300 truncate">{short(h.account)}{h.account === myAddress && <span className="text-green-400"> · you</span>}</p>
+              <p className="min-w-0 flex-1 text-sm font-mono text-neutral-700 truncate">{short(h.account)}{h.account === myAddress && <span className="text-black"> · you</span>}</p>
               <span className="text-[10px] shrink-0">{h.badges.join(" ")}</span>
               <span className="text-xs font-bold tabular-nums shrink-0">{fmtXno(h.value)} XNO</span>
             </div>
           ))}
-          {lb.holders.length === 0 && <p className="text-xs text-zinc-600 py-4 text-center">no holders yet</p>}
+          {lb.holders.length === 0 && <p className="text-xs text-neutral-400 py-4 text-center">no holders yet</p>}
         </div>
       </section>
     </div>
   );
 }
-const medal = (i: number) => (i === 0 ? "text-amber-300" : i === 1 ? "text-zinc-300" : i === 2 ? "text-amber-600" : "text-zinc-600");
-function Skel() { return <div className="h-40 rounded-2xl border border-zinc-900 bg-[#0a0a0a] animate-pulse" />; }
+const medal = (i: number) => (i === 0 ? "text-black" : i === 1 ? "text-neutral-700" : i === 2 ? "text-black" : "text-neutral-400");
+function Skel() { return <div className="h-40 rounded-none border border-neutral-300 bg-white animate-pulse" />; }
 
 function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id: string) => void; myAddress?: string }) {
   const [query, setQuery] = useState("");
@@ -943,9 +941,8 @@ function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id:
 
   if (tokens.length === 0) {
     return (
-      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-10 text-center text-zinc-500">
-        <p className="text-4xl mb-3">🚀</p>
-        <p className="font-bold text-zinc-300">No coins yet</p>
+      <div className="rounded-none border border-neutral-300 bg-white p-10 text-center text-neutral-500">
+        <p className="font-bold text-neutral-700">No coins yet</p>
         <p className="text-sm mt-1">Start a new coin to launch the first one on Nano.</p>
       </div>
     );
@@ -953,7 +950,7 @@ function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id:
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-bold text-zinc-400 shrink-0">Coins</h2>
+        <h2 className="text-sm font-bold text-neutral-600 shrink-0">Coins</h2>
         <input
           className={inputC + " py-2"}
           placeholder="search name / symbol"
@@ -961,7 +958,7 @@ function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id:
           onChange={(e) => setQuery(e.target.value)}
         />
         <select
-          className="rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-300 shrink-0"
+          className="rounded-none border border-neutral-300 bg-white px-3 py-2 text-xs text-neutral-700 shrink-0"
           value={sort}
           onChange={(e) => setSort(e.target.value as any)}
         >
@@ -972,30 +969,30 @@ function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id:
           <option value="new">newest</option>
         </select>
       </div>
-      {filtered.length === 0 && <p className="text-sm text-zinc-600 py-6 text-center">No coins match.</p>}
+      {filtered.length === 0 && <p className="text-sm text-neutral-400 py-6 text-center">No coins match.</p>}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
         {filtered.map((t) => (
           <button
             key={t.tokenId}
             onClick={() => onSelect(t.tokenId)}
-            className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4 text-left hover:border-green-500/60 transition group"
+            className="rounded-none border border-neutral-300 bg-white p-4 text-left hover:border-black transition group"
           >
             <div className="flex items-center gap-3">
               <Avatar image={t.image} symbol={t.symbol} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <p className="font-bold text-sm truncate">{t.name}</p>
-                  <p className="text-[11px] text-zinc-500 shrink-0">${t.symbol}</p>
+                  <p className="text-[11px] text-neutral-500 shrink-0">${t.symbol}</p>
                 </div>
-                <p className="text-[11px] text-zinc-500 truncate">mc {fmtXno(t.marketCap)} XNO</p>
+                <p className="text-[11px] text-neutral-500 truncate">mc {fmtXno(t.marketCap)} XNO</p>
               </div>
               <Sparkline points={t.spark} width={64} height={26} color={trendColor(t.spark)} />
             </div>
-            <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-zinc-500">
-              <span className={"font-bold shrink-0 " + (t.change24h == null ? "text-zinc-600" : t.change24h >= 0 ? "text-green-400" : "text-red-400")}>
+            <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-neutral-500">
+              <span className={"font-bold shrink-0 " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-black" : "text-black")}>
                 {pctStr(t.change24h)}
               </span>
-              <span className="truncate text-zinc-400">{fmtXno(t.price)} XNO</span>
+              <span className="truncate text-neutral-600">{fmtXno(t.price)} XNO</span>
               <span className="shrink-0">{t.holders} hodl</span>
             </div>
           </button>
@@ -1006,10 +1003,10 @@ function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id:
 }
 
 function trendColor(points: PricePoint[]): string {
-  if (points.length < 2) return "#22c55e";
+  if (points.length < 2) return "#000000";
   const a = BigInt(points[0].priceRaw);
   const b = BigInt(points[points.length - 1].priceRaw);
-  return b >= a ? "#22c55e" : "#ef4444";
+  return b >= a ? "#000000" : "#666666";
 }
 
 // Public IPFS gateways tried in order; images are stored as ipfs://CID so any
@@ -1050,7 +1047,7 @@ function Avatar({ image, symbol, size = 40 }: { image: string; symbol: string; s
   return (
     <div
       style={{ width: size, height: size, fontSize: size * 0.4 }}
-      className="rounded-full bg-gradient-to-br from-green-400 to-emerald-600 flex items-center justify-center font-black text-black shrink-0"
+      className="rounded-full bg-black flex items-center justify-center font-black text-white shrink-0"
     >
       {(symbol || "?").slice(0, 2).toUpperCase()}
     </div>
@@ -1178,46 +1175,46 @@ function TokenDetail({
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <button onClick={onBack} className="text-xs text-zinc-500 hover:text-zinc-300">← all coins</button>
-        <a href={`/pro?token=${token.tokenId}`} className="rounded-lg border border-zinc-800 px-2.5 py-1 text-[11px] font-bold text-green-400 hover:border-green-500">
+        <button onClick={onBack} className="text-xs text-neutral-500 hover:text-neutral-700">← all coins</button>
+        <a href={`/pro?token=${token.tokenId}`} className="rounded-none border border-neutral-300 px-2.5 py-1 text-[11px] font-bold text-black hover:border-black">
           Pro terminal ↗
         </a>
       </div>
 
-      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-5">
+      <div className="rounded-none border border-neutral-300 bg-white p-5">
         <div className="flex items-center gap-3">
           <Avatar image={token.image} symbol={token.symbol} size={48} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-black truncate">{token.name}</h2>
-              <span className="text-[11px] text-zinc-500">${token.symbol}</span>
+              <span className="text-[11px] text-neutral-500">${token.symbol}</span>
             </div>
-            <p className="text-[11px] text-zinc-600 font-mono truncate">{token.tokenId}</p>
+            <p className="text-[11px] text-neutral-400 font-mono truncate">{token.tokenId}</p>
           </div>
           <div className="text-right">
             <p className="text-2xl font-black">{fmtXno(token.marketCap)} XNO</p>
-            <p className="text-[11px] text-zinc-500">
-              market cap · <span className={token.change24h == null ? "text-zinc-600" : token.change24h >= 0 ? "text-green-400" : "text-red-400"}>{pctStr(token.change24h)}</span>
+            <p className="text-[11px] text-neutral-500">
+              market cap · <span className={token.change24h == null ? "text-neutral-400" : token.change24h >= 0 ? "text-black" : "text-black"}>{pctStr(token.change24h)}</span>
             </p>
           </div>
         </div>
-        {token.description && <p className="text-sm text-zinc-400 mt-3">{token.description}</p>}
+        {token.description && <p className="text-sm text-neutral-600 mt-3">{token.description}</p>}
         <div className="flex gap-3 mt-3">
           {token.website && <SocialLink href={token.website} label="website" />}
           {token.twitter && <SocialLink href={token.twitter} label="X" />}
           {token.telegram && <SocialLink href={token.telegram} label="telegram" />}
         </div>
-        <div className="flex items-center gap-3 mt-4 text-[11px] text-zinc-500">
+        <div className="flex items-center gap-3 mt-4 text-[11px] text-neutral-500">
           <span>dev {short(token.creator)}</span>
           <span>holders {token.holders}</span>
           <span>price {fmtXno(token.price)} XNO</span>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-5">
+      <div className="rounded-none border border-neutral-300 bg-white p-5">
         <div className="flex items-center justify-between mb-3">
-          <p className="text-sm font-bold text-zinc-300">Price</p>
-          <div className="flex items-center gap-3 text-[11px] text-zinc-500">
+          <p className="text-sm font-bold text-neutral-700">Price</p>
+          <div className="flex items-center gap-3 text-[11px] text-neutral-500">
             <span>liq {fmtXno(token.poolXno)} XNO</span>
             <span>reserve {fmtTok(token.poolTokens, token.decimals)}</span>
           </div>
@@ -1225,21 +1222,21 @@ function TokenDetail({
         {token.series.length >= 2 ? (
           <PriceChart series={token.series} trades={token.trades} decimals={token.decimals} symbol={token.symbol} />
         ) : (
-          <div className="h-40 flex items-center justify-center text-zinc-600 text-sm">trades chart the price</div>
+          <div className="h-40 flex items-center justify-center text-neutral-400 text-sm">trades chart the price</div>
         )}
         <ProgressBar token={token} />
       </div>
 
-      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-5">
+      <div className="rounded-none border border-neutral-300 bg-white p-5">
         <div className="flex items-center gap-2 mb-3">
           <button
-            className={"px-4 py-2 rounded-xl text-sm font-bold " + (tab === "trade" ? "bg-zinc-800 text-white" : "text-zinc-500")}
+            className={"px-4 py-2 rounded-none text-sm font-bold " + (tab === "trade" ? "bg-black text-white" : "text-neutral-500")}
             onClick={() => setTab("trade")}
           >
             Trade
           </button>
           <button
-            className={"px-4 py-2 rounded-xl text-sm font-bold " + (tab === "thread" ? "bg-zinc-800 text-white" : "text-zinc-500")}
+            className={"px-4 py-2 rounded-none text-sm font-bold " + (tab === "thread" ? "bg-black text-white" : "text-neutral-500")}
             onClick={() => setTab("thread")}
           >
             Thread ({token.comments.length})
@@ -1263,12 +1260,12 @@ function TokenDetail({
         )}
       </div>
 
-      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-5 space-y-2">
-        <p className="text-sm font-bold text-zinc-300">Send tokens</p>
+      <div className="rounded-none border border-neutral-300 bg-white p-5 space-y-2">
+        <p className="text-sm font-bold text-neutral-700">Send tokens</p>
         <input className={inputC} placeholder="nano_… recipient" value={sendTo} onChange={(e) => setSendTo(e.target.value)} />
         <div className="flex gap-2">
           <input className={inputC} placeholder="amount" inputMode="decimal" value={sendAmount} onChange={(e) => setSendAmount(e.target.value)} />
-          <button className="rounded-xl bg-zinc-800 px-4 py-3 text-sm font-bold hover:bg-zinc-700 shrink-0 disabled:opacity-40" disabled={busy} onClick={transfer}>
+          <button className="rounded-none bg-neutral-100 px-4 py-3 text-sm font-bold hover:bg-neutral-200 shrink-0 disabled:opacity-40" disabled={busy} onClick={transfer}>
             Send
           </button>
         </div>
@@ -1296,7 +1293,7 @@ function SocialLink({ href, label }: { href: string; label: string }) {
   const safe = safeHref(href);
   if (!safe) return null;
   return (
-    <a href={safe} target="_blank" rel="noreferrer" className="text-[11px] text-green-400 hover:underline">
+    <a href={safe} target="_blank" rel="noreferrer" className="text-[11px] text-black hover:underline">
       {label}
     </a>
   );
@@ -1311,12 +1308,12 @@ function ProgressBar({ token }: { token: Token }) {
   const pct = initialTreasury > 0n ? Number(((initialTreasury - treasury) * 100n) / initialTreasury) : 100;
   return (
     <div className="mt-3">
-      <div className="flex items-center justify-between text-[11px] text-zinc-500 mb-1">
+      <div className="flex items-center justify-between text-[11px] text-neutral-500 mb-1">
         <span>{graduated ? "graduated · liquidity locked" : "liquidity ramp"}</span>
         <span>{graduated ? "100%" : `${pct.toFixed(2)}%`}</span>
       </div>
-      <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
-        <div className="h-full bg-gradient-to-r from-green-500 to-emerald-300" style={{ width: `${Math.min(100, pct)}%` }} />
+      <div className="h-2 rounded-full bg-neutral-100 overflow-hidden">
+        <div className="h-full bg-black" style={{ width: `${Math.min(100, pct)}%` }} />
       </div>
     </div>
   );
@@ -1378,28 +1375,28 @@ function TradePanel({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between text-[11px] text-zinc-500">
+      <div className="flex items-center justify-between text-[11px] text-neutral-500">
         <span>your balance: {fmtTok(myHolding?.balanceRaw, token.decimals)} {token.symbol}</span>
         <label className="flex items-center gap-1.5">
-          <span className="text-zinc-600">slippage %</span>
+          <span className="text-neutral-400">slippage %</span>
           <input
-            className="w-14 rounded-lg bg-zinc-900 border border-zinc-800 px-2 py-1 text-xs text-white text-right"
+            className="w-14 rounded-none bg-white border border-neutral-300 px-2 py-1 text-xs text-black text-right"
             inputMode="decimal"
             value={slippage}
             onChange={(e) => setSlippage(e.target.value)}
           />
         </label>
       </div>
-      {slip > 0 && <p className="text-[10px] text-zinc-600">min-received enforced on-chain via fragment links</p>}
+      {slip > 0 && <p className="text-[10px] text-neutral-400">min-received enforced on-chain via fragment links</p>}
       <div className="grid grid-cols-2 gap-2">
         <button
-          className={"rounded-xl py-2 text-sm font-bold " + (side === "buy" ? "bg-green-500 text-black" : "bg-zinc-800 text-zinc-400")}
+          className={"rounded-none py-2 text-sm font-bold " + (side === "buy" ? "bg-black text-white" : "bg-neutral-100 text-neutral-600")}
           onClick={() => setSide("buy")}
         >
           Buy
         </button>
         <button
-          className={"rounded-xl py-2 text-sm font-bold " + (side === "sell" ? "bg-red-500 text-white" : "bg-zinc-800 text-zinc-400")}
+          className={"rounded-none py-2 text-sm font-bold " + (side === "sell" ? "bg-black text-white" : "bg-neutral-100 text-neutral-600")}
           onClick={() => setSide("sell")}
         >
           Sell
@@ -1415,7 +1412,7 @@ function TradePanel({
         />
         {side === "sell" && myHolding && (
           <button
-            className="shrink-0 rounded-xl bg-zinc-800 px-3 text-xs font-bold text-zinc-300 hover:bg-zinc-700"
+            className="shrink-0 rounded-none bg-neutral-100 px-3 text-xs font-bold text-neutral-700 hover:bg-neutral-200"
             onClick={() => setAmount(fmtTok(myHolding.balanceRaw, token.decimals))}
           >
             Max
@@ -1427,7 +1424,7 @@ function TradePanel({
           {["0.1", "0.5", "1", "5"].map((v) => (
             <button
               key={v}
-              className="rounded-lg border border-zinc-800 py-1.5 text-xs font-bold text-zinc-400 hover:border-green-500 hover:text-green-400"
+              className="rounded-none border border-neutral-300 py-1.5 text-xs font-bold text-neutral-600 hover:border-black hover:text-black"
               onClick={() => setAmount(v)}
             >
               {v} XNO
@@ -1436,20 +1433,20 @@ function TradePanel({
         </div>
       )}
       {quote && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 space-y-1 text-[11px]">
+        <div className="rounded-none border border-neutral-300 bg-neutral-50 p-3 space-y-1 text-[11px]">
           <div className="flex justify-between">
-            <span className="text-zinc-500">you receive ≈</span>
-            <span className="font-bold text-white">{quote.outStr} {quote.unit}</span>
+            <span className="text-neutral-500">you receive ≈</span>
+            <span className="font-bold text-black">{quote.outStr} {quote.unit}</span>
           </div>
           {slip > 0 && (
             <div className="flex justify-between">
-              <span className="text-zinc-500">minimum received</span>
-              <span className="text-zinc-300">{quote.minStr} {quote.unit}</span>
+              <span className="text-neutral-500">minimum received</span>
+              <span className="text-neutral-700">{quote.minStr} {quote.unit}</span>
             </div>
           )}
           <div className="flex justify-between">
-            <span className="text-zinc-500">price impact</span>
-            <span className={quote.impact >= 5 ? "text-red-400" : quote.impact >= 1 ? "text-amber-400" : "text-green-400"}>
+            <span className="text-neutral-500">price impact</span>
+            <span className={quote.impact >= 5 ? "text-black" : quote.impact >= 1 ? "text-black" : "text-black"}>
               {quote.impact.toFixed(2)}%
             </span>
           </div>
@@ -1461,7 +1458,7 @@ function TradePanel({
 
       <StakeBox token={token} busy={busy} sendOp={sendOp} />
 
-      {token.pool && <p className="text-[11px] text-zinc-600 font-mono break-all">pool: {token.pool}</p>}
+      {token.pool && <p className="text-[11px] text-neutral-400 font-mono break-all">pool: {token.pool}</p>}
     </div>
   );
 }
@@ -1495,10 +1492,10 @@ function StakeBox({
   };
 
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 space-y-3">
+    <div className="rounded-none border border-neutral-300 bg-neutral-50 p-3 space-y-3">
       <div className="flex items-center justify-between text-[11px]">
-        <span className="text-zinc-400 font-bold">Stake · earn XNO rebates</span>
-        <span className="text-zinc-500">staked {fmtTok(token.myStaked, token.decimals)} {token.symbol}</span>
+        <span className="text-neutral-600 font-bold">Stake · earn XNO rebates</span>
+        <span className="text-neutral-500">staked {fmtTok(token.myStaked, token.decimals)} {token.symbol}</span>
       </div>
 
       <div className="flex gap-2">
@@ -1512,7 +1509,7 @@ function StakeBox({
           />
           {bal > 0n && (
             <button
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-zinc-400 hover:text-green-400"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-neutral-600 hover:text-black"
               onClick={() => setStakeAmt(fmtTok(token.myBalance, token.decimals))}
             >
               MAX
@@ -1533,7 +1530,7 @@ function StakeBox({
           />
           {staked > 0n && (
             <button
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-zinc-400 hover:text-green-400"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-neutral-600 hover:text-black"
               onClick={() => setUnstakeAmt(fmtTok(token.myStaked, token.decimals))}
             >
               MAX
@@ -1543,13 +1540,13 @@ function StakeBox({
         <ActionBtn disabled={busy || staked <= 0n} onClick={doUnstake}>Unstake</ActionBtn>
       </div>
       {unstakeAmt && Number(unstakeAmt) > 0 && (
-        <p className="text-[10px] text-amber-500/80">20% exit tax on unstake (5% burned, 15% to stakers)</p>
+        <p className="text-[10px] text-black">20% exit tax on unstake (5% burned, 15% to stakers)</p>
       )}
 
-      <div className="flex items-center justify-between border-t border-zinc-800 pt-2">
-        <span className="text-[11px] text-zinc-500">claimable ≈ <span className="text-green-400 font-bold">{fmtXno(token.myClaimable)} XNO</span></span>
+      <div className="flex items-center justify-between border-t border-neutral-300 pt-2">
+        <span className="text-[11px] text-neutral-500">claimable ≈ <span className="text-black font-bold">{fmtXno(token.myClaimable)} XNO</span></span>
         <button
-          className="rounded-lg bg-green-500/10 border border-green-500/40 px-3 py-1.5 text-[11px] font-bold text-green-400 hover:bg-green-500/20 disabled:opacity-40"
+          className="rounded-none bg-neutral-100 border border-black px-3 py-1.5 text-[11px] font-bold text-black hover:bg-neutral-200 disabled:opacity-40"
           disabled={busy || claimable <= 0n}
           onClick={() => sendOp(token.tokenId, { kind: "claim" }, "claim")}
         >
@@ -1562,7 +1559,7 @@ function StakeBox({
 
 function ActionBtn({ children, onClick, disabled }: { children: ReactNode; onClick: () => void; disabled: boolean }) {
   return (
-    <button className="rounded-xl border border-zinc-800 py-3 text-sm font-bold text-zinc-200 hover:border-green-500 disabled:opacity-40" disabled={disabled} onClick={onClick}>
+    <button className="rounded-none border border-neutral-300 py-3 text-sm font-bold text-neutral-800 hover:border-black disabled:opacity-40" disabled={disabled} onClick={onClick}>
       {children}
     </button>
   );
@@ -1570,18 +1567,18 @@ function ActionBtn({ children, onClick, disabled }: { children: ReactNode; onCli
 
 function TradesPanel({ trades }: { trades: Trade[] }) {
   return (
-    <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4">
-      <p className="text-sm font-bold text-zinc-300 mb-2">Recent trades</p>
+    <div className="rounded-none border border-neutral-300 bg-white p-4">
+      <p className="text-sm font-bold text-neutral-700 mb-2">Recent trades</p>
       <div className="space-y-1.5 max-h-72 overflow-y-auto">
-        {trades.length === 0 && <p className="text-xs text-zinc-600">no trades yet</p>}
+        {trades.length === 0 && <p className="text-xs text-neutral-400">no trades yet</p>}
         {trades.map((t, i) => (
           <div key={i} className="flex items-center justify-between text-xs">
-            <span className="text-zinc-500 font-mono">{short(t.account)}</span>
-            <span className={t.kind === "buy" ? "text-green-400" : "text-red-400"}>
+            <span className="text-neutral-500 font-mono">{short(t.account)}</span>
+            <span className={t.kind === "buy" ? "text-black" : "text-black"}>
               {t.kind === "buy" ? "▲" : "▼"} {t.kind}
             </span>
-            <span className="text-zinc-400">{fmtXno(t.priceRaw)}</span>
-            <span className="text-zinc-600">{timeAgo(t.time)}</span>
+            <span className="text-neutral-600">{fmtXno(t.priceRaw)}</span>
+            <span className="text-neutral-400">{timeAgo(t.time)}</span>
           </div>
         ))}
       </div>
@@ -1592,17 +1589,17 @@ function TradesPanel({ trades }: { trades: Trade[] }) {
 function HoldersPanel({ holders, creator, decimals }: { holders: Holder[]; creator: string; decimals: number }) {
   const top = holders.slice(0, 20);
   return (
-    <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4">
-      <p className="text-sm font-bold text-zinc-300 mb-2">Top holders</p>
+    <div className="rounded-none border border-neutral-300 bg-white p-4">
+      <p className="text-sm font-bold text-neutral-700 mb-2">Top holders</p>
       <div className="space-y-1.5 max-h-72 overflow-y-auto">
         {top.map((h, i) => (
           <div key={i} className="flex items-center justify-between text-xs">
-            <span className="text-zinc-500 font-mono flex items-center gap-1">
-              {i + 1}. {short(h.account)} {h.account === creator && <span className="text-green-400">dev</span>}
+            <span className="text-neutral-500 font-mono flex items-center gap-1">
+              {i + 1}. {short(h.account)} {h.account === creator && <span className="text-black">dev</span>}
             </span>
             <div className="flex items-center gap-2">
-              <span className="text-zinc-400">{fmtTok(h.balanceRaw, decimals)}</span>
-              <span className="text-zinc-600 w-12 text-right">{h.pct.toFixed(2)}%</span>
+              <span className="text-neutral-600">{fmtTok(h.balanceRaw, decimals)}</span>
+              <span className="text-neutral-400 w-12 text-right">{h.pct.toFixed(2)}%</span>
             </div>
           </div>
         ))}
@@ -1636,17 +1633,17 @@ function CommentThread({ tokenId, comments, keys, isDev }: { tokenId: string; co
   return (
     <div className="space-y-3">
       <div className="space-y-2 max-h-80 overflow-y-auto">
-        {all.length === 0 && <p className="text-xs text-zinc-600">be the first to comment</p>}
+        {all.length === 0 && <p className="text-xs text-neutral-400">be the first to comment</p>}
         {all.map((c) => (
-          <div key={c.id} className="rounded-xl bg-zinc-900/60 p-2.5">
-            <p className="text-[11px] text-zinc-500 font-mono">{short(c.account)} · {timeAgo(c.time)}</p>
-            <p className="text-xs text-zinc-300 mt-1">{c.text}</p>
+          <div key={c.id} className="rounded-none bg-neutral-50 p-2.5">
+            <p className="text-[11px] text-neutral-500 font-mono">{short(c.account)} · {timeAgo(c.time)}</p>
+            <p className="text-xs text-neutral-700 mt-1">{c.text}</p>
           </div>
         ))}
       </div>
       <div className="flex gap-2">
         <input className={inputC} placeholder="say something…" value={text} onChange={(e) => setText(e.target.value)} />
-        <button className="shrink-0 rounded-xl bg-zinc-800 px-4 py-3 text-sm font-bold hover:bg-zinc-700" onClick={post}>
+        <button className="shrink-0 rounded-none bg-neutral-100 px-4 py-3 text-sm font-bold hover:bg-neutral-200" onClick={post}>
           Post
         </button>
       </div>
@@ -1728,15 +1725,15 @@ function CreateToken({
   }
 
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-[#0a0a0a] p-5 space-y-3">
+    <div className="rounded-none border border-neutral-300 bg-white p-5 space-y-3">
       <h3 className="font-black text-lg">Start a new coin</h3>
       <div className="flex items-center gap-3">
         <Avatar image={image} symbol={symbol} size={56} />
-        <label className="text-xs text-green-400 cursor-pointer">
+        <label className="text-xs text-black cursor-pointer">
           {uploading ? "uploading…" : "upload image"}
           <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
         </label>
-        <span className="text-[11px] text-zinc-600">or a URL below</span>
+        <span className="text-[11px] text-neutral-400">or a URL below</span>
       </div>
       <input className={inputC} placeholder="image URL (optional)" value={image} onChange={(e) => setImage(e.target.value)} />
       <div className="grid grid-cols-2 gap-2">
@@ -1753,7 +1750,7 @@ function CreateToken({
       <button className={btn} disabled={busy} onClick={launch}>
         {busy ? "launching…" : "Create coin (0.000002 XNO)"}
       </button>
-      <p className="text-[11px] text-zinc-600">creator keeps 5% · 1 raw data fee per op</p>
+      <p className="text-[11px] text-neutral-400">creator keeps 5% · 1 raw data fee per op</p>
     </div>
   );
 }
@@ -1762,25 +1759,23 @@ function Portfolio({ tokens, onSelect, account }: { tokens: Token[]; onSelect: (
   const mine = tokens.filter((t) => BigInt(t.myBalance) > 0n);
   if (!account) {
     return (
-      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-10 text-center text-zinc-500">
-        <p className="text-3xl mb-2">🔒</p>
-        <p className="font-bold text-zinc-300">Unlock your wallet</p>
+      <div className="rounded-none border border-neutral-300 bg-white p-10 text-center text-neutral-500">
+        <p className="font-bold text-neutral-700">Unlock your wallet</p>
         <p className="text-sm mt-1">to see your tokens.</p>
       </div>
     );
   }
   if (mine.length === 0) {
     return (
-      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-10 text-center text-zinc-500">
-        <p className="text-3xl mb-2">💼</p>
-        <p className="font-bold text-zinc-300">No holdings yet</p>
+      <div className="rounded-none border border-neutral-300 bg-white p-10 text-center text-neutral-500">
+        <p className="font-bold text-neutral-700">No holdings yet</p>
         <p className="text-sm mt-1">Buy a coin to add it here.</p>
       </div>
     );
   }
   return (
     <div className="space-y-2">
-      <h2 className="text-sm font-bold text-zinc-400">Your holdings</h2>
+      <h2 className="text-sm font-bold text-neutral-600">Your holdings</h2>
       <div className="space-y-2">
         {mine.map((t) => {
           const valueRaw = (BigInt(t.myBalance) * BigInt(t.price)) / 10n ** BigInt(t.decimals);
@@ -1788,16 +1783,16 @@ function Portfolio({ tokens, onSelect, account }: { tokens: Token[]; onSelect: (
             <button
               key={t.tokenId}
               onClick={() => onSelect(t.tokenId)}
-              className="w-full rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-3 flex items-center gap-3 text-left hover:border-green-500/60"
+              className="w-full rounded-none border border-neutral-300 bg-white p-3 flex items-center gap-3 text-left hover:border-black"
             >
               <Avatar image={t.image} symbol={t.symbol} size={40} />
               <div className="min-w-0 flex-1">
                 <p className="font-bold text-sm truncate">{t.symbol}</p>
-                <p className="text-[11px] text-zinc-500">{fmtTok(t.myBalance, t.decimals)}</p>
+                <p className="text-[11px] text-neutral-500">{fmtTok(t.myBalance, t.decimals)}</p>
               </div>
               <div className="text-right">
                 <p className="text-sm font-bold">{fmtXno(valueRaw.toString())} XNO</p>
-                <p className={"text-[11px] " + (t.change24h == null ? "text-zinc-600" : t.change24h >= 0 ? "text-green-400" : "text-red-400")}>{pctStr(t.change24h)}</p>
+                <p className={"text-[11px] " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-black" : "text-black")}>{pctStr(t.change24h)}</p>
               </div>
             </button>
           );
@@ -1818,15 +1813,14 @@ const TABS: { id: "explore" | "ranks" | "portfolio" | "create" | "scan" | "walle
 
 function TabBar({ tab, setTab }: { tab: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet"; setTab: (t: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet") => void }) {
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-zinc-900 bg-[#0a0a0a]/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
-      <div className="max-w-2xl mx-auto grid grid-cols-6">
+    <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-neutral-300 bg-white/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
+      <div className="w-full grid grid-cols-6">
         {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={"flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-bold " + (tab === t.id ? "text-green-400" : "text-zinc-500")}
+            className={"py-3 text-xs font-bold uppercase tracking-wide border-t-2 " + (tab === t.id ? "text-black border-black" : "text-neutral-400 border-transparent hover:text-black")}
           >
-            <span className="text-lg leading-none">{t.icon}</span>
             {t.label}
           </button>
         ))}

@@ -135,9 +135,9 @@ export function computeLeaderboards(tokens: TokenView[], nowMs: number, limit = 
   const creators: CreatorRank[] = [...cmap.entries()]
     .map(([account, e]) => {
       const badges: string[] = [];
-      if (e.count >= 3) badges.push("🚀 Serial");
-      if (e.holders >= 25) badges.push("👥 Community");
-      if (maxLiq > 0n && e.liq === maxLiq) badges.push("💎 Blue Chip");
+      if (e.count >= 3) badges.push("Serial");
+      if (e.holders >= 25) badges.push("Community");
+      if (maxLiq > 0n && e.liq === maxLiq) badges.push("Blue chip");
       // deterministic integer score: holders, breadth, then REAL liquidity in XNO
       const score = e.holders * 100 + e.count * 50 + Math.round(toXno(e.liq));
       return { account, tokenCount: e.count, holders: e.holders, marketCap: e.liq.toString(), volume: e.volume.toString(), score, badges, topSymbols: e.syms };
@@ -161,8 +161,8 @@ export function computeLeaderboards(tokens: TokenView[], nowMs: number, limit = 
   const holderArr = [...hmap.entries()].sort((a, b) => (b[1].value > a[1].value ? 1 : b[1].value < a[1].value ? -1 : a[0] < b[0] ? -1 : 1));
   const holders: HolderRank[] = holderArr.slice(0, limit).map(([account, e], i) => {
     const badges: string[] = [];
-    if (i === 0) badges.push("🐋 Whale");
-    if (e.tokens >= 3) badges.push("🌈 Diversified");
+    if (i === 0) badges.push("Whale");
+    if (e.tokens >= 3) badges.push("Diversified");
     return { account, tokensHeld: e.tokens, value: e.value.toString(), badges };
   });
 

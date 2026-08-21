@@ -52,7 +52,7 @@ function buildVolume(trades: Trade[], tf: number, dec: number) {
     .map(([time, v]) => ({
       time: time as UTCTimestamp,
       value: v.buy + v.sell,
-      color: v.buy >= v.sell ? "rgba(34,197,94,0.5)" : "rgba(239,68,68,0.5)",
+      color: "rgba(0,0,0,0.28)",
     }));
 }
 
@@ -91,10 +91,10 @@ export default function PriceChart({
     const chart = createChart(wrap.current, {
       width: wrap.current.clientWidth,
       height: 320,
-      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#9ca3af", fontSize: 11 },
-      grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
-      rightPriceScale: { borderColor: "rgba(255,255,255,0.1)", scaleMargins: { top: 0.08, bottom: 0.28 } },
-      timeScale: { borderColor: "rgba(255,255,255,0.1)", timeVisible: true, secondsVisible: false },
+      layout: { background: { type: ColorType.Solid, color: "#ffffff" }, textColor: "#666666", fontSize: 11 },
+      grid: { vertLines: { color: "rgba(0,0,0,0.06)" }, horzLines: { color: "rgba(0,0,0,0.06)" } },
+      rightPriceScale: { borderColor: "rgba(0,0,0,0.2)", scaleMargins: { top: 0.08, bottom: 0.28 } },
+      timeScale: { borderColor: "rgba(0,0,0,0.2)", timeVisible: true, secondsVisible: false },
       crosshair: { mode: CrosshairMode.Normal },
     });
     chartRef.current = chart;
@@ -102,12 +102,14 @@ export default function PriceChart({
     const price =
       type === "candles"
         ? chart.addCandlestickSeries({
-            upColor: "#22c55e", downColor: "#ef4444", borderVisible: false,
-            wickUpColor: "#22c55e", wickDownColor: "#ef4444",
+            // monochrome: up = hollow (white body, black border), down = filled black
+            upColor: "#ffffff", downColor: "#000000", borderVisible: true,
+            borderUpColor: "#000000", borderDownColor: "#000000",
+            wickUpColor: "#000000", wickDownColor: "#000000",
             priceFormat: { type: "price", precision: 9, minMove: 1e-12 },
           })
         : chart.addAreaSeries({
-            lineColor: "#22c55e", topColor: "rgba(34,197,94,0.35)", bottomColor: "rgba(34,197,94,0)", lineWidth: 2,
+            lineColor: "#000000", topColor: "rgba(0,0,0,0.10)", bottomColor: "rgba(0,0,0,0)", lineWidth: 2,
             priceFormat: { type: "price", precision: 9, minMove: 1e-12 },
           });
     priceRef.current = price as any;
@@ -157,17 +159,17 @@ export default function PriceChart({
   return (
     <div className="relative">
       <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-1 rounded-lg bg-zinc-900/60 p-0.5">
+        <div className="flex items-center gap-1 rounded-none bg-neutral-50 p-0.5">
           {(["candles", "area"] as const).map((t) => (
             <button key={t}
-              className={"rounded-md px-2 py-0.5 text-[11px] font-bold " + (type === t ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300")}
+              className={"rounded-none px-2 py-0.5 text-[11px] font-bold " + (type === t ? "bg-black text-white" : "text-neutral-500 hover:text-neutral-700")}
               onClick={() => setType(t)}>{t === "candles" ? "Candles" : "Line"}</button>
           ))}
         </div>
         <div className="flex gap-0.5">
           {TF.map((t, i) => (
             <button key={t.k}
-              className={"rounded px-1.5 py-0.5 text-[11px] font-bold " + (i === tf ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300")}
+              className={"rounded px-1.5 py-0.5 text-[11px] font-bold " + (i === tf ? "bg-black text-white" : "text-neutral-500 hover:text-neutral-700")}
               onClick={() => setTf(i)}>{t.k}</button>
           ))}
         </div>
@@ -179,13 +181,13 @@ export default function PriceChart({
         <div className="pointer-events-none absolute left-2 top-10 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-mono tabular-nums">
           {legend.o != null ? (
             <>
-              <span className="text-zinc-500">O <span className={up ? "text-green-400" : "text-red-400"}>{fmtP(legend.o)}</span></span>
-              <span className="text-zinc-500">H <span className={up ? "text-green-400" : "text-red-400"}>{fmtP(legend.h!)}</span></span>
-              <span className="text-zinc-500">L <span className={up ? "text-green-400" : "text-red-400"}>{fmtP(legend.l!)}</span></span>
-              <span className="text-zinc-500">C <span className={up ? "text-green-400" : "text-red-400"}>{fmtP(legend.c)}</span></span>
+              <span className="text-neutral-500">O <span className={up ? "text-black" : "text-black"}>{fmtP(legend.o)}</span></span>
+              <span className="text-neutral-500">H <span className={up ? "text-black" : "text-black"}>{fmtP(legend.h!)}</span></span>
+              <span className="text-neutral-500">L <span className={up ? "text-black" : "text-black"}>{fmtP(legend.l!)}</span></span>
+              <span className="text-neutral-500">C <span className={up ? "text-black" : "text-black"}>{fmtP(legend.c)}</span></span>
             </>
           ) : (
-            <span className="text-zinc-500">{symbol || "price"} <span className="text-green-400">{fmtP(legend.c)} XNO</span></span>
+            <span className="text-neutral-500">{symbol || "price"} <span className="text-black">{fmtP(legend.c)} XNO</span></span>
           )}
         </div>
       )}
