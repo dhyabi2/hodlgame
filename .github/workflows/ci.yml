@@ -18,6 +18,8 @@ jobs:
           cache-dependency-path: nano/package-lock.json
       - run: npm ci
         working-directory: nano
+      - run: npm run build-workgen
+        working-directory: nano
       - run: npm test
         working-directory: nano
 
