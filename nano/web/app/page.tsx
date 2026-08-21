@@ -375,14 +375,14 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-white text-black pb-20">
+    <main className="min-h-screen bg-white text-black pb-20 overflow-x-hidden">
       <header className="sticky top-0 z-20 border-b border-neutral-300 bg-white/90 backdrop-blur">
         <div className="w-full px-4 py-3 flex items-center gap-3 sm:gap-5">
           <button className="text-lg font-black tracking-tight text-black shrink-0" onClick={() => { setSelectedId(null); setTab("explore"); }}>
             HoldFun
           </button>
           {/* Desktop nav only — on mobile the bottom tab bar handles navigation. */}
-          <nav className="hidden sm:flex items-center gap-4 text-xs font-bold uppercase tracking-wide text-neutral-500">
+          <nav className="hidden sm:flex items-center gap-4 text-xs font-bold uppercase tracking-wide text-neutral-500 min-w-0 overflow-x-auto">
             {([["explore", "Coins"], ["ranks", "Ranks"], ["scan", "Explorer"], ["wallet", "Wallet"]] as const).map(([id, label]) => (
               <button key={id} className={"hover:text-black whitespace-nowrap " + (!selectedId && tab === id ? "text-black" : "")} onClick={() => { setSelectedId(null); setTab(id); }}>{label}</button>
             ))}
@@ -413,19 +413,29 @@ export default function Home() {
       </header>
 
       <div className="w-full px-4 py-5">
-        {selectedId && detail ? (
-          <div className="w-full">
-            <TokenDetail
-              token={detail}
-              keys={keys}
-              busy={busy}
-              say={say}
-              submitBlock={submitBlock}
-              sendOp={sendOp}
-              promptUnlock={promptUnlock}
-              onBack={() => setSelectedId(null)}
-            />
-          </div>
+        {selectedId ? (
+          detail ? (
+            <div className="w-full">
+              <TokenDetail
+                token={detail}
+                keys={keys}
+                busy={busy}
+                say={say}
+                submitBlock={submitBlock}
+                sendOp={sendOp}
+                promptUnlock={promptUnlock}
+                onBack={() => setSelectedId(null)}
+              />
+            </div>
+          ) : (
+            // Deep-linked / just-selected coin whose detail is still loading — show
+            // a loading card, never the empty "No coins yet" feed (which made a
+            // shared coin link look broken).
+            <div className="w-full max-w-3xl mx-auto">
+              <button onClick={() => setSelectedId(null)} className="text-xs text-neutral-500 hover:text-black">← all coins</button>
+              <div className="mt-4 rounded-none border border-neutral-300 bg-white p-10 text-center text-neutral-500 animate-pulse">loading coin…</div>
+            </div>
+          )
         ) : tab === "explore" ? (
           <Feed tokens={tokens} onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} />
         ) : tab === "ranks" ? (
@@ -1281,6 +1291,7 @@ function TokenDetail({
     const raw = toRaw(sendAmount, token.decimals);
     if (!to || raw <= 0n) return say("enter recipient address + amount");
     if (!isNanoAddr(to)) return say("recipient must be a valid nano_ address");
+    if (raw > BigInt(myHolding?.balanceRaw ?? "0")) return say(`you only hold ${fmtTok(myHolding?.balanceRaw, token.decimals)} ${tokSym(token)}`);
     try {
       const [fragA, fragB] = encodeFragLinks(token.tokenId, { kind: "transfer", to, amount: raw });
       await submitBlock(fragA, 1n);
@@ -1312,10 +1323,10 @@ function TokenDetail({
             </div>
             <p className="text-[11px] text-neutral-400 font-mono truncate">{token.tokenId}</p>
           </div>
-          <div className="text-right">
-            <p className="text-2xl font-black">{fmtXno(token.marketCap)} XNO</p>
-            <p className="text-[11px] text-neutral-500">
-              market cap · <span className={token.change24h == null ? "text-neutral-400" : token.change24h >= 0 ? "text-black" : "text-black"}>{pctStr(token.change24h)}</span>
+          <div className="text-right shrink-0">
+            <p className="text-base sm:text-2xl font-black whitespace-nowrap">{fmtXno(token.marketCap)} XNO</p>
+            <p className="text-[11px] text-neutral-500 whitespace-nowrap">
+              market cap · <span className="text-black">{pctStr(token.change24h)}</span>
             </p>
           </div>
         </div>
@@ -1337,7 +1348,7 @@ function TokenDetail({
           <p className="text-sm font-bold text-neutral-700">Price</p>
           <div className="flex items-center gap-3 text-[11px] text-neutral-500">
             <span>liq {fmtXno(token.poolXno)} XNO</span>
-            <span>reserve {fmtTok(token.poolTokens, token.decimals)}</span>
+            <span>reserve {fmtTok(token.poolTokens, token.decimals)} {tokSym(token)}</span>
           </div>
         </div>
         {token.series.length >= 2 ? (
@@ -1450,7 +1461,7 @@ function ProgressBar({ token }: { token: Token }) {
   return (
     <div className="mt-3">
       <div className="flex items-center justify-between text-[11px] text-neutral-500 mb-1">
-        <span>{graduated ? "graduated · liquidity locked" : "liquidity ramp"}</span>
+        <span>{graduated ? "fully seeded · liquidity in pool" : "seeding liquidity"}</span>
         <span>{graduated ? "100%" : `${pct.toFixed(2)}%`}</span>
       </div>
       <div className="h-2 rounded-full bg-neutral-100 overflow-hidden">
@@ -1573,15 +1584,20 @@ function TradePanel({
       </div>
       {side === "buy" && (
         <div className="grid grid-cols-4 gap-2">
-          {["0.1", "0.5", "1", "5"].map((v) => (
-            <button
-              key={v}
-              className="rounded-none border border-neutral-300 py-1.5 text-xs font-bold text-neutral-600 hover:border-black hover:text-black"
-              onClick={() => setAmount(v)}
-            >
-              {v} XNO
-            </button>
-          ))}
+          {["0.1", "0.5", "1", "5"].map((v) => {
+            const over = toRaw(v, 30) > BigInt(xnoBal || "0"); // more than you hold
+            return (
+              <button
+                key={v}
+                disabled={over}
+                title={over ? "more than your balance" : undefined}
+                className="rounded-none border border-neutral-300 py-1.5 text-xs font-bold text-neutral-600 hover:border-black hover:text-black disabled:opacity-40 disabled:hover:border-neutral-300 disabled:hover:text-neutral-600"
+                onClick={() => setAmount(v)}
+              >
+                {v} XNO
+              </button>
+            );
+          })}
         </div>
       )}
       {quote && (
