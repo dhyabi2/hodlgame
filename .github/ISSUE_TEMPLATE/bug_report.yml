@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in the ledger, indexer, APIs, or web app is wrong.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **If this is a security vulnerability, do not file it
+        here** — see [SECURITY.md](../../SECURITY.md) for private disclosure.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you observe, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: A runnable repro is ideal — commands, a failing test, or a block/tx hash.
+      placeholder: |
+        1. cd nano && npm install
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: area
+    attributes:
+      label: Area
+      description: Which part? e.g. core/state, indexer, server/explorer, web app, /pro terminal, custody.
+    validations:
+      required: false
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Node version, OS, browser (for the web app), commit SHA.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: This is not a security vulnerability (those go through SECURITY.md).
+          required: true
+        - label: I searched existing issues.
+          required: true

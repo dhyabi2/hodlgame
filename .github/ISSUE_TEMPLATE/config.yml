@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability (private)
+    url: https://github.com/dhyabi2/holdergame/security/advisories/new
+    about: Report vulnerabilities privately — please do NOT open a public issue. See SECURITY.md.
+  - name: Design docs & spec
+    url: https://github.com/dhyabi2/holdergame/blob/main/nano/SPEC.md
+    about: Read the encoding + state-machine spec and the docs/ folder before filing a design issue.
