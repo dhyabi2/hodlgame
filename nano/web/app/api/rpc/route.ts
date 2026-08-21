@@ -12,6 +12,7 @@ const ALLOWED = new Set([
   "blocks_info",
   "block_info",
   "pending",
+  "receivable", // modern alias of `pending`; the wallet receive flow uses it
   "work_generate",
   "process",
 ]);
