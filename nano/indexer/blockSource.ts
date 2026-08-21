@@ -1,9 +1,19 @@
 // HoldFun Nano L2 — block sources.
 //
 // The indexer reads Nano blocks through a `BlockSource`. Two implementations:
-// `MemorySource` (tests / local) and `NanoRpcSource` (rpc.nano.to).
+// `MemorySource` (tests / local) and `NanoRpcSource` (untrusted RPC endpoints).
+//
+// NanoRpcSource verifies every returned block LOCALLY: the state-block hash is
+// recomputed from its fields and the ed25519-blake2b signature checked against
+// the owning account. A lying endpoint can therefore omit blocks (liveness),
+// but never forge one (integrity) — which is what makes multi-endpoint
+// failover safe. Value-bearing blocks that fail verification are rejected;
+// zero-amount blocks that fail only the signature check (epoch blocks are
+// signed by the epoch signer, not the account) are kept — they can never be
+// ops or deposits, so they cannot influence state.
 
-import { NANO_RPC, nanoRpc } from "../lib/rpc";
+import * as nanocurrency from "nanocurrency";
+import { nanoRpc } from "../lib/rpc";
 
 export interface NanoBlock {
   account: string;
@@ -34,9 +44,43 @@ export class MemorySource implements BlockSource {
   }
 }
 
+/** Local verification of a fetched block (see header). Exported for tests. */
+export function verifyFetchedBlock(
+  hash: string,
+  b: { block_account: string; contents: any; amount?: string }
+): boolean {
+  const c = b.contents ?? {};
+  if (c.type && c.type !== "state") {
+    // Legacy pre-state blocks predate this app's history; keep only if valueless.
+    return !b.amount || BigInt(b.amount) === 0n;
+  }
+  try {
+    const computed = nanocurrency.hashBlock({
+      account: c.account ?? b.block_account,
+      previous: c.previous,
+      representative: c.representative,
+      balance: c.balance,
+      link: c.link,
+    });
+    if (computed.toLowerCase() !== hash.toLowerCase()) return false; // tampered contents
+    const publicKey = nanocurrency.derivePublicKey(c.account ?? b.block_account);
+    const sigOk = (nanocurrency as any).verifyBlock({
+      hash: computed,
+      signature: String(c.signature ?? "").toUpperCase(),
+      publicKey,
+    });
+    if (sigOk) return true;
+    // Epoch blocks are account-chain blocks signed by the epoch signer: keep
+    // only when valueless (they can never be ops or deposits).
+    return !b.amount || BigInt(b.amount) === 0n;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Reads blocks from rpc.nano.to (strict — no other nodes). Uses
- * `account_history` + `blocks_info`.
+ * Reads blocks from untrusted RPC endpoints (lib/rpc.ts failover list) and
+ * verifies each block locally. Uses `account_history` + `blocks_info`.
  */
 export class NanoRpcSource implements BlockSource {
   constructor(private apiKey: string) {}
@@ -79,6 +123,7 @@ export class NanoRpcSource implements BlockSource {
         const b = info.blocks?.[hash];
         if (!b) continue;
         seen.add(hash);
+        if (!verifyFetchedBlock(hash, b)) continue; // forged/tampered → reject
         blocks.push({
           account: b.block_account,
           hash,
