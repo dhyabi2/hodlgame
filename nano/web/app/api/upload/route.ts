@@ -8,7 +8,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_BYTES = 5 * 1024 * 1024;
-const GATEWAY = "https://gateway.pinata.cloud/ipfs";
 const EXTS: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -31,7 +30,9 @@ async function pinToIpfs(file: File): Promise<string> {
     throw new Error(`IPFS pin failed (${res.status}): ${t.slice(0, 200)}`);
   }
   const data = (await res.json()) as { IpfsHash: string };
-  return `${GATEWAY}/${data.IpfsHash}`;
+  // Store the content address, not a gateway URL: the CID is host-independent,
+  // so anyone can pin/serve it; the client resolves via a gateway list.
+  return `ipfs://${data.IpfsHash}`;
 }
 
 async function saveLocal(file: File): Promise<string> {

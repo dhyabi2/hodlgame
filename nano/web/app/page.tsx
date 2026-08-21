@@ -576,10 +576,40 @@ function trendColor(points: PricePoint[]): string {
   return b >= a ? "#22c55e" : "#ef4444";
 }
 
+// Public IPFS gateways tried in order; images are stored as ipfs://CID so any
+// gateway (or a community pin) can serve them — no single pinning account.
+const IPFS_GATEWAYS = [
+  "https://ipfs.io/ipfs/",
+  "https://dweb.link/ipfs/",
+  "https://cloudflare-ipfs.com/ipfs/",
+  "https://gateway.pinata.cloud/ipfs/",
+];
+
+/** Resolve an image URL to an ordered candidate list (ipfs:// and legacy
+ * gateway URLs fan out across gateways; anything else passes through). */
+function imageCandidates(url: string): string[] {
+  const m =
+    url.match(/^ipfs:\/\/(?:ipfs\/)?([^/?#]+)(\/[^?#]*)?$/) ??
+    url.match(/^https?:\/\/[^/]+\/ipfs\/([^/?#]+)(\/[^?#]*)?$/);
+  if (m) return IPFS_GATEWAYS.map((g) => g + m[1] + (m[2] ?? ""));
+  const safe = safeHref(url);
+  return safe ? [safe] : [];
+}
+
 function Avatar({ image, symbol, size = 40 }: { image: string; symbol: string; size?: number }) {
-  const safeImage = image ? safeHref(image) : undefined;
-  if (safeImage) {
-    return <img src={safeImage} alt="" style={{ width: size, height: size }} className="rounded-full object-cover shrink-0" />;
+  const [idx, setIdx] = useState(0);
+  useEffect(() => setIdx(0), [image]);
+  const candidates = image ? imageCandidates(image) : [];
+  if (idx < candidates.length) {
+    return (
+      <img
+        src={candidates[idx]}
+        alt=""
+        style={{ width: size, height: size }}
+        className="rounded-full object-cover shrink-0"
+        onError={() => setIdx((i) => i + 1)}
+      />
+    );
   }
   return (
     <div
