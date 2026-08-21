@@ -78,6 +78,10 @@ export interface IndexedEvent {
   height: bigint;
   timestamp?: number;
   hash: string;
+  /** All carrier block hashes when the op spans multiple blocks (fragment
+   * pairs: [A, B]); absent for single-block ops. Explorer metadata only —
+   * never part of consensus state. */
+  carriers?: string[];
 }
 
 /**
@@ -196,6 +200,13 @@ export class MultiIndexer {
     return [...this.metaAnchors];
   }
 
+  /** op hash → the pool deposit that value-bound it (explorer edges). */
+  private depositEdges = new Map<string, { deposit: string; amountRaw: string }>();
+
+  getDepositEdges(): Map<string, { deposit: string; amountRaw: string }> {
+    return new Map(this.depositEdges);
+  }
+
   /** Pull + decode all ops for the given accounts, in confirmation order.
    *
    * Two passes. Pass 1 derives each token's pool pubkey FROM CHAIN DATA: the
@@ -263,7 +274,15 @@ export class MultiIndexer {
         // The op completes only at B: height/hash come from B so canonical
         // ordering is identical for every indexer.
         events.push({
-          ev: { tokenId: d.tokenId, op: d.op, sender: block.account, height: child.height, timestamp, hash: child.hash },
+          ev: {
+            tokenId: d.tokenId,
+            op: d.op,
+            sender: block.account,
+            height: child.height,
+            timestamp,
+            hash: child.hash,
+            carriers: [block.hash, child.hash],
+          },
           prev: block.previous,
         });
         continue;
@@ -274,15 +293,22 @@ export class MultiIndexer {
     return { events, byHash, anchors };
   }
 
-  async collectEvents(accounts: string[]): Promise<IndexedEvent[]> {
+  /** Fragment-aware decoded chains per account (explorer/edge consumers). */
+  async collectChains(accounts: string[]): Promise<Map<string, DecodedChain>> {
     const decoded = new Map<string, DecodedChain>();
     for (const account of accounts) decoded.set(account, this.decodeChain(await this.source.listBlocks(account)));
+    return decoded;
+  }
+
+  async collectEvents(accounts: string[]): Promise<IndexedEvent[]> {
+    const decoded = await this.collectChains(accounts);
 
     this.chainPools = derivePoolKeysFromChain(decoded);
     this.metaAnchors = [...decoded.values()].flatMap((d) => d.anchors);
     const poolOf = (tokenId: TokenId): string | null =>
       this.chainPools.get(tokenId) ?? this.poolKey?.(tokenId) ?? null;
 
+    this.depositEdges = new Map();
     const events: IndexedEvent[] = [];
     for (const { events: evs, byHash } of decoded.values()) {
       for (const { ev, prev } of evs) {
@@ -295,6 +321,7 @@ export class MultiIndexer {
           const routesToPool = Boolean(dep && poolPub && dep.link.toLowerCase() === poolPub.toLowerCase());
           if (!dep || amount <= 0n || !routesToPool) continue; // malformed buy → skip
           ev.op = { ...ev.op, xno: amount };
+          this.depositEdges.set(ev.hash, { deposit: dep!.hash, amountRaw: amount.toString() });
         } else if (ev.op.kind === "seedLiq" || ev.op.kind === "addLiq") {
           // Value-bound liquidity: pool XNO only ever credits from a real
           // chained deposit send to this token's pool — the deposit's native
@@ -307,6 +334,7 @@ export class MultiIndexer {
           const routesToPool = Boolean(dep && poolPub && dep.link.toLowerCase() === poolPub.toLowerCase());
           if (routesToPool && amount > 0n) {
             ev.op = { ...ev.op, xno: amount };
+            this.depositEdges.set(ev.hash, { deposit: byHash.get(prev)!.hash, amountRaw: amount.toString() });
           } else if (ev.op.xno > 0n) {
             continue; // declared-but-unbacked → skip
           }

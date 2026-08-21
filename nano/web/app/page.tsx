@@ -13,6 +13,7 @@ import { encodeFragLinks } from "../core/fraglink";
 import { sanitizeMeta } from "../server/validate";
 import type { Op } from "../core/ops";
 import { Sparkline } from "./components/Sparkline";
+import Explorer from "./components/Explorer";
 import { loadWallet, saveWallet, removeWallet, encryptSeed, decryptSeed } from "./lib/wallet";
 
 const PriceChart = dynamic(() => import("./components/PriceChart"), { ssr: false });
@@ -185,7 +186,7 @@ export default function Home() {
   const [detail, setDetail] = useState<Token | null>(null);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<string[]>([]);
-  const [tab, setTab] = useState<"explore" | "portfolio" | "create" | "wallet">("explore");
+  const [tab, setTab] = useState<"explore" | "portfolio" | "create" | "scan" | "wallet">("explore");
 
   const say = (s: string) => setLog((l) => [...l.slice(-9), s]);
 
@@ -346,6 +347,8 @@ export default function Home() {
           />
         ) : tab === "explore" ? (
           <Feed tokens={tokens} onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} />
+        ) : tab === "scan" ? (
+          <Explorer />
         ) : tab === "portfolio" ? (
           <Portfolio tokens={tokens} onSelect={(id) => setSelectedId(id)} account={keys?.address} />
         ) : tab === "create" ? (
@@ -1231,17 +1234,18 @@ function Portfolio({ tokens, onSelect, account }: { tokens: Token[]; onSelect: (
   );
 }
 
-const TABS: { id: "explore" | "portfolio" | "create" | "wallet"; label: string; icon: string }[] = [
+const TABS: { id: "explore" | "portfolio" | "create" | "scan" | "wallet"; label: string; icon: string }[] = [
   { id: "explore", label: "Explore", icon: "🏠" },
   { id: "portfolio", label: "Holdings", icon: "💼" },
   { id: "create", label: "Create", icon: "✨" },
+  { id: "scan", label: "Scan", icon: "🔎" },
   { id: "wallet", label: "Wallet", icon: "👛" },
 ];
 
-function TabBar({ tab, setTab }: { tab: "explore" | "portfolio" | "create" | "wallet"; setTab: (t: "explore" | "portfolio" | "create" | "wallet") => void }) {
+function TabBar({ tab, setTab }: { tab: "explore" | "portfolio" | "create" | "scan" | "wallet"; setTab: (t: "explore" | "portfolio" | "create" | "scan" | "wallet") => void }) {
   return (
     <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-zinc-900 bg-[#0a0a0a]/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
-      <div className="max-w-2xl mx-auto grid grid-cols-4">
+      <div className="max-w-2xl mx-auto grid grid-cols-5">
         {TABS.map((t) => (
           <button
             key={t.id}

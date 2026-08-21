@@ -2,7 +2,7 @@
 // analytics (price/market-cap/holders/trades/series), off-chain metadata, and
 // per-token pool addresses.
 
-import { MultiIndexer } from "../indexer/multiIndexer";
+import { MultiIndexer, type IndexedEvent } from "../indexer/multiIndexer";
 import { NanoRpcSource } from "../indexer/blockSource";
 import { analyze, type PricePoint, type TokenAnalytics } from "./analytics";
 import { tokenPoolKeys } from "./custody";
@@ -46,12 +46,15 @@ export interface TokenView {
   comments: Comment[];
 }
 
-interface RawMarket {
+export interface RawMarket {
   state: ReturnType<typeof analyze>["state"];
   byToken: Map<string, TokenAnalytics>;
   meta: Map<string, any>;
   master: string;
   metaAuthority: Map<string, MetaAuthorityState>;
+  events: IndexedEvent[];
+  idx: MultiIndexer;
+  sellPayouts: ReturnType<typeof analyze>["sellPayouts"];
 }
 
 let cache: { at: number; value: RawMarket } | null = null;
@@ -64,13 +67,13 @@ async function computeFresh(): Promise<RawMarket> {
   const poolKey = (tokenId: string) => (master ? tokenPoolKeys(master, tokenId).publicKey : null);
   const idx = new MultiIndexer(new NanoRpcSource(loadNanoRpcKey()), (id) => reg.get(id) ?? EMPTY_META, commit, poolKey);
   const events = await idx.collectEvents(await watchedAccounts());
-  const { state, byToken } = analyze(events);
+  const { state, byToken, sellPayouts } = analyze(events);
   // Chain-derived metadata-authority state (core/metaAnchor.ts): seeded by
   // each launch creator, folded over on-chain immutable/setAuthority anchors.
   const creators = new Map<string, string>();
   for (const [tokenId, s] of state) if (s.creator) creators.set(tokenId, s.creator);
   const metaAuthority = deriveMetaAuthority(idx.getMetaAnchors(), creators);
-  return { state, byToken, meta: reg, master, metaAuthority };
+  return { state, byToken, meta: reg, master, metaAuthority, events, idx, sellPayouts };
 }
 
 /** Shared in-memory cache so burst requests (feed + detail + SSE) share one index. */
@@ -105,6 +108,11 @@ export async function authorityStateOf(tokenId: string): Promise<MetaAuthoritySt
 
 export function bustCache(): void {
   cache = null;
+}
+
+/** Raw market internals (events, indexer, payouts) for the explorer layer. */
+export async function raw(): Promise<RawMarket> {
+  return compute();
 }
 
 /** Percent change vs the last price at or before `now - secondsAgo` (step fn). */
