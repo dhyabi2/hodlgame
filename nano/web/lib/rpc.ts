@@ -1,17 +1,21 @@
-// STRICT RULE: HoldFun Nano uses https://rpc.nano.to EXCLUSIVELY.
-// Do NOT add other RPC endpoints, proxies, or work services to this file or
-// anywhere else in the codebase. The only permitted fallback is LOCAL CPU
-// proof-of-work computation (offline, contacts no one), used when
-// work_generate does not answer.
+// STRICT RULE (amended by owner 2026-08-21): https://rpc.nano.to is the
+// PRIMARY and only keyed endpoint. https://rpc.nano-gpt.com is the SOLE
+// permitted FALLBACK, used only when nano.to does not answer (transport
+// failure/timeout), keyless, for its keyless tier (reads + process +
+// work_validate — its keyless tier does NOT serve work_generate). Do NOT
+// add any other endpoints, proxies, or work services. The API key is sent
+// to rpc.nano.to ONLY — never to the fallback. Local CPU proof-of-work
+// (offline) remains the work fallback.
 //
-// Fetched blocks are still verified locally (indexer/blockSource.ts):
-// self-certifying ed25519-blake2b signatures mean the endpoint can omit
+// Fetched blocks are verified locally (indexer/blockSource.ts):
+// self-certifying ed25519-blake2b signatures mean either endpoint can omit
 // data, never forge it.
 
 import * as fs from "node:fs";
 import * as nanocurrency from "nanocurrency";
 
 export const NANO_RPC = "https://rpc.nano.to";
+export const FALLBACK_RPC = "https://rpc.nano-gpt.com";
 export const SEND_DIFFICULTY = "fffffff800000000";
 export const RECEIVE_DIFFICULTY = "fffffe0000000000";
 
@@ -29,30 +33,54 @@ export function loadNanoRpcKey(): string {
 const TIMEOUT_MS = 30_000;
 const WORK_RPC_TIMEOUT_MS = 10_000; // work_generate is known to hang; fail fast to local
 
-async function rawCall(key: string, body: Record<string, unknown>, timeoutMs: number): Promise<any> {
+async function callEndpoint(
+  url: string,
+  key: string,
+  body: Record<string, unknown>,
+  timeoutMs: number
+): Promise<any> {
   const payload = { ...body };
-  // rpc.nano.to accepts the key in the body and as an Authorization header
-  // (no "Bearer" prefix) — per the reference implementation.
-  if (key) (payload as any).key = key;
+  // The API key belongs to rpc.nano.to ONLY — never sent to the fallback.
+  const useKey = key && url === NANO_RPC;
+  if (useKey) (payload as any).key = key;
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const res = await fetch(NANO_RPC, {
+    const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(key ? { Authorization: key } : {}),
+        ...(useKey ? { Authorization: key } : {}),
       },
       body: JSON.stringify(payload),
       signal: ctl.signal,
     });
     const json = (await res.json()) as any;
     if (json.error) {
-      throw new Error(typeof json.error === "string" ? json.error : JSON.stringify(json.error));
+      throw new SemanticError(typeof json.error === "string" ? json.error : JSON.stringify(json.error));
     }
     return json;
   } finally {
     clearTimeout(t);
+  }
+}
+
+/** A real answer from a responsive endpoint (e.g. "Account not found") —
+ * never a reason to fail over. */
+class SemanticError extends Error {}
+
+async function rawCall(key: string, body: Record<string, unknown>, timeoutMs: number): Promise<any> {
+  try {
+    return await callEndpoint(NANO_RPC, key, body, timeoutMs);
+  } catch (e) {
+    if (e instanceof SemanticError) throw new Error(e.message);
+    // Transport failure/timeout on nano.to → the one permitted fallback.
+    try {
+      return await callEndpoint(FALLBACK_RPC, key, body, timeoutMs);
+    } catch (e2) {
+      if (e2 instanceof SemanticError) throw new Error(e2.message);
+      throw e; // report the primary's failure
+    }
   }
 }
 

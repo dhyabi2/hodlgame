@@ -44,8 +44,8 @@
       <bpmn:outgoing>Flow_Replay_2</bpmn:outgoing>
     </bpmn:serviceTask>
 
-    <bpmn:serviceTask id="Task_Replay_Fetch" name="listBlocks via rpc.nano.to (STRICT: sole endpoint); verifyFetchedBlock each">
-      <bpmn:documentation>lib/rpc.ts (STRICT RULE: rpc.nano.to exclusively; only fallback is LOCAL CPU proof-of-work) + blockSource.ts (recompute hash, check ed25519-blake2b signature; value-bearing failures rejected, valueless epoch blocks tolerated).</bpmn:documentation>
+    <bpmn:serviceTask id="Task_Replay_Fetch" name="listBlocks via rpc.nano.to (primary; rpc.nano-gpt.com keyless fallback); verifyFetchedBlock each">
+      <bpmn:documentation>lib/rpc.ts (rpc.nano.to primary + keyed; rpc.nano-gpt.com is the sole permitted keyless fallback for reads/process; work falls back to LOCAL CPU) + blockSource.ts (recompute hash, check ed25519-blake2b signature; value-bearing failures rejected, valueless epoch blocks tolerated).</bpmn:documentation>
       <bpmn:incoming>Flow_Replay_2</bpmn:incoming>
       <bpmn:outgoing>Flow_Replay_3</bpmn:outgoing>
     </bpmn:serviceTask>

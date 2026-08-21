@@ -2,7 +2,7 @@
 
 > **Status (2026-08-21):** SHIPPED — W2 (chain-derived settlement), W3
 > (fragment links), W5 (ipfs:// images), W7 (anchor discovery), W8
-> (chain-derived pools + verify CLI), W9 (strict rpc.nano.to + local block
+> (chain-derived pools + verify CLI), W9 (nano.to + nano-gpt fallback + local block
 > verification), W10 (dissolved by W2/W4), plus signed comments, LICENSE,
 > and CI with vendored-drift gate from W6. REMAINING — W1 custody only
 > (needs steward selection; see revision below), plus W6 org/second-owner
@@ -244,9 +244,11 @@ a new trust root); IPFS ledger hashes (Nano has no canonical global ledger
 hash; who signs the snapshot?); building an archive federation (the community
 node ecosystem already exists — consume it).
 
-**Winning design (REVISED by owner decision, 2026-08-21): STRICT single
-endpoint.** rpc.nano.to is the sole permitted RPC — do not add other
-endpoints, proxies, or work services anywhere in the codebase. **Verify blocks locally** — `nanocurrency` already
+**Winning design (owner-set policy, 2026-08-21): rpc.nano.to primary,
+rpc.nano-gpt.com the sole permitted fallback** (keyless tier: reads +
+process + work_validate; used only when nano.to does not answer; the API
+key is never sent to the fallback). No other endpoints, proxies, or work
+services anywhere in the codebase. **Verify blocks locally** — `nanocurrency` already
 ships `hashBlock`/`verifyBlock`: check hash, signature, and chain contiguity
 on everything fetched, so any untrusted endpoint becomes usable for reads
 (2-of-3 quorum rejected: integrity is self-certifying; quorum only helps
