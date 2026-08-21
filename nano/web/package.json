@@ -11,6 +11,7 @@
     "start": "next start"
   },
   "dependencies": {
+    "@vercel/blob": "^2.8.0",
     "lightweight-charts": "^4.2.0",
     "nanocurrency": "^2.5.0",
     "next": "^14.2.35",

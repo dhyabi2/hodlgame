@@ -38,6 +38,26 @@ async function upstashSet(key: string, value: string, u: { url: string; token: s
   });
 }
 
+// Vercel Blob backend (used when BLOB_READ_WRITE_TOKEN is present, i.e. a Blob
+// store is connected to the project). Lazily imported so neither the tests nor
+// the local/self-host paths need the @vercel/blob package. Deterministic
+// pathnames (no random suffix, overwrite) make it a plain key→value store.
+const blobEnabled = () => Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+const blobKey = (name: string) => name.replace(/[^\w.-]/g, "_");
+
+async function blobPut(pathname: string, value: string, contentType: string): Promise<void> {
+  const { put } = await import("@vercel/blob");
+  await put(pathname, value, { access: "public", addRandomSuffix: false, allowOverwrite: true, contentType });
+}
+async function blobGet(pathname: string): Promise<string | null> {
+  const { list } = await import("@vercel/blob");
+  const { blobs } = await list({ prefix: pathname, limit: 1 });
+  const b = blobs.find((x: { pathname: string }) => x.pathname === pathname);
+  if (!b) return null;
+  const res = await fetch((b as { downloadUrl?: string; url: string }).downloadUrl ?? b.url);
+  return res.ok ? await res.text() : null;
+}
+
 export async function loadJson<T>(name: string): Promise<T | null> {
   const u = upstash();
   if (u) {
@@ -47,6 +67,9 @@ export async function loadJson<T>(name: string): Promise<T | null> {
     } catch {
       return null;
     }
+  }
+  if (blobEnabled()) {
+    try { const v = await blobGet(`kv/${blobKey(name)}.json`); return v ? parse<T>(v) : null; } catch { return null; }
   }
   try {
     return parse<T>(await fs.promises.readFile(path.join(dir(), name + ".json"), "utf-8"));
@@ -59,6 +82,10 @@ export async function saveJson(name: string, value: unknown): Promise<void> {
   const u = upstash();
   if (u) {
     await upstashSet(`holdfun:${name}`, stringify(value), u);
+    return;
+  }
+  if (blobEnabled()) {
+    await blobPut(`kv/${blobKey(name)}.json`, stringify(value), "application/json");
     return;
   }
   await fs.promises.mkdir(dir(), { recursive: true });
@@ -84,6 +111,7 @@ const blobFile = (name: string) => path.join(dir(), name.replace(/[^\w.-]/g, "_"
 export async function saveBlob(name: string, value: string): Promise<void> {
   const u = upstash();
   if (u) { await upstashCmd(["SET", `holdfun:${name}`, value], u); return; }
+  if (blobEnabled()) { await blobPut(`blob/${blobKey(name)}`, value, "text/plain"); return; }
   await fs.promises.mkdir(dir(), { recursive: true });
   atomicWrite(blobFile(name), value);
 }
@@ -92,6 +120,9 @@ export async function loadBlob(name: string): Promise<string | null> {
   const u = upstash();
   if (u) {
     try { return await upstashCmd(["GET", `holdfun:${name}`], u); } catch { return null; }
+  }
+  if (blobEnabled()) {
+    try { return await blobGet(`blob/${blobKey(name)}`); } catch { return null; }
   }
   try { return await fs.promises.readFile(blobFile(name), "utf-8"); } catch { return null; }
 }
