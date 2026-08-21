@@ -265,7 +265,11 @@ export default function Home() {
   }, []);
 
   // Keep the URL hash in sync so refresh/back/share land in the same place.
+  // Skip the very first run (mount) so it can't clobber a deep-linked #tab=/#t=
+  // with the default tab before the restore effect's setState propagates.
+  const syncedOnce = useRef(false);
   useEffect(() => {
+    if (!syncedOnce.current) { syncedOnce.current = true; return; }
     try {
       const hash = selectedId ? `t=${selectedId}` : `tab=${tab}`;
       window.history.replaceState(null, "", `#${hash}`);
