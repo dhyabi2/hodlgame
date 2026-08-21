@@ -8,7 +8,8 @@
 // payoutSellsMulti / refundRejectedBuys / readPoolDeposits further down are
 // the LEGACY store-ledger path, kept only for transition tooling.
 
-import { tokenPoolKeys, signPayout, signPayoutWithSignatures, remoteCosign, broadcastPayout, type PoolKeys, type Payout } from "./custody";
+import { tokenPoolKeys, signPayout, broadcastPayout, type PoolKeys, type Payout } from "./custody";
+import { frostEnabled, frostSignPayout } from "./frostSigner";
 import { computeRefunds } from "./reconcile";
 import { loadJson, saveJson } from "./store";
 import type { SellPayout } from "./analytics";
@@ -193,16 +194,14 @@ async function signGuardedPayout(
   payout: Payout,
   cosignerSeeds: string[]
 ): Promise<any> {
-  const gurl = process.env.GUARDIAN_URL;
-  const gkey = process.env.GUARDIAN_KEY;
-  if (gurl && gkey) {
-    const sigs: string[] = [];
-    for (const url of gurl.split(",").map((s) => s.trim()).filter(Boolean)) {
-      const s = await remoteCosign(url, gkey, { tokenId, pool, payout });
-      if (s) sigs.push(s);
-    }
-    return signPayoutWithSignatures(pool, payout, rpcKey, sigs);
+  // Preferred: FROST 2-of-3 threshold custody — no single key can move funds,
+  // and each cosigner re-derives the payout from its own replay before signing.
+  if (frostEnabled()) {
+    return frostSignPayout(pool, tokenId, payout);
   }
+  // Legacy single-key path (opt-in FROST is the migration target). The old
+  // GUARDIAN_URL/`signatures`-array path is removed: Nano blocks take one
+  // signature, so that array never settled on-chain (see SECURITY-AUDIT).
   return signPayout(pool, payout, rpcKey, cosignerSeeds);
 }
 

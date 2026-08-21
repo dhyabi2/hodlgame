@@ -5,6 +5,7 @@ import * as http from "node:http";
 import type { State } from "../core/state";
 import { watched, indexer, runSweep } from "./operator";
 import { stateRoot } from "../core/canonical";
+import { verifyPayout } from "./verifyPayout";
 
 const PORT = Number(process.env.PORT ?? 8080);
 
@@ -63,6 +64,25 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === "/health") {
       return json(res, 200, { ok: true, poolSeed: Boolean(process.env.POOL_SEED) });
+    }
+    if (url.pathname === "/frost/verify-payout" && req.method === "POST") {
+      // Cosigner-as-verifier gate: the local FROST cosigner calls this over
+      // loopback before releasing its share. Bound to VERIFY_KEY.
+      const vkey = process.env.VERIFY_KEY;
+      if (!vkey || req.headers["x-verify-key"] !== vkey) return json(res, 403, { error: "unauthorized" });
+      const body = await new Promise<string>((r) => {
+        let s = "";
+        req.on("data", (c) => (s += c));
+        req.on("end", () => r(s));
+      });
+      let reqObj: any;
+      try {
+        reqObj = JSON.parse(body || "{}");
+      } catch {
+        return json(res, 400, { error: "invalid JSON" });
+      }
+      const verdict = await verifyPayout({ tokenId: String(reqObj.tokenId ?? ""), to: String(reqObj.to ?? ""), amountRaw: String(reqObj.amountRaw ?? "") });
+      return json(res, verdict.ok ? 200 : 409, verdict);
     }
     if (url.pathname === "/root") {
       // Consensus state root — anyone can recompute it with scripts/verify.ts
