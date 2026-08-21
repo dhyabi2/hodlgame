@@ -47,15 +47,15 @@ const blobKey = (name: string) => name.replace(/[^\w.-]/g, "_");
 
 async function blobPut(pathname: string, value: string, contentType: string): Promise<void> {
   const { put } = await import("@vercel/blob");
-  await put(pathname, value, { access: "public", addRandomSuffix: false, allowOverwrite: true, contentType });
+  // Private store: content is read back server-side (with the token) via get()
+  // and streamed by our own routes, so blobs never need to be publicly fetchable.
+  await put(pathname, value, { access: "private" as any, addRandomSuffix: false, allowOverwrite: true, contentType });
 }
 async function blobGet(pathname: string): Promise<string | null> {
-  const { list } = await import("@vercel/blob");
-  const { blobs } = await list({ prefix: pathname, limit: 1 });
-  const b = blobs.find((x: { pathname: string }) => x.pathname === pathname);
-  if (!b) return null;
-  const res = await fetch((b as { downloadUrl?: string; url: string }).downloadUrl ?? b.url);
-  return res.ok ? await res.text() : null;
+  const { get } = await import("@vercel/blob");
+  const r: any = await get(pathname, { access: "private" as any });
+  if (!r || r.statusCode !== 200) return null;
+  return await new Response(r.stream).text();
 }
 
 export async function loadJson<T>(name: string): Promise<T | null> {
