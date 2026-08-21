@@ -94,12 +94,45 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
     return { inbound, outbound };
   }
 
+  /**
+   * Root-caused live (2026-08-22): the exact same account, queried at the
+   * exact same moment, can report a DIFFERENT frontier from rpc.nano.to's
+   * keyed tier vs its own keyless tier — the keyed tier lagged behind on a
+   * specific account's history, silently hiding its most recent blocks (a
+   * launch, in the observed case). Cheap fix: check both frontiers first (one
+   * lightweight account_info each, in parallel). If they agree, the keyed
+   * tier is caught up and the normal single-source walk below is used as
+   * before. If they disagree, walk BOTH full chains and keep whichever is
+   * more complete — blocks are self-verifying (core/blockVerify.ts), so a
+   * longer verified chain is strictly a superset of a shorter one from the
+   * same real ledger, never a reason to distrust it. The common case (tiers
+   * agree) pays only one extra cheap call; the full double-walk only
+   * triggers when staleness is actually detected.
+   */
   async listBlocks(account: string, limit = 20000): Promise<NanoBlock[]> {
+    const [keyedFrontier, keylessFrontier] = await Promise.all([
+      nanoRpc(this.apiKey, { action: "account_info", account }).then((i: any) => String(i?.frontier ?? "")).catch(() => ""),
+      nanoRpc("", { action: "account_info", account }).then((i: any) => String(i?.frontier ?? "")).catch(() => ""),
+    ]);
+
+    if (keyedFrontier && keyedFrontier === keylessFrontier) {
+      return this.fetchChain(this.apiKey, account, limit, keyedFrontier);
+    }
+
+    const [keyed, keyless] = await Promise.allSettled([
+      this.fetchChain(this.apiKey, account, limit, keyedFrontier),
+      this.fetchChain("", account, limit, keylessFrontier),
+    ]);
+    const results = [keyed, keyless]
+      .filter((r): r is PromiseFulfilledResult<NanoBlock[]> => r.status === "fulfilled")
+      .map((r) => r.value);
+    if (results.length === 0) throw new Error(`listBlocks(${account}): both keyed and keyless RPC failed`);
+    return results.reduce((a, b) => (b.length > a.length ? b : a));
+  }
+
+  private async fetchChain(apiKey: string, account: string, limit: number, frontier: string): Promise<NanoBlock[]> {
     // H2 fast path: if the account's frontier is unchanged, its verified block
-    // list is unchanged. One cheap account_info avoids the whole history pull.
-    const frontier = await nanoRpc(this.apiKey, { action: "account_info", account })
-      .then((i: any) => String(i?.frontier ?? ""))
-      .catch(() => "");
+    // list is unchanged — skip the whole history pull.
     if (frontier) {
       const hit = FRONTIER_CACHE.get(`${account}|${frontier}`);
       if (hit) return hit;
@@ -112,7 +145,7 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
     while (raw.length < limit) {
       const params: Record<string, unknown> = { action: "account_history", account, count: 500, raw: true };
       if (head) params.head = head;
-      const hist = (await nanoRpc(this.apiKey, params)) as {
+      const hist = (await nanoRpc(apiKey, params)) as {
         history?: { hash: string; height: string }[];
         previous?: string;
       };
@@ -121,7 +154,7 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
       const hashes = history.map((h) => h.hash).filter((h) => !seen.has(h));
       if (hashes.length === 0) break;
 
-      const info = (await nanoRpc(this.apiKey, {
+      const info = (await nanoRpc(apiKey, {
         action: "blocks_info",
         hashes,
         json_block: true,
