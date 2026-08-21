@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  id="Definitions_indexer"
+  targetNamespace="https://holdfun.io/bpmn">
+
+  <!-- ======================================================================
+  Flow 05 — Indexer / deterministic replay (the substitute for a VM)
+  ======================================================================
+  Reads raw Nano blocks, decodes the `link` into { tokenId, op }, folds them in
+  confirmation-height order, and flags invalid ops WITHOUT throwing, so the
+  canonical state of everything before a bad block is still served.
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Indexer" name="Indexer replay" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Indexer">
+      <bpmn:lane id="Lane_Idx_Source" name="Block source (NanoRpcSource)">
+        <bpmn:flowNodeRef>Event_Idx_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Idx_History</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Idx_BlocksInfo</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Idx_Decode" name="Decoder (MultiIndexer)">
+        <bpmn:flowNodeRef>Task_Idx_Decode</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Idx_IsOp</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Idx_Commit</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Idx_ResolveCommit</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Idx_DecodeCompact</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Idx_BindBuy</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Idx_Replay" name="Replay (replayMulti)">
+        <bpmn:flowNodeRef>Task_Idx_Sort</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Idx_Fold</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Idx_Valid</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Idx_Flag</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Idx_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <bpmn:startEvent id="Event_Idx_Start" name="watched account">
+      <bpmn:outgoing>Flow_Idx_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Idx_History" name="rpc account_history (paged, count 500)">
+      <bpmn:documentation>NanoRpcSource.listBlocks — paginates backwards with `head`.</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Idx_BlocksInfo" name="rpc blocks_info (json_block)">
+      <bpmn:documentation>Gets link, previous, representative, amount, height, timestamp per hash.</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Idx_Decode" name="decode(block)">
+      <bpmn:documentation>Skip non-op blocks: amount != 1 raw (value transfers / receive/open).</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Idx_IsOp" name="carries an op?">
+      <bpmn:incoming>Flow_Idx_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_5</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Idx_skip</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:exclusiveGateway id="Gateway_Idx_Commit" name="commit-reveal (0xFF prefix)?">
+      <bpmn:incoming>Flow_Idx_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_6</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Idx_7</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Idx_ResolveCommit" name="commitResolver(link) + verifyCommit(tokenId, op, link)">
+      <bpmn:documentation>Re-hashes the revealed op and checks it equals the on-chain commit.</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Idx_DecodeCompact" name="decodeOpLink(link) → { tokenId, op }">
+      <bpmn:documentation>launch: tokenId = tokenIdFromLaunchHash(block.hash).</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Idx_BindBuy" name="if buy → bind xno from block.previous deposit">
+      <bpmn:documentation>Value-bound: op.xno = deposit native amount (flow 02).</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_8</bpmn:incoming>
+      <bpmn:incoming>Flow_Idx_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_10</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Idx_Sort" name="sort events by confirmation height">
+      <bpmn:incoming>Flow_Idx_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_11</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Idx_Fold" name="replayMulti(events) → applyBlock → applyOp">
+      <bpmn:documentation>Pure fold into MultiState = Map&lt;tokenId, State&gt;.</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_11</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_12</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Idx_Valid" name="applyOp throws?">
+      <bpmn:incoming>Flow_Idx_12</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_13</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Idx_14</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Idx_Flag" name="flag invalid (keep previous state)">
+      <bpmn:documentation>invalid.push({ index, reason }) — never throws, keeps serving.</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_14</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_15</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Idx_Done" name="canonical MultiState">
+      <bpmn:incoming>Flow_Idx_13</bpmn:incoming>
+      <bpmn:incoming>Flow_Idx_15</bpmn:incoming>
+      <bpmn:incoming>Flow_Idx_skip</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Idx_1" sourceRef="Event_Idx_Start" targetRef="Task_Idx_History"/>
+    <bpmn:sequenceFlow id="Flow_Idx_2" sourceRef="Task_Idx_History" targetRef="Task_Idx_BlocksInfo"/>
+    <bpmn:sequenceFlow id="Flow_Idx_3" sourceRef="Task_Idx_BlocksInfo" targetRef="Task_Idx_Decode"/>
+    <bpmn:sequenceFlow id="Flow_Idx_4" sourceRef="Task_Idx_Decode" targetRef="Gateway_Idx_IsOp"/>
+    <bpmn:sequenceFlow id="Flow_Idx_5" sourceRef="Gateway_Idx_IsOp" targetRef="Gateway_Idx_Commit" name="yes"/>
+    <bpmn:sequenceFlow id="Flow_Idx_skip" sourceRef="Gateway_Idx_IsOp" targetRef="Event_Idx_Done" name="no (skip)"/>
+    <bpmn:sequenceFlow id="Flow_Idx_6" sourceRef="Gateway_Idx_Commit" targetRef="Task_Idx_ResolveCommit" name="commit-reveal"/>
+    <bpmn:sequenceFlow id="Flow_Idx_7" sourceRef="Gateway_Idx_Commit" targetRef="Task_Idx_DecodeCompact" name="compact"/>
+    <bpmn:sequenceFlow id="Flow_Idx_8" sourceRef="Task_Idx_ResolveCommit" targetRef="Task_Idx_BindBuy"/>
+    <bpmn:sequenceFlow id="Flow_Idx_9" sourceRef="Task_Idx_DecodeCompact" targetRef="Task_Idx_BindBuy"/>
+    <bpmn:sequenceFlow id="Flow_Idx_10" sourceRef="Task_Idx_BindBuy" targetRef="Task_Idx_Sort"/>
+    <bpmn:sequenceFlow id="Flow_Idx_11" sourceRef="Task_Idx_Sort" targetRef="Task_Idx_Fold"/>
+    <bpmn:sequenceFlow id="Flow_Idx_12" sourceRef="Task_Idx_Fold" targetRef="Gateway_Idx_Valid"/>
+    <bpmn:sequenceFlow id="Flow_Idx_13" sourceRef="Gateway_Idx_Valid" targetRef="Event_Idx_Done" name="ok"/>
+    <bpmn:sequenceFlow id="Flow_Idx_14" sourceRef="Gateway_Idx_Valid" targetRef="Task_Idx_Flag" name="throws"/>
+    <bpmn:sequenceFlow id="Flow_Idx_15" sourceRef="Task_Idx_Flag" targetRef="Event_Idx_Done"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Indexer">
+    <bpmndi:BPMNPlane id="BPMNPlane_Indexer" bpmnElement="Process_Indexer">
+      <bpmndi:BPMNShape id="Shape_Lane_Idx_Source" bpmnElement="Lane_Idx_Source" isHorizontal="true">
+        <dc:Bounds x="30" y="30" width="1180" height="120"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Idx_Decode" bpmnElement="Lane_Idx_Decode" isHorizontal="true">
+        <dc:Bounds x="30" y="150" width="1180" height="210"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Idx_Replay" bpmnElement="Lane_Idx_Replay" isHorizontal="true">
+        <dc:Bounds x="30" y="360" width="1180" height="180"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Idx_Start" bpmnElement="Event_Idx_Start"><dc:Bounds x="60" y="70" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_History" bpmnElement="Task_Idx_History"><dc:Bounds x="150" y="58" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_BlocksInfo" bpmnElement="Task_Idx_BlocksInfo"><dc:Bounds x="380" y="58" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_Decode" bpmnElement="Task_Idx_Decode"><dc:Bounds x="150" y="190" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_IsOp" bpmnElement="Gateway_Idx_IsOp" isMarkerVisible="true"><dc:Bounds x="370" y="195" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_Commit" bpmnElement="Gateway_Idx_Commit" isMarkerVisible="true"><dc:Bounds x="470" y="195" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_ResolveCommit" bpmnElement="Task_Idx_ResolveCommit"><dc:Bounds x="570" y="150" width="200" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_DecodeCompact" bpmnElement="Task_Idx_DecodeCompact"><dc:Bounds x="570" y="245" width="200" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_BindBuy" bpmnElement="Task_Idx_BindBuy"><dc:Bounds x="830" y="190" width="200" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_Sort" bpmnElement="Task_Idx_Sort"><dc:Bounds x="150" y="415" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_Fold" bpmnElement="Task_Idx_Fold"><dc:Bounds x="380" y="415" width="200" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_Valid" bpmnElement="Gateway_Idx_Valid" isMarkerVisible="true"><dc:Bounds x="630" y="420" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_Flag" bpmnElement="Task_Idx_Flag"><dc:Bounds x="730" y="415" width="200" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_Done" bpmnElement="Event_Idx_Done"><dc:Bounds x="1000" y="427" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Idx_1" bpmnElement="Flow_Idx_1"><di:waypoint x="96" y="88"/><di:waypoint x="150" y="88"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_2" bpmnElement="Flow_Idx_2"><di:waypoint x="330" y="88"/><di:waypoint x="380" y="88"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_3" bpmnElement="Flow_Idx_3"><di:waypoint x="470" y="118"/><di:waypoint x="235" y="190"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_4" bpmnElement="Flow_Idx_4"><di:waypoint x="320" y="220"/><di:waypoint x="370" y="220"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_5" bpmnElement="Flow_Idx_5"><di:waypoint x="420" y="220"/><di:waypoint x="470" y="220"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_skip" bpmnElement="Flow_Idx_skip"><di:waypoint x="395" y="245"/><di:waypoint x="1018" y="427"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_6" bpmnElement="Flow_Idx_6"><di:waypoint x="495" y="195"/><di:waypoint x="570" y="180"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_7" bpmnElement="Flow_Idx_7"><di:waypoint x="495" y="245"/><di:waypoint x="570" y="275"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_8" bpmnElement="Flow_Idx_8"><di:waypoint x="770" y="180"/><di:waypoint x="830" y="220"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_9" bpmnElement="Flow_Idx_9"><di:waypoint x="770" y="275"/><di:waypoint x="930" y="250"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_10" bpmnElement="Flow_Idx_10"><di:waypoint x="930" y="250"/><di:waypoint x="240" y="415"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_11" bpmnElement="Flow_Idx_11"><di:waypoint x="330" y="445"/><di:waypoint x="380" y="445"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_12" bpmnElement="Flow_Idx_12"><di:waypoint x="580" y="445"/><di:waypoint x="630" y="445"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_13" bpmnElement="Flow_Idx_13"><di:waypoint x="680" y="445"/><di:waypoint x="730" y="445"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_14" bpmnElement="Flow_Idx_14"><di:waypoint x="655" y="470"/><di:waypoint x="1000" y="463"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_15" bpmnElement="Flow_Idx_15"><di:waypoint x="930" y="445"/><di:waypoint x="1000" y="445"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>

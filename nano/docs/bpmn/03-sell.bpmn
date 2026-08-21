@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  id="Definitions_sell"
+  targetNamespace="https://holdfun.io/bpmn">
+
+  <!-- ======================================================================
+  Flow 03 — Sell → exact XNO-out → 2-of-3 custody payout
+  ======================================================================
+  The seller signs a sell op. The indexer computes the exact XNO-out at the
+  sell's *execution point* (pre-sell reserves), so batched sells are paid
+  path-dependently. The XNO then leaves the 2-of-3 multisig pool account only
+  after the operator collects a co-signature from a guardian.
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Sell" name="Sell + custody payout" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Sell">
+      <bpmn:lane id="Lane_Sell_Seller" name="Seller">
+        <bpmn:flowNodeRef>Event_Sell_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Commit</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Sign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Sell_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Sell_Indexer" name="Indexer / Analytics">
+        <bpmn:flowNodeRef>Task_Sell_Analyze</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Apply</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Sell_Slip</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Reject</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Record</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Sell_Operator" name="Operator (custody sweep)">
+        <bpmn:flowNodeRef>Event_Sell_Sweep</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Idem</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Cosign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Broadcast</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Sell_Paid</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Sell_Guardian" name="Guardian (co-signer)">
+        <bpmn:flowNodeRef>Task_Sell_GuardianSign</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <!-- Seller -->
+    <bpmn:startEvent id="Event_Sell_Start" name="Seller wants XNO">
+      <bpmn:outgoing>Flow_Sell_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Sell_Commit" name="If minXno set → registerCommit(tokenId, sell)">
+      <bpmn:documentation>Two-amount op → commit-reveal (flow 08). Compact sell skips this.</bpmn:documentation>
+      <bpmn:incoming>Flow_Sell_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Sell_Sign" name="Sign sell op block (link = tokenId|tokens)">
+      <bpmn:incoming>Flow_Sell_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Sell_Done" name="Broadcasted">
+      <bpmn:incoming>Flow_Sell_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_4</bpmn:outgoing>
+    </bpmn:endEvent>
+
+    <!-- Indexer -->
+    <bpmn:serviceTask id="Task_Sell_Analyze" name="analyze(events) → sellPayouts[]">
+      <bpmn:documentation>out = tokens·poolXno / (poolTokens + tokens) computed on PRE-sell reserves.</bpmn:documentation>
+      <bpmn:incoming>Flow_Sell_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Sell_Apply" name="applyOp(state, sell, sender, height)">
+      <bpmn:incoming>Flow_Sell_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Sell_Slip" name="out ≥ minXno and out &lt; poolXno?">
+      <bpmn:incoming>Flow_Sell_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_7</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Sell_8</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Sell_Reject" name="reject (slippage)">
+      <bpmn:incoming>Flow_Sell_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Sell_Record" name="push { tokenId, to, amountRaw, hash } into sellPayouts">
+      <bpmn:incoming>Flow_Sell_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_10</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- Operator -->
+    <bpmn:startEvent id="Event_Sell_Sweep" name="runSweep (cron / operator)">
+      <bpmn:incoming>Flow_Sell_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_11</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Sell_Idem" name="payoutSellsMulti: skip if paid.has(p.hash)">
+      <bpmn:documentation>Idempotency: `paid` set in the durable store prevents double-pay.</bpmn:documentation>
+      <bpmn:incoming>Flow_Sell_11</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_12</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Sell_Cosign" name="signGuardedPayout → remoteCosign(guardian) → signPayoutWithSignatures">
+      <bpmn:documentation>2-of-3: operator key + guardian co-signature over the same block hash.</bpmn:documentation>
+      <bpmn:incoming>Flow_Sell_12</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_13</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Sell_Broadcast" name="broadcastPayout (rpc action=process)">
+      <bpmn:incoming>Flow_Sell_13</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_14</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Sell_Paid" name="seller receives XNO">
+      <bpmn:incoming>Flow_Sell_14</bpmn:incoming>
+      <bpmn:incoming>Flow_Sell_9</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <!-- Guardian -->
+    <bpmn:serviceTask id="Task_Sell_GuardianSign" name="Guardian re-verifies + co-signs (flow 06)">
+      <bpmn:incoming>Flow_Sell_15</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_16</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:sequenceFlow id="Flow_Sell_1" sourceRef="Event_Sell_Start" targetRef="Task_Sell_Commit"/>
+    <bpmn:sequenceFlow id="Flow_Sell_2" sourceRef="Task_Sell_Commit" targetRef="Task_Sell_Sign"/>
+    <bpmn:sequenceFlow id="Flow_Sell_3" sourceRef="Task_Sell_Sign" targetRef="Event_Sell_Done"/>
+    <bpmn:sequenceFlow id="Flow_Sell_4" sourceRef="Event_Sell_Done" targetRef="Task_Sell_Analyze"/>
+    <bpmn:sequenceFlow id="Flow_Sell_5" sourceRef="Task_Sell_Analyze" targetRef="Task_Sell_Apply"/>
+    <bpmn:sequenceFlow id="Flow_Sell_6" sourceRef="Task_Sell_Apply" targetRef="Gateway_Sell_Slip"/>
+    <bpmn:sequenceFlow id="Flow_Sell_7" sourceRef="Gateway_Sell_Slip" targetRef="Task_Sell_Record" name="ok"/>
+    <bpmn:sequenceFlow id="Flow_Sell_8" sourceRef="Gateway_Sell_Slip" targetRef="Task_Sell_Reject" name="slippage"/>
+    <bpmn:sequenceFlow id="Flow_Sell_9" sourceRef="Task_Sell_Reject" targetRef="Event_Sell_Paid"/>
+    <bpmn:sequenceFlow id="Flow_Sell_10" sourceRef="Task_Sell_Record" targetRef="Event_Sell_Sweep"/>
+    <bpmn:sequenceFlow id="Flow_Sell_11" sourceRef="Event_Sell_Sweep" targetRef="Task_Sell_Idem"/>
+    <bpmn:sequenceFlow id="Flow_Sell_12" sourceRef="Task_Sell_Idem" targetRef="Task_Sell_Cosign"/>
+    <bpmn:sequenceFlow id="Flow_Sell_13" sourceRef="Task_Sell_Cosign" targetRef="Task_Sell_Broadcast"/>
+    <bpmn:sequenceFlow id="Flow_Sell_14" sourceRef="Task_Sell_Broadcast" targetRef="Event_Sell_Paid"/>
+    <bpmn:sequenceFlow id="Flow_Sell_15" sourceRef="Task_Sell_Cosign" targetRef="Task_Sell_GuardianSign"/>
+    <bpmn:sequenceFlow id="Flow_Sell_16" sourceRef="Task_Sell_GuardianSign" targetRef="Task_Sell_Cosign"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Sell">
+    <bpmndi:BPMNPlane id="BPMNPlane_Sell" bpmnElement="Process_Sell">
+      <bpmndi:BPMNShape id="Shape_Lane_Sell_Seller" bpmnElement="Lane_Sell_Seller" isHorizontal="true">
+        <dc:Bounds x="30" y="30" width="1180" height="130"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Sell_Indexer" bpmnElement="Lane_Sell_Indexer" isHorizontal="true">
+        <dc:Bounds x="30" y="160" width="1180" height="150"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Sell_Operator" bpmnElement="Lane_Sell_Operator" isHorizontal="true">
+        <dc:Bounds x="30" y="310" width="1180" height="150"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Sell_Guardian" bpmnElement="Lane_Sell_Guardian" isHorizontal="true">
+        <dc:Bounds x="30" y="460" width="1180" height="110"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Sell_Start" bpmnElement="Event_Sell_Start"><dc:Bounds x="60" y="75" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Commit" bpmnElement="Task_Sell_Commit"><dc:Bounds x="150" y="63" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Sign" bpmnElement="Task_Sell_Sign"><dc:Bounds x="370" y="63" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Done" bpmnElement="Event_Sell_Done"><dc:Bounds x="590" y="75" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Analyze" bpmnElement="Task_Sell_Analyze"><dc:Bounds x="150" y="205" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Apply" bpmnElement="Task_Sell_Apply"><dc:Bounds x="370" y="205" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Slip" bpmnElement="Gateway_Sell_Slip" isMarkerVisible="true"><dc:Bounds x="590" y="210" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Record" bpmnElement="Task_Sell_Record"><dc:Bounds x="690" y="205" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Reject" bpmnElement="Task_Sell_Reject"><dc:Bounds x="590" y="280" width="140" height="40"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Sweep" bpmnElement="Event_Sell_Sweep"><dc:Bounds x="60" y="365" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Idem" bpmnElement="Task_Sell_Idem"><dc:Bounds x="150" y="353" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Cosign" bpmnElement="Task_Sell_Cosign"><dc:Bounds x="370" y="353" width="200" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Broadcast" bpmnElement="Task_Sell_Broadcast"><dc:Bounds x="620" y="353" width="160" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Paid" bpmnElement="Event_Sell_Paid"><dc:Bounds x="840" y="365" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_GuardianSign" bpmnElement="Task_Sell_GuardianSign"><dc:Bounds x="150" y="485" width="200" height="60"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Sell_1" bpmnElement="Flow_Sell_1"><di:waypoint x="96" y="93"/><di:waypoint x="150" y="93"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_2" bpmnElement="Flow_Sell_2"><di:waypoint x="320" y="93"/><di:waypoint x="370" y="93"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_3" bpmnElement="Flow_Sell_3"><di:waypoint x="540" y="93"/><di:waypoint x="590" y="93"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_4" bpmnElement="Flow_Sell_4"><di:waypoint x="608" y="111"/><di:waypoint x="235" y="205"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_5" bpmnElement="Flow_Sell_5"><di:waypoint x="320" y="235"/><di:waypoint x="370" y="235"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_6" bpmnElement="Flow_Sell_6"><di:waypoint x="540" y="235"/><di:waypoint x="590" y="235"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_7" bpmnElement="Flow_Sell_7"><di:waypoint x="640" y="235"/><di:waypoint x="690" y="235"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_8" bpmnElement="Flow_Sell_8"><di:waypoint x="615" y="260"/><di:waypoint x="615" y="280"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_9" bpmnElement="Flow_Sell_9"><di:waypoint x="730" y="300"/><di:waypoint x="858" y="365"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_10" bpmnElement="Flow_Sell_10"><di:waypoint x="780" y="265"/><di:waypoint x="78" y="365"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_11" bpmnElement="Flow_Sell_11"><di:waypoint x="96" y="383"/><di:waypoint x="150" y="383"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_12" bpmnElement="Flow_Sell_12"><di:waypoint x="320" y="383"/><di:waypoint x="370" y="383"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_13" bpmnElement="Flow_Sell_13"><di:waypoint x="570" y="383"/><di:waypoint x="620" y="383"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_14" bpmnElement="Flow_Sell_14"><di:waypoint x="780" y="383"/><di:waypoint x="840" y="383"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_15" bpmnElement="Flow_Sell_15"><di:waypoint x="470" y="413"/><di:waypoint x="250" y="485"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_16" bpmnElement="Flow_Sell_16"><di:waypoint x="250" y="545"/><di:waypoint x="470" y="413"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>

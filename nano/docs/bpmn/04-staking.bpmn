@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  id="Definitions_staking"
+  targetNamespace="https://holdfun.io/bpmn">
+
+  <!-- ======================================================================
+  Flow 04 — Stake / unstake / claim (the "holding is the game" engine)
+  ======================================================================
+  Rewards are clocked by Nano confirmation HEIGHT (not wall time), so the math
+  is deterministic and timestamp-free. Unstake pays a 20% exit tax that splits
+  80/15/5: 80% back to the user, 15% to the rebate vault (holders), 5% burned
+  (permanent deflation — supply can only ever decrease).
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Staking" name="Stake / unstake / claim" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Staking">
+      <bpmn:lane id="Lane_Staking_User" name="Holder">
+        <bpmn:flowNodeRef>Event_Stake_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Stake_Which</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Stake_Sign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Unstake_Sign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Claim_Sign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Stake_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Staking_Indexer" name="Indexer (applyOp)">
+        <bpmn:flowNodeRef>Gateway_Stake_Kind</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Stake_ApplyStake</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Stake_ApplyUnstake</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Stake_ApplyClaim</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Stake_IdxDone</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <!-- User -->
+    <bpmn:startEvent id="Event_Stake_Start" name="Holder signs an op">
+      <bpmn:outgoing>Flow_Stake_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:exclusiveGateway id="Gateway_Stake_Which" name="which op?">
+      <bpmn:incoming>Flow_Stake_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_2</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Stake_3</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Stake_4</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Stake_Sign" name="stake op (link = tokenId|amount)">
+      <bpmn:incoming>Flow_Stake_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_Unstake_Sign" name="unstake op (link = tokenId|amount)">
+      <bpmn:incoming>Flow_Stake_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_Claim_Sign" name="claim op (link = tokenId)">
+      <bpmn:incoming>Flow_Stake_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Stake_Done" name="Broadcasted">
+      <bpmn:incoming>Flow_Stake_5</bpmn:incoming>
+      <bpmn:incoming>Flow_Stake_6</bpmn:incoming>
+      <bpmn:incoming>Flow_Stake_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_8</bpmn:outgoing>
+    </bpmn:endEvent>
+
+    <!-- Indexer -->
+    <bpmn:exclusiveGateway id="Gateway_Stake_Kind" name="op kind">
+      <bpmn:incoming>Flow_Stake_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_9</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Stake_10</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Stake_11</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Stake_ApplyStake" name="stake: settlePoints() → staked += amount">
+      <bpmn:documentation>accrue(s,h) + settlePoints(s, sender, h) settle the debt before moving stake.</bpmn:documentation>
+      <bpmn:incoming>Flow_Stake_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_12</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Stake_ApplyUnstake" name="unstake: tax 20% → burn 5% + rebate 15% + user 80%">
+      <bpmn:documentation>supply -= burn (deflation); rebateVault += rebate; syncRewards(s, rebate).</bpmn:documentation>
+      <bpmn:incoming>Flow_Stake_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_13</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Stake_ApplyClaim" name="claim: pending = points·rewardPerPoint/PRECISION − rewardDebt">
+      <bpmn:documentation>Pay from rebateVault (clamped to available); carry shortfall via debt.</bpmn:documentation>
+      <bpmn:incoming>Flow_Stake_11</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_14</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Stake_IdxDone" name="state updated">
+      <bpmn:incoming>Flow_Stake_12</bpmn:incoming>
+      <bpmn:incoming>Flow_Stake_13</bpmn:incoming>
+      <bpmn:incoming>Flow_Stake_14</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Stake_1" sourceRef="Event_Stake_Start" targetRef="Gateway_Stake_Which"/>
+    <bpmn:sequenceFlow id="Flow_Stake_2" sourceRef="Gateway_Stake_Which" targetRef="Task_Stake_Sign" name="stake"/>
+    <bpmn:sequenceFlow id="Flow_Stake_3" sourceRef="Gateway_Stake_Which" targetRef="Task_Unstake_Sign" name="unstake"/>
+    <bpmn:sequenceFlow id="Flow_Stake_4" sourceRef="Gateway_Stake_Which" targetRef="Task_Claim_Sign" name="claim"/>
+    <bpmn:sequenceFlow id="Flow_Stake_5" sourceRef="Task_Stake_Sign" targetRef="Event_Stake_Done"/>
+    <bpmn:sequenceFlow id="Flow_Stake_6" sourceRef="Task_Unstake_Sign" targetRef="Event_Stake_Done"/>
+    <bpmn:sequenceFlow id="Flow_Stake_7" sourceRef="Task_Claim_Sign" targetRef="Event_Stake_Done"/>
+    <bpmn:sequenceFlow id="Flow_Stake_8" sourceRef="Event_Stake_Done" targetRef="Gateway_Stake_Kind"/>
+    <bpmn:sequenceFlow id="Flow_Stake_9" sourceRef="Gateway_Stake_Kind" targetRef="Task_Stake_ApplyStake" name="stake"/>
+    <bpmn:sequenceFlow id="Flow_Stake_10" sourceRef="Gateway_Stake_Kind" targetRef="Task_Stake_ApplyUnstake" name="unstake"/>
+    <bpmn:sequenceFlow id="Flow_Stake_11" sourceRef="Gateway_Stake_Kind" targetRef="Task_Stake_ApplyClaim" name="claim"/>
+    <bpmn:sequenceFlow id="Flow_Stake_12" sourceRef="Task_Stake_ApplyStake" targetRef="Event_Stake_IdxDone"/>
+    <bpmn:sequenceFlow id="Flow_Stake_13" sourceRef="Task_Stake_ApplyUnstake" targetRef="Event_Stake_IdxDone"/>
+    <bpmn:sequenceFlow id="Flow_Stake_14" sourceRef="Task_Stake_ApplyClaim" targetRef="Event_Stake_IdxDone"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Staking">
+    <bpmndi:BPMNPlane id="BPMNPlane_Staking" bpmnElement="Process_Staking">
+      <bpmndi:BPMNShape id="Shape_Lane_Staking_User" bpmnElement="Lane_Staking_User" isHorizontal="true">
+        <dc:Bounds x="30" y="30" width="1180" height="220"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Staking_Indexer" bpmnElement="Lane_Staking_Indexer" isHorizontal="true">
+        <dc:Bounds x="30" y="250" width="1180" height="220"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Stake_Start" bpmnElement="Event_Stake_Start"><dc:Bounds x="60" y="120" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_Which" bpmnElement="Gateway_Stake_Which" isMarkerVisible="true"><dc:Bounds x="160" y="113" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_Sign" bpmnElement="Task_Stake_Sign"><dc:Bounds x="280" y="60" width="150" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Unstake_Sign" bpmnElement="Task_Unstake_Sign"><dc:Bounds x="280" y="120" width="150" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Claim_Sign" bpmnElement="Task_Claim_Sign"><dc:Bounds x="280" y="180" width="150" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_Done" bpmnElement="Event_Stake_Done"><dc:Bounds x="520" y="120" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_Kind" bpmnElement="Gateway_Stake_Kind" isMarkerVisible="true"><dc:Bounds x="160" y="330" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_ApplyStake" bpmnElement="Task_Stake_ApplyStake"><dc:Bounds x="280" y="280" width="190" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_ApplyUnstake" bpmnElement="Task_Stake_ApplyUnstake"><dc:Bounds x="280" y="340" width="210" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_ApplyClaim" bpmnElement="Task_Stake_ApplyClaim"><dc:Bounds x="280" y="400" width="210" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_IdxDone" bpmnElement="Event_Stake_IdxDone"><dc:Bounds x="560" y="340" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Stake_1" bpmnElement="Flow_Stake_1"><di:waypoint x="96" y="138"/><di:waypoint x="160" y="138"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_2" bpmnElement="Flow_Stake_2"><di:waypoint x="185" y="113"/><di:waypoint x="280" y="85"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_3" bpmnElement="Flow_Stake_3"><di:waypoint x="210" y="138"/><di:waypoint x="280" y="145"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_4" bpmnElement="Flow_Stake_4"><di:waypoint x="185" y="163"/><di:waypoint x="280" y="205"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_5" bpmnElement="Flow_Stake_5"><di:waypoint x="430" y="85"/><di:waypoint x="520" y="138"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_6" bpmnElement="Flow_Stake_6"><di:waypoint x="430" y="145"/><di:waypoint x="520" y="138"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_7" bpmnElement="Flow_Stake_7"><di:waypoint x="430" y="205"/><di:waypoint x="520" y="156"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_8" bpmnElement="Flow_Stake_8"><di:waypoint x="538" y="156"/><di:waypoint x="185" y="330"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_9" bpmnElement="Flow_Stake_9"><di:waypoint x="185" y="355"/><di:waypoint x="280" y="305"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_10" bpmnElement="Flow_Stake_10"><di:waypoint x="210" y="355"/><di:waypoint x="280" y="365"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_11" bpmnElement="Flow_Stake_11"><di:waypoint x="185" y="380"/><di:waypoint x="280" y="425"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_12" bpmnElement="Flow_Stake_12"><di:waypoint x="470" y="305"/><di:waypoint x="560" y="358"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_13" bpmnElement="Flow_Stake_13"><di:waypoint x="490" y="365"/><di:waypoint x="560" y="358"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_14" bpmnElement="Flow_Stake_14"><di:waypoint x="490" y="425"/><di:waypoint x="560" y="376"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>

@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  id="Definitions_commit"
+  targetNamespace="https://holdfun.io/bpmn">
+
+  <!-- ======================================================================
+  Flow 08 — Commit-reveal (for ops that don't fit the 32-byte link)
+  ======================================================================
+  A Nano `link` is exactly 32 bytes. Ops with two amounts or a string payload
+  (transfer, sell-with-minXno, seedLiq, addLiq) are committed on-chain and the
+  full op is served off-chain. An indexer re-hashes the revealed op and checks
+  it equals the commitment before trusting it.
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Commit" name="Commit-reveal" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Commit">
+      <bpmn:lane id="Lane_Commit_Client" name="Client">
+        <bpmn:flowNodeRef>Event_Commit_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Commit_Link</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Commit_Register</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Commit_Sign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Commit_Broadcast</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Commit_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Commit_Indexer" name="Indexer">
+        <bpmn:flowNodeRef>Task_Commit_Resolve</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Commit_Verify</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Commit_Match</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Commit_Accept</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Commit_Reject</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <bpmn:startEvent id="Event_Commit_Start" name="op needs commit (2 amounts / string)">
+      <bpmn:outgoing>Flow_Commit_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Commit_Link" name="commitLink(tokenId, op)">
+      <bpmn:documentation>link = 0xFF ‖ blake2b-256(tokenId ‖ encodeOp(op))[0..30].</bpmn:documentation>
+      <bpmn:incoming>Flow_Commit_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Commit_Register" name="registerCommit(tokenId, op) → store reveal off-chain">
+      <bpmn:documentation>server/commits.ts: persist {tokenId, op} keyed by the commit link.</bpmn:documentation>
+      <bpmn:incoming>Flow_Commit_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Commit_Sign" name="Sign block with link = commitLink">
+      <bpmn:incoming>Flow_Commit_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Commit_Broadcast" name="Broadcast block">
+      <bpmn:incoming>Flow_Commit_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Commit_Done" name="on-chain">
+      <bpmn:incoming>Flow_Commit_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_6</bpmn:outgoing>
+    </bpmn:endEvent>
+
+    <bpmn:serviceTask id="Task_Commit_Resolve" name="commitResolver(link) → reveal {tokenId, op}">
+      <bpmn:incoming>Flow_Commit_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Commit_Verify" name="verifyCommit(tokenId, op, link)">
+      <bpmn:documentation>Recompute commitLink(tokenId, op) and compare to on-chain link.</bpmn:documentation>
+      <bpmn:incoming>Flow_Commit_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Commit_Match" name="hash matches?">
+      <bpmn:incoming>Flow_Commit_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_9</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Commit_10</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Commit_Accept" name="apply op to state">
+      <bpmn:incoming>Flow_Commit_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_11</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Commit_Reject" name="reject (commit mismatch)">
+      <bpmn:incoming>Flow_Commit_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_12</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Commit_IdxDone" name="resolved">
+      <bpmn:incoming>Flow_Commit_11</bpmn:incoming>
+      <bpmn:incoming>Flow_Commit_12</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Commit_1" sourceRef="Event_Commit_Start" targetRef="Task_Commit_Link"/>
+    <bpmn:sequenceFlow id="Flow_Commit_2" sourceRef="Task_Commit_Link" targetRef="Task_Commit_Register"/>
+    <bpmn:sequenceFlow id="Flow_Commit_3" sourceRef="Task_Commit_Register" targetRef="Task_Commit_Sign"/>
+    <bpmn:sequenceFlow id="Flow_Commit_4" sourceRef="Task_Commit_Sign" targetRef="Task_Commit_Broadcast"/>
+    <bpmn:sequenceFlow id="Flow_Commit_5" sourceRef="Task_Commit_Broadcast" targetRef="Event_Commit_Done"/>
+    <bpmn:sequenceFlow id="Flow_Commit_6" sourceRef="Event_Commit_Done" targetRef="Task_Commit_Resolve"/>
+    <bpmn:sequenceFlow id="Flow_Commit_7" sourceRef="Task_Commit_Resolve" targetRef="Task_Commit_Verify"/>
+    <bpmn:sequenceFlow id="Flow_Commit_8" sourceRef="Task_Commit_Verify" targetRef="Gateway_Commit_Match"/>
+    <bpmn:sequenceFlow id="Flow_Commit_9" sourceRef="Gateway_Commit_Match" targetRef="Task_Commit_Accept" name="match"/>
+    <bpmn:sequenceFlow id="Flow_Commit_10" sourceRef="Gateway_Commit_Match" targetRef="Task_Commit_Reject" name="mismatch"/>
+    <bpmn:sequenceFlow id="Flow_Commit_11" sourceRef="Task_Commit_Accept" targetRef="Event_Commit_IdxDone"/>
+    <bpmn:sequenceFlow id="Flow_Commit_12" sourceRef="Task_Commit_Reject" targetRef="Event_Commit_IdxDone"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Commit">
+    <bpmndi:BPMNPlane id="BPMNPlane_Commit" bpmnElement="Process_Commit">
+      <bpmndi:BPMNShape id="Shape_Lane_Commit_Client" bpmnElement="Lane_Commit_Client" isHorizontal="true">
+        <dc:Bounds x="30" y="30" width="1180" height="160"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Commit_Indexer" bpmnElement="Lane_Commit_Indexer" isHorizontal="true">
+        <dc:Bounds x="30" y="190" width="1180" height="180"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Commit_Start" bpmnElement="Event_Commit_Start"><dc:Bounds x="60" y="90" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Link" bpmnElement="Task_Commit_Link"><dc:Bounds x="150" y="78" width="160" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Register" bpmnElement="Task_Commit_Register"><dc:Bounds x="360" y="78" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Sign" bpmnElement="Task_Commit_Sign"><dc:Bounds x="590" y="78" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Broadcast" bpmnElement="Task_Commit_Broadcast"><dc:Bounds x="810" y="78" width="150" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Done" bpmnElement="Event_Commit_Done"><dc:Bounds x="1010" y="90" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Resolve" bpmnElement="Task_Commit_Resolve"><dc:Bounds x="150" y="245" width="190" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Verify" bpmnElement="Task_Commit_Verify"><dc:Bounds x="390" y="245" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Match" bpmnElement="Gateway_Commit_Match" isMarkerVisible="true"><dc:Bounds x="610" y="250" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Accept" bpmnElement="Task_Commit_Accept"><dc:Bounds x="710" y="245" width="150" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Reject" bpmnElement="Task_Commit_Reject"><dc:Bounds x="610" y="330" width="150" height="40"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_IdxDone" bpmnElement="Event_Commit_IdxDone"><dc:Bounds x="930" y="252" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Commit_1" bpmnElement="Flow_Commit_1"><di:waypoint x="96" y="108"/><di:waypoint x="150" y="108"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_2" bpmnElement="Flow_Commit_2"><di:waypoint x="310" y="108"/><di:waypoint x="360" y="108"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_3" bpmnElement="Flow_Commit_3"><di:waypoint x="540" y="108"/><di:waypoint x="590" y="108"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_4" bpmnElement="Flow_Commit_4"><di:waypoint x="760" y="108"/><di:waypoint x="810" y="108"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_5" bpmnElement="Flow_Commit_5"><di:waypoint x="960" y="108"/><di:waypoint x="1010" y="108"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_6" bpmnElement="Flow_Commit_6"><di:waypoint x="1028" y="126"/><di:waypoint x="245" y="245"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_7" bpmnElement="Flow_Commit_7"><di:waypoint x="340" y="275"/><di:waypoint x="390" y="275"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_8" bpmnElement="Flow_Commit_8"><di:waypoint x="560" y="275"/><di:waypoint x="610" y="275"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_9" bpmnElement="Flow_Commit_9"><di:waypoint x="660" y="275"/><di:waypoint x="710" y="275"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_10" bpmnElement="Flow_Commit_10"><di:waypoint x="635" y="300"/><di:waypoint x="635" y="330"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_11" bpmnElement="Flow_Commit_11"><di:waypoint x="860" y="275"/><di:waypoint x="930" y="270"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_12" bpmnElement="Flow_Commit_12"><di:waypoint x="760" y="350"/><di:waypoint x="948" y="288"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>

@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  id="Definitions_refund"
+  targetNamespace="https://holdfun.io/bpmn">
+
+  <!-- ======================================================================
+  Flow 07 — Rejected-buy refund (deterministic reconciliation, never trusts
+           the buyer's declared amount)
+  ======================================================================
+  When a buy is rejected (slippage / no liquidity), its XNO arrived at the pool
+  but was never credited. The refund rule is:
+      refund[sender] = poolReceived[sender] − creditedBuyXno[sender]   (if > 0)
+  A sender who never actually sent XNO has poolReceived 0 and can never drain
+  the pool. This is the "value-bound" guarantee carried through to settlement.
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Refund" name="Rejected-buy refund" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Refund">
+      <bpmn:lane id="Lane_Refund_Indexer" name="Indexer / Reconciliation">
+        <bpmn:flowNodeRef>Event_Refund_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Refund_Events</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Refund_Credited</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Refund_Received</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Refund_Compute</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Refund_Owed</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Refund_Operator" name="Operator (sweep)">
+        <bpmn:flowNodeRef>Task_Refund_Sign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Refund_Broadcast</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Refund_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <bpmn:startEvent id="Event_Refund_Start" name="after sweep">
+      <bpmn:outgoing>Flow_Refund_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Refund_Events" name="idx.collectEvents(watched)">
+      <bpmn:incoming>Flow_Refund_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Refund_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Refund_Credited" name="creditedBuys(events) → tokenId → (sender → xno)">
+      <bpmn:documentation>Only VALID buy ops are credited (rejected ops are skipped).</bpmn:documentation>
+      <bpmn:incoming>Flow_Refund_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Refund_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Refund_Received" name="readPoolDeposits(rpcKey, pool) → sender → received">
+      <bpmn:documentation>Sum of the pool's received deposits ledger + still-pending sends.</bpmn:documentation>
+      <bpmn:incoming>Flow_Refund_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Refund_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Refund_Compute" name="computeRefunds(poolReceived, credited)">
+      <bpmn:documentation>refund = received − credited (only when positive).</bpmn:documentation>
+      <bpmn:incoming>Flow_Refund_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Refund_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Refund_Owed" name="any refunds > 0?">
+      <bpmn:incoming>Flow_Refund_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Refund_6</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Refund_7</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Refund_Sign" name="refundRejectedBuys: for each sender → signPayout (2-of-3)">
+      <bpmn:documentation>Chained: each refund updates the pool frontier/balance sequentially.</bpmn:documentation>
+      <bpmn:incoming>Flow_Refund_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_Refund_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Refund_Broadcast" name="broadcastPayout (rpc action=process)">
+      <bpmn:incoming>Flow_Refund_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Refund_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Refund_Done" name="refunded">
+      <bpmn:incoming>Flow_Refund_9</bpmn:incoming>
+      <bpmn:incoming>Flow_Refund_7</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Refund_1" sourceRef="Event_Refund_Start" targetRef="Task_Refund_Events"/>
+    <bpmn:sequenceFlow id="Flow_Refund_2" sourceRef="Task_Refund_Events" targetRef="Task_Refund_Credited"/>
+    <bpmn:sequenceFlow id="Flow_Refund_3" sourceRef="Task_Refund_Credited" targetRef="Task_Refund_Received"/>
+    <bpmn:sequenceFlow id="Flow_Refund_4" sourceRef="Task_Refund_Received" targetRef="Task_Refund_Compute"/>
+    <bpmn:sequenceFlow id="Flow_Refund_5" sourceRef="Task_Refund_Compute" targetRef="Gateway_Refund_Owed"/>
+    <bpmn:sequenceFlow id="Flow_Refund_6" sourceRef="Gateway_Refund_Owed" targetRef="Task_Refund_Sign" name="yes"/>
+    <bpmn:sequenceFlow id="Flow_Refund_7" sourceRef="Gateway_Refund_Owed" targetRef="Event_Refund_Done" name="none"/>
+    <bpmn:sequenceFlow id="Flow_Refund_8" sourceRef="Task_Refund_Sign" targetRef="Task_Refund_Broadcast"/>
+    <bpmn:sequenceFlow id="Flow_Refund_9" sourceRef="Task_Refund_Broadcast" targetRef="Event_Refund_Done"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Refund">
+    <bpmndi:BPMNPlane id="BPMNPlane_Refund" bpmnElement="Process_Refund">
+      <bpmndi:BPMNShape id="Shape_Lane_Refund_Indexer" bpmnElement="Lane_Refund_Indexer" isHorizontal="true">
+        <dc:Bounds x="30" y="30" width="1180" height="190"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Refund_Operator" bpmnElement="Lane_Refund_Operator" isHorizontal="true">
+        <dc:Bounds x="30" y="220" width="1180" height="150"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Refund_Start" bpmnElement="Event_Refund_Start"><dc:Bounds x="60" y="100" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Events" bpmnElement="Task_Refund_Events"><dc:Bounds x="150" y="88" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Credited" bpmnElement="Task_Refund_Credited"><dc:Bounds x="370" y="88" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Received" bpmnElement="Task_Refund_Received"><dc:Bounds x="600" y="88" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Compute" bpmnElement="Task_Refund_Compute"><dc:Bounds x="830" y="88" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Owed" bpmnElement="Gateway_Refund_Owed" isMarkerVisible="true"><dc:Bounds x="1060" y="93" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Sign" bpmnElement="Task_Refund_Sign"><dc:Bounds x="150" y="265" width="200" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Broadcast" bpmnElement="Task_Refund_Broadcast"><dc:Bounds x="400" y="265" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Done" bpmnElement="Event_Refund_Done"><dc:Bounds x="640" y="277" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Refund_1" bpmnElement="Flow_Refund_1"><di:waypoint x="96" y="118"/><di:waypoint x="150" y="118"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_2" bpmnElement="Flow_Refund_2"><di:waypoint x="320" y="118"/><di:waypoint x="370" y="118"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_3" bpmnElement="Flow_Refund_3"><di:waypoint x="550" y="118"/><di:waypoint x="600" y="118"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_4" bpmnElement="Flow_Refund_4"><di:waypoint x="780" y="118"/><di:waypoint x="830" y="118"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_5" bpmnElement="Flow_Refund_5"><di:waypoint x="1010" y="118"/><di:waypoint x="1060" y="118"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_6" bpmnElement="Flow_Refund_6"><di:waypoint x="1085" y="143"/><di:waypoint x="250" y="265"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_7" bpmnElement="Flow_Refund_7"><di:waypoint x="1110" y="118"/><di:waypoint x="658" y="277"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_8" bpmnElement="Flow_Refund_8"><di:waypoint x="350" y="295"/><di:waypoint x="400" y="295"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_9" bpmnElement="Flow_Refund_9"><di:waypoint x="580" y="295"/><di:waypoint x="640" y="295"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>

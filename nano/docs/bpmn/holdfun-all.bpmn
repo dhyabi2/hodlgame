@@ -1,0 +1,1612 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  id="Definitions_HoldFun_All"
+  targetNamespace="https://holdfun.io/bpmn"
+  exporter="manual"
+  exporterVersion="2.0">
+<!-- ======================================================================
+  HoldFun Nano L2 — Collaboration overview
+  ======================================================================
+  Shows the 5 actors and their message flows across the entire system.
+  This is the "big picture" — each lane's activity is detailed in the
+  flow-specific BPMN files.
+  ====================================================================== -->
+
+  <bpmn:collaboration id="Collab_holdfun" name="HoldFun Nano L2 (no smart contracts)">
+
+    <!-- ===== Participants ===== -->
+
+    <bpmn:participant id="Creator" name="Creator" processRef="Proc_Creator"/>
+    <bpmn:participant id="Buyer" name="Buyer" processRef="Proc_Buyer"/>
+    <bpmn:participant id="Seller" name="Seller" processRef="Proc_Seller"/>
+    <bpmn:participant id="NanoNetwork" name="Nano Network" processRef="Proc_Nano"/>
+    <bpmn:participant id="Operator" name="Operator (indexer + custody)" processRef="Proc_Operator"/>
+    <bpmn:participant id="Guardian" name="Guardian (co-signer)" processRef="Proc_Guardian"/>
+
+    <!-- ===== Message flows ===== -->
+
+    <!-- Creator launches -->
+    <bpmn:messageFlow id="MF_launch" sourceRef="Creator" targetRef="NanoNetwork"
+      name="launch block (link = opcode|supply)"/>
+    <bpmn:messageFlow id="MF_launch_meta" sourceRef="Creator" targetRef="Operator"
+      name="commit-reveal payload (name, symbol, image, IPFS CID)"/>
+
+    <!-- Buyer deposits -->
+    <bpmn:messageFlow id="MF_deposit" sourceRef="Buyer" targetRef="NanoNetwork"
+      name="native XNO send → pool account"/>
+    <bpmn:messageFlow id="MF_buy_op" sourceRef="Buyer" targetRef="NanoNetwork"
+      name="buy op block (previous = deposit hash, link = tokenId|minTokens)"/>
+
+    <!-- Seller sells -->
+    <bpmn:messageFlow id="MF_sell_op" sourceRef="Seller" targetRef="NanoNetwork"
+      name="sell op block (link = tokenId|tokens)"/>
+    <bpmn:messageFlow id="MF_sell_commit" sourceRef="Seller" targetRef="Operator"
+      name="commit-reveal: sell with minXno"/>
+
+    <!-- Operator reads Nano -->
+    <bpmn:messageFlow id="MF_read" sourceRef="NanoNetwork" targetRef="Operator"
+      name="account_history + blocks_info (read-only)"/>
+
+    <!-- Operator → Guardian (co-sign payout) -->
+    <bpmn:messageFlow id="MF_cosign" sourceRef="Operator" targetRef="Guardian"
+      name="POST /sign { account, previous, balance, link, requestId }"/>
+    <bpmn:messageFlow id="MF_cosign_resp" sourceRef="Guardian" targetRef="Operator"
+      name="200 { signature, publicKey }"/>
+
+    <!-- Operator pays seller -->
+    <bpmn:messageFlow id="MF_payout" sourceRef="Operator" targetRef="NanoNetwork"
+      name="pool → seller send (2-of-3 multisig)"/>
+
+    <!-- Operator refunds rejected buys -->
+    <bpmn:messageFlow id="MF_refund" sourceRef="Operator" targetRef="NanoNetwork"
+      name="pool → buyer send (refund = received − credited)"/>
+
+    <!-- Staker stakes/unstakes/claims -->
+    <bpmn:messageFlow id="MF_stake" sourceRef="Seller" targetRef="NanoNetwork"
+      name="stake/unstake/claim op blocks"/>
+
+  </bpmn:collaboration>
+
+  <!-- ===== Participant processes (stubs) ===== -->
+
+  <bpmn:process id="Proc_Creator" name="Creator" isExecutable="false">
+    <bpmn:laneSet>
+      <bpmn:lane id="Lane_Creator" name="Creator">
+        <bpmn:flowNodeRef>Event_CreatorStart</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Service_CreatorSign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_CreatorDone</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Event_CreatorStart" name="Has token idea"/>
+    <bpmn:serviceTask id="Service_CreatorSign" name="Sign launch block">
+      <bpmn:incoming>Flow_Creator1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Creator2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="Event_CreatorDone" name="Broadcasted"/>
+    <bpmn:sequenceFlow id="Flow_Creator1" sourceRef="Event_CreatorStart" targetRef="Service_CreatorSign"/>
+    <bpmn:sequenceFlow id="Flow_Creator2" sourceRef="Service_CreatorSign" targetRef="Event_CreatorDone"/>
+  </bpmn:process>
+
+  <bpmn:process id="Proc_Buyer" name="Buyer" isExecutable="false">
+    <bpmn:laneSet>
+      <bpmn:lane id="Lane_Buyer" name="Buyer">
+        <bpmn:flowNodeRef>Event_BuyerStart</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Service_BuyerDeposit</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Service_BuyerSignOp</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_BuyerDone</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Event_BuyerStart" name="Wants tokens"/>
+    <bpmn:serviceTask id="Service_BuyerDeposit" name="Send XNO to pool">
+      <bpmn:incoming>Flow_Buyer1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Buyer2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Service_BuyerSignOp" name="Sign buy op (previous = deposit hash)">
+      <bpmn:incoming>Flow_Buyer2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Buyer3</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="Event_BuyerDone" name="Confirmed"/>
+    <bpmn:sequenceFlow id="Flow_Buyer1" sourceRef="Event_BuyerStart" targetRef="Service_BuyerDeposit"/>
+    <bpmn:sequenceFlow id="Flow_Buyer2" sourceRef="Service_BuyerDeposit" targetRef="Service_BuyerSignOp"/>
+    <bpmn:sequenceFlow id="Flow_Buyer3" sourceRef="Service_BuyerSignOp" targetRef="Event_BuyerDone"/>
+  </bpmn:process>
+
+  <bpmn:process id="Proc_Seller" name="Seller" isExecutable="false">
+    <bpmn:laneSet>
+      <bpmn:lane id="Lane_Seller" name="Seller">
+        <bpmn:flowNodeRef>Event_SellerStart</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Service_SellerSignSell</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_SellerDone</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:startEvent id="Event_SellerStart" name="Wants XNO"/>
+    <bpmn:serviceTask id="Service_SellerSignSell" name="Sign sell op (commit-reveal if minXno)">
+      <bpmn:incoming>Flow_Seller1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Seller2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="Event_SellerDone" name="Waiting for payout"/>
+    <bpmn:sequenceFlow id="Flow_Seller1" sourceRef="Event_SellerStart" targetRef="Service_SellerSignSell"/>
+    <bpmn:sequenceFlow id="Flow_Seller2" sourceRef="Service_SellerSignSell" targetRef="Event_SellerDone"/>
+  </bpmn:process>
+
+  <bpmn:process id="Proc_Nano" name="Nano Network" isExecutable="false">
+    <bpmn:laneSet>
+      <bpmn:lane id="Lane_Nano" name="Nano L1 (rpc.nano.to)">
+        <bpmn:flowNodeRef>Service_NanoConfirm</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:serviceTask id="Service_NanoConfirm" name="Confirm blocks (ORV consensus, sub-second)"/>
+  </bpmn:process>
+
+  <bpmn:process id="Proc_Operator" name="Operator" isExecutable="false">
+    <bpmn:laneSet>
+      <bpmn:lane id="Lane_Operator" name="Operator (indexer + custody)">
+        <bpmn:flowNodeRef>Service_OpIndex</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Service_OpReplay</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Service_OpReconcile</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Service_OpSweep</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Service_OpCosign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Service_OpRefund</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:serviceTask id="Service_OpIndex" name="Read blocks (NanoRpcSource.listBlocks)"/>
+    <bpmn:serviceTask id="Service_OpReplay" name="Replay fold (replayMulti → applyBlock → applyOp)"/>
+    <bpmn:serviceTask id="Service_OpReconcile" name="Reconcile (creditedBuys / computeRefunds)"/>
+    <bpmn:serviceTask id="Service_OpSweep" name="Sweep (receivePoolsMulti / payoutSellsMulti)"/>
+    <bpmn:serviceTask id="Service_OpCosign" name="Co-sign payouts (signPayoutWithSignatures / remoteCosign)"/>
+    <bpmn:serviceTask id="Service_OpRefund" name="Refund rejected buys (refundRejectedBuys)"/>
+  </bpmn:process>
+
+  <bpmn:process id="Proc_Guardian" name="Guardian" isExecutable="false">
+    <bpmn:laneSet>
+      <bpmn:lane id="Lane_Guardian" name="Guardian (independent co-signer)">
+        <bpmn:flowNodeRef>Service_GuardianVerify</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Service_GuardianSign</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+    <bpmn:serviceTask id="Service_GuardianVerify" name="Re-verify (guardian.ts: re-hash block, check balance, replay protection)"/>
+    <bpmn:serviceTask id="Service_GuardianSign" name="Co-sign (signBlock with GUARDIAN_SEED)"/>
+  </bpmn:process>
+
+  <!-- ===== Diagram layout (minimal) ===== -->
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_overview">
+    <bpmndi:BPMNPlane id="BPMNPlane_overview" bpmnElement="Collab_holdfun">
+      <!-- Participants -->
+      <bpmndi:BPMNShape id="Shape_Creator" bpmnElement="Creator" isHorizontal="true">
+        <dc:Bounds x="30" y="30" width="1200" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buyer" bpmnElement="Buyer" isHorizontal="true">
+        <dc:Bounds x="30" y="120" width="1200" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Seller" bpmnElement="Seller" isHorizontal="true">
+        <dc:Bounds x="30" y="210" width="1200" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Nano" bpmnElement="NanoNetwork" isHorizontal="true">
+        <dc:Bounds x="30" y="300" width="1200" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Operator" bpmnElement="Operator" isHorizontal="true">
+        <dc:Bounds x="30" y="390" width="1200" height="80"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Guardian" bpmnElement="Guardian" isHorizontal="true">
+        <dc:Bounds x="30" y="480" width="1200" height="80"/>
+      </bpmndi:BPMNShape>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+<!-- ======================================================================
+  Flow 01 — Token launch (5% creator cap is STRUCTURAL, not contractual)
+  ======================================================================
+  The creator signs one Nano state block. There is no contract to call and no
+  one to "ask" for the 5% cap — the cap is the formula `floor(supply * 5%)`
+  inside applyOp(), so it is mathematically impossible to get more.
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Launch" name="Launch token" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Launch">
+      <bpmn:lane id="Lane_Launch_Creator" name="Creator (browser wallet)">
+        <bpmn:flowNodeRef>Event_Launch_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Launch_Encode</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Launch_Sign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Launch_Broadcast</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Launch_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Launch_Nano" name="Nano L1 (rpc.nano.to)">
+        <bpmn:flowNodeRef>Task_Launch_Confirm</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Launch_Indexer" name="Indexer (deterministic fold)">
+        <bpmn:flowNodeRef>Event_Launch_IdxStart</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Launch_Decode</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Launch_DeriveId</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Launch_Apply</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Launch_Cap</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Launch_Reject</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Launch_IdxDone</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <!-- Creator lane -->
+    <bpmn:startEvent id="Event_Launch_Start" name="Creator picks supply + metadata">
+      <bpmn:outgoing>Flow_Launch_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Launch_Encode" name="encodeOpLink(tokenId='', launch)">
+      <bpmn:documentation>link = [opcode 0x01][tokenId 0×16][supply] — tokenId slot is zero at launch.</bpmn:documentation>
+      <bpmn:incoming>Flow_Launch_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Launch_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Launch_Sign" name="nanocurrency.createBlock(secretKey, {previous, link, balance:0})">
+      <bpmn:incoming>Flow_Launch_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Launch_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Launch_Broadcast" name="rpc action=process (broadcast state block)">
+      <bpmn:incoming>Flow_Launch_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Launch_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Launch_Done" name="Block on-chain">
+      <bpmn:incoming>Flow_Launch_4</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <!-- Nano lane -->
+    <bpmn:serviceTask id="Task_Launch_Confirm" name="Confirm (ORV consensus) → block hash + height">
+      <bpmn:incoming>Flow_Launch_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Launch_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- Indexer lane -->
+    <bpmn:startEvent id="Event_Launch_IdxStart" name="Sees block in watched account">
+      <bpmn:outgoing>Flow_Launch_7</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Launch_Decode" name="decodeOpLink(block.link)">
+      <bpmn:documentation>Confirms opcode 0x01 and reads supply from the amount slot.</bpmn:documentation>
+      <bpmn:incoming>Flow_Launch_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Launch_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Launch_DeriveId" name="tokenIdFromLaunchHash(block.hash)">
+      <bpmn:documentation>tokenId = first 16 bytes of the launch block hash — no registry.</bpmn:documentation>
+      <bpmn:incoming>Flow_Launch_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Launch_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Launch_Apply" name="applyOp(state, launch, sender, height)">
+      <bpmn:documentation>creatorShare = floor(supply × 500 / 10000); treasury = supply − creatorShare.</bpmn:documentation>
+      <bpmn:incoming>Flow_Launch_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_Launch_10</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Launch_Cap" name="creatorShare > 0 and not already launched?">
+      <bpmn:incoming>Flow_Launch_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_Launch_11</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Launch_12</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Launch_Reject" name="flag invalid (replay.replayMulti marks invalid)">
+      <bpmn:incoming>Flow_Launch_12</bpmn:incoming>
+      <bpmn:outgoing>Flow_Launch_13</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Launch_IdxDone" name="token live in MultiState">
+      <bpmn:incoming>Flow_Launch_11</bpmn:incoming>
+      <bpmn:incoming>Flow_Launch_13</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <!-- Sequence flows -->
+    <bpmn:sequenceFlow id="Flow_Launch_1" sourceRef="Event_Launch_Start" targetRef="Task_Launch_Encode"/>
+    <bpmn:sequenceFlow id="Flow_Launch_2" sourceRef="Task_Launch_Encode" targetRef="Task_Launch_Sign"/>
+    <bpmn:sequenceFlow id="Flow_Launch_3" sourceRef="Task_Launch_Sign" targetRef="Task_Launch_Broadcast"/>
+    <bpmn:sequenceFlow id="Flow_Launch_4" sourceRef="Task_Launch_Broadcast" targetRef="Event_Launch_Done"/>
+    <bpmn:sequenceFlow id="Flow_Launch_5" sourceRef="Event_Launch_Done" targetRef="Task_Launch_Confirm"/>
+    <bpmn:sequenceFlow id="Flow_Launch_6" sourceRef="Task_Launch_Confirm" targetRef="Event_Launch_IdxStart"/>
+    <bpmn:sequenceFlow id="Flow_Launch_7" sourceRef="Event_Launch_IdxStart" targetRef="Task_Launch_Decode"/>
+    <bpmn:sequenceFlow id="Flow_Launch_8" sourceRef="Task_Launch_Decode" targetRef="Task_Launch_DeriveId"/>
+    <bpmn:sequenceFlow id="Flow_Launch_9" sourceRef="Task_Launch_DeriveId" targetRef="Task_Launch_Apply"/>
+    <bpmn:sequenceFlow id="Flow_Launch_10" sourceRef="Task_Launch_Apply" targetRef="Gateway_Launch_Cap"/>
+    <bpmn:sequenceFlow id="Flow_Launch_11" sourceRef="Gateway_Launch_Cap" targetRef="Event_Launch_IdxDone" name="valid"/>
+    <bpmn:sequenceFlow id="Flow_Launch_12" sourceRef="Gateway_Launch_Cap" targetRef="Task_Launch_Reject" name="invalid"/>
+    <bpmn:sequenceFlow id="Flow_Launch_13" sourceRef="Task_Launch_Reject" targetRef="Event_Launch_IdxDone"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Launch">
+    <bpmndi:BPMNPlane id="BPMNPlane_Launch" bpmnElement="Process_Launch">
+      <bpmndi:BPMNShape id="Shape_Lane_Launch_Creator" bpmnElement="Lane_Launch_Creator" isHorizontal="true">
+        <dc:Bounds x="30" y="30" width="1180" height="140"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Launch_Nano" bpmnElement="Lane_Launch_Nano" isHorizontal="true">
+        <dc:Bounds x="30" y="170" width="1180" height="120"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Launch_Indexer" bpmnElement="Lane_Launch_Indexer" isHorizontal="true">
+        <dc:Bounds x="30" y="290" width="1180" height="230"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Launch_Start" bpmnElement="Event_Launch_Start">
+        <dc:Bounds x="60" y="80" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_Encode" bpmnElement="Task_Launch_Encode">
+        <dc:Bounds x="150" y="68" width="150" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_Sign" bpmnElement="Task_Launch_Sign">
+        <dc:Bounds x="350" y="68" width="170" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_Broadcast" bpmnElement="Task_Launch_Broadcast">
+        <dc:Bounds x="570" y="68" width="150" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_Done" bpmnElement="Event_Launch_Done">
+        <dc:Bounds x="770" y="80" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_Confirm" bpmnElement="Task_Launch_Confirm">
+        <dc:Bounds x="150" y="200" width="170" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_IdxStart" bpmnElement="Event_Launch_IdxStart">
+        <dc:Bounds x="60" y="330" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_Decode" bpmnElement="Task_Launch_Decode">
+        <dc:Bounds x="150" y="318" width="150" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_DeriveId" bpmnElement="Task_Launch_DeriveId">
+        <dc:Bounds x="350" y="318" width="150" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_Apply" bpmnElement="Task_Launch_Apply">
+        <dc:Bounds x="550" y="318" width="150" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_Cap" bpmnElement="Gateway_Launch_Cap" isMarkerVisible="true">
+        <dc:Bounds x="750" y="330" width="50" height="50"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_Reject" bpmnElement="Task_Launch_Reject">
+        <dc:Bounds x="550" y="430" width="150" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_IdxDone" bpmnElement="Event_Launch_IdxDone">
+        <dc:Bounds x="930" y="340" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Launch_1" bpmnElement="Flow_Launch_1">
+        <di:waypoint x="96" y="98"/>
+        <di:waypoint x="150" y="98"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_2" bpmnElement="Flow_Launch_2">
+        <di:waypoint x="300" y="98"/>
+        <di:waypoint x="350" y="98"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_3" bpmnElement="Flow_Launch_3">
+        <di:waypoint x="520" y="98"/>
+        <di:waypoint x="570" y="98"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_4" bpmnElement="Flow_Launch_4">
+        <di:waypoint x="720" y="98"/>
+        <di:waypoint x="770" y="98"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_5" bpmnElement="Flow_Launch_5">
+        <di:waypoint x="788" y="116"/>
+        <di:waypoint x="235" y="200"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_6" bpmnElement="Flow_Launch_6">
+        <di:waypoint x="235" y="260"/>
+        <di:waypoint x="78" y="330"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_7" bpmnElement="Flow_Launch_7">
+        <di:waypoint x="96" y="348"/>
+        <di:waypoint x="150" y="348"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_8" bpmnElement="Flow_Launch_8">
+        <di:waypoint x="300" y="348"/>
+        <di:waypoint x="350" y="348"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_9" bpmnElement="Flow_Launch_9">
+        <di:waypoint x="500" y="348"/>
+        <di:waypoint x="550" y="348"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_10" bpmnElement="Flow_Launch_10">
+        <di:waypoint x="700" y="348"/>
+        <di:waypoint x="750" y="355"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_11" bpmnElement="Flow_Launch_11">
+        <di:waypoint x="800" y="355"/>
+        <di:waypoint x="930" y="358"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_12" bpmnElement="Flow_Launch_12">
+        <di:waypoint x="775" y="380"/>
+        <di:waypoint x="700" y="430"/>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_13" bpmnElement="Flow_Launch_13">
+        <di:waypoint x="700" y="460"/>
+        <di:waypoint x="930" y="376"/>
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+<!-- ======================================================================
+  Flow 02 — Value-bound buy (the key trick that replaces a DEX contract)
+  ======================================================================
+  A buy is TWO chained Nano blocks on the SAME account:
+    1. DEPOSIT — a native XNO send to the token's pool account. The native
+       amount is the authoritative `xno`.
+    2. BUY OP  — a data block whose `previous` points at the deposit hash and
+       whose `link` carries `[opcode 0x03][tokenId][minTokens]`.
+  Because Nano's `previous` field is a hash chain, the intent is *bound* to the
+  value. The indexer reads the deposit's native amount as `op.xno`, so a buyer
+  can neither under-declare (pool insolvency) nor over-declare (free credit).
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Buy" name="Value-bound buy" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Buy">
+      <bpmn:lane id="Lane_Buy_Buyer" name="Buyer (browser wallet)">
+        <bpmn:flowNodeRef>Event_Buy_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Buy_PoolAddr</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Buy_Deposit</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Buy_Op</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Buy_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Buy_Nano" name="Nano L1">
+        <bpmn:flowNodeRef>Task_Buy_Confirm</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Buy_Indexer" name="Indexer">
+        <bpmn:flowNodeRef>Event_Buy_Idx</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Buy_Bind</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Buy_Route</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Buy_Apply</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Buy_Slip</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Buy_Reject</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Buy_Credit</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Buy_IdxDone</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <!-- Buyer -->
+    <bpmn:startEvent id="Event_Buy_Start" name="Buyer wants tokens">
+      <bpmn:outgoing>Flow_Buy_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Buy_PoolAddr" name="tokenPoolKeys(masterSeed, tokenId) → pool address">
+      <bpmn:documentation>HD: poolSeedForToken(master, tokenId) = blake2b(master‖tokenId).</bpmn:documentation>
+      <bpmn:incoming>Flow_Buy_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Buy_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Buy_Deposit" name="Block 1 — native XNO send → pool">
+      <bpmn:documentation>The native amount is the value. Nothing is declared.</bpmn:documentation>
+      <bpmn:incoming>Flow_Buy_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Buy_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Buy_Op" name="Block 2 — buy op, previous = deposit hash">
+      <bpmn:documentation>link = encodeOpLink(tokenId, buy). minTokens is the slippage guard.</bpmn:documentation>
+      <bpmn:incoming>Flow_Buy_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Buy_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Buy_Done" name="Both blocks on-chain">
+      <bpmn:incoming>Flow_Buy_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Buy_5</bpmn:outgoing>
+    </bpmn:endEvent>
+
+    <!-- Nano -->
+    <bpmn:serviceTask id="Task_Buy_Confirm" name="Confirm deposit + op">
+      <bpmn:incoming>Flow_Buy_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Buy_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- Indexer -->
+    <bpmn:startEvent id="Event_Buy_Idx" name="Sees buy op block">
+      <bpmn:incoming>Flow_Buy_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_Buy_7</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Buy_Bind" name="collectEvents: read deposit via block.previous → amount">
+      <bpmn:documentation>op.xno = BigInt(deposit.amount). Also verify deposit.link === pool public key (routes to pool).</bpmn:documentation>
+      <bpmn:incoming>Flow_Buy_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Buy_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Buy_Route" name="deposit exists, amount>0, routes to pool?">
+      <bpmn:incoming>Flow_Buy_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Buy_9</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Buy_10</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Buy_Apply" name="applyOp(state, buy, sender, height)">
+      <bpmn:documentation>constantProductOut: out = (xno·99%)·poolTokens/(poolXno + xno·99%).</bpmn:documentation>
+      <bpmn:incoming>Flow_Buy_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_Buy_11</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Buy_Slip" name="out ≥ minTokens and out &lt; poolTokens?">
+      <bpmn:incoming>Flow_Buy_11</bpmn:incoming>
+      <bpmn:outgoing>Flow_Buy_12</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Buy_13</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Buy_Reject" name="reject (slippage / no liquidity) → refund later (flow 07)">
+      <bpmn:incoming>Flow_Buy_13</bpmn:incoming>
+      <bpmn:outgoing>Flow_Buy_15</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Buy_Credit" name="credit: poolXno += xno; poolTokens -= out; balances[buyer] += out">
+      <bpmn:incoming>Flow_Buy_12</bpmn:incoming>
+      <bpmn:outgoing>Flow_Buy_14</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Buy_IdxDone" name="buyer holds tokens">
+      <bpmn:incoming>Flow_Buy_14</bpmn:incoming>
+      <bpmn:incoming>Flow_Buy_15</bpmn:incoming>
+      <bpmn:incoming>Flow_Buy_10</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Buy_1" sourceRef="Event_Buy_Start" targetRef="Task_Buy_PoolAddr"/>
+    <bpmn:sequenceFlow id="Flow_Buy_2" sourceRef="Task_Buy_PoolAddr" targetRef="Task_Buy_Deposit"/>
+    <bpmn:sequenceFlow id="Flow_Buy_3" sourceRef="Task_Buy_Deposit" targetRef="Task_Buy_Op"/>
+    <bpmn:sequenceFlow id="Flow_Buy_4" sourceRef="Task_Buy_Op" targetRef="Event_Buy_Done"/>
+    <bpmn:sequenceFlow id="Flow_Buy_5" sourceRef="Event_Buy_Done" targetRef="Task_Buy_Confirm"/>
+    <bpmn:sequenceFlow id="Flow_Buy_6" sourceRef="Task_Buy_Confirm" targetRef="Event_Buy_Idx"/>
+    <bpmn:sequenceFlow id="Flow_Buy_7" sourceRef="Event_Buy_Idx" targetRef="Task_Buy_Bind"/>
+    <bpmn:sequenceFlow id="Flow_Buy_8" sourceRef="Task_Buy_Bind" targetRef="Gateway_Buy_Route"/>
+    <bpmn:sequenceFlow id="Flow_Buy_9" sourceRef="Gateway_Buy_Route" targetRef="Task_Buy_Apply" name="valid"/>
+    <bpmn:sequenceFlow id="Flow_Buy_10" sourceRef="Gateway_Buy_Route" targetRef="Event_Buy_IdxDone" name="malformed → skip"/>
+    <bpmn:sequenceFlow id="Flow_Buy_11" sourceRef="Task_Buy_Apply" targetRef="Gateway_Buy_Slip"/>
+    <bpmn:sequenceFlow id="Flow_Buy_12" sourceRef="Gateway_Buy_Slip" targetRef="Task_Buy_Credit" name="ok"/>
+    <bpmn:sequenceFlow id="Flow_Buy_13" sourceRef="Gateway_Buy_Slip" targetRef="Task_Buy_Reject" name="slippage"/>
+    <bpmn:sequenceFlow id="Flow_Buy_14" sourceRef="Task_Buy_Credit" targetRef="Event_Buy_IdxDone"/>
+    <bpmn:sequenceFlow id="Flow_Buy_15" sourceRef="Task_Buy_Reject" targetRef="Event_Buy_IdxDone"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Buy">
+    <bpmndi:BPMNPlane id="BPMNPlane_Buy" bpmnElement="Process_Buy">
+      <bpmndi:BPMNShape id="Shape_Lane_Buy_Buyer" bpmnElement="Lane_Buy_Buyer" isHorizontal="true">
+        <dc:Bounds x="30" y="30" width="1180" height="150"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Buy_Nano" bpmnElement="Lane_Buy_Nano" isHorizontal="true">
+        <dc:Bounds x="30" y="180" width="1180" height="110"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Buy_Indexer" bpmnElement="Lane_Buy_Indexer" isHorizontal="true">
+        <dc:Bounds x="30" y="290" width="1180" height="240"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Buy_Start" bpmnElement="Event_Buy_Start">
+        <dc:Bounds x="60" y="85" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_PoolAddr" bpmnElement="Task_Buy_PoolAddr">
+        <dc:Bounds x="150" y="73" width="160" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Deposit" bpmnElement="Task_Buy_Deposit">
+        <dc:Bounds x="360" y="73" width="160" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Op" bpmnElement="Task_Buy_Op">
+        <dc:Bounds x="570" y="73" width="180" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Done" bpmnElement="Event_Buy_Done">
+        <dc:Bounds x="800" y="85" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Confirm" bpmnElement="Task_Buy_Confirm">
+        <dc:Bounds x="150" y="205" width="180" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Idx" bpmnElement="Event_Buy_Idx">
+        <dc:Bounds x="60" y="340" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Bind" bpmnElement="Task_Buy_Bind">
+        <dc:Bounds x="150" y="328" width="180" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Route" bpmnElement="Gateway_Buy_Route" isMarkerVisible="true">
+        <dc:Bounds x="380" y="338" width="50" height="50"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Apply" bpmnElement="Task_Buy_Apply">
+        <dc:Bounds x="480" y="328" width="170" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Slip" bpmnElement="Gateway_Buy_Slip" isMarkerVisible="true">
+        <dc:Bounds x="700" y="338" width="50" height="50"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Credit" bpmnElement="Task_Buy_Credit">
+        <dc:Bounds x="800" y="328" width="180" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Reject" bpmnElement="Task_Buy_Reject">
+        <dc:Bounds x="700" y="450" width="180" height="60"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_IdxDone" bpmnElement="Event_Buy_IdxDone">
+        <dc:Bounds x="1050" y="345" width="36" height="36"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Buy_1" bpmnElement="Flow_Buy_1"><di:waypoint x="96" y="103"/><di:waypoint x="150" y="103"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_2" bpmnElement="Flow_Buy_2"><di:waypoint x="310" y="103"/><di:waypoint x="360" y="103"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_3" bpmnElement="Flow_Buy_3"><di:waypoint x="520" y="103"/><di:waypoint x="570" y="103"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_4" bpmnElement="Flow_Buy_4"><di:waypoint x="750" y="103"/><di:waypoint x="800" y="103"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_5" bpmnElement="Flow_Buy_5"><di:waypoint x="818" y="121"/><di:waypoint x="240" y="205"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_6" bpmnElement="Flow_Buy_6"><di:waypoint x="240" y="265"/><di:waypoint x="78" y="340"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_7" bpmnElement="Flow_Buy_7"><di:waypoint x="96" y="358"/><di:waypoint x="150" y="358"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_8" bpmnElement="Flow_Buy_8"><di:waypoint x="330" y="358"/><di:waypoint x="380" y="363"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_9" bpmnElement="Flow_Buy_9"><di:waypoint x="430" y="363"/><di:waypoint x="480" y="358"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_10" bpmnElement="Flow_Buy_10"><di:waypoint x="405" y="388"/><di:waypoint x="1050" y="381"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_11" bpmnElement="Flow_Buy_11"><di:waypoint x="650" y="358"/><di:waypoint x="700" y="363"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_12" bpmnElement="Flow_Buy_12"><di:waypoint x="750" y="363"/><di:waypoint x="800" y="358"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_13" bpmnElement="Flow_Buy_13"><di:waypoint x="725" y="388"/><di:waypoint x="725" y="450"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_14" bpmnElement="Flow_Buy_14"><di:waypoint x="980" y="358"/><di:waypoint x="1050" y="363"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_15" bpmnElement="Flow_Buy_15"><di:waypoint x="880" y="480"/><di:waypoint x="1068" y="381"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+<!-- ======================================================================
+  Flow 03 — Sell → exact XNO-out → 2-of-3 custody payout
+  ======================================================================
+  The seller signs a sell op. The indexer computes the exact XNO-out at the
+  sell's *execution point* (pre-sell reserves), so batched sells are paid
+  path-dependently. The XNO then leaves the 2-of-3 multisig pool account only
+  after the operator collects a co-signature from a guardian.
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Sell" name="Sell + custody payout" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Sell">
+      <bpmn:lane id="Lane_Sell_Seller" name="Seller">
+        <bpmn:flowNodeRef>Event_Sell_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Commit</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Sign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Sell_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Sell_Indexer" name="Indexer / Analytics">
+        <bpmn:flowNodeRef>Task_Sell_Analyze</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Apply</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Sell_Slip</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Reject</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Record</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Sell_Operator" name="Operator (custody sweep)">
+        <bpmn:flowNodeRef>Event_Sell_Sweep</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Idem</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Cosign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Sell_Broadcast</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Sell_Paid</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Sell_Guardian" name="Guardian (co-signer)">
+        <bpmn:flowNodeRef>Task_Sell_GuardianSign</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <!-- Seller -->
+    <bpmn:startEvent id="Event_Sell_Start" name="Seller wants XNO">
+      <bpmn:outgoing>Flow_Sell_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Sell_Commit" name="If minXno set → registerCommit(tokenId, sell)">
+      <bpmn:documentation>Two-amount op → commit-reveal (flow 08). Compact sell skips this.</bpmn:documentation>
+      <bpmn:incoming>Flow_Sell_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Sell_Sign" name="Sign sell op block (link = tokenId|tokens)">
+      <bpmn:incoming>Flow_Sell_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Sell_Done" name="Broadcasted">
+      <bpmn:incoming>Flow_Sell_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_4</bpmn:outgoing>
+    </bpmn:endEvent>
+
+    <!-- Indexer -->
+    <bpmn:serviceTask id="Task_Sell_Analyze" name="analyze(events) → sellPayouts[]">
+      <bpmn:documentation>out = tokens·poolXno / (poolTokens + tokens) computed on PRE-sell reserves.</bpmn:documentation>
+      <bpmn:incoming>Flow_Sell_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Sell_Apply" name="applyOp(state, sell, sender, height)">
+      <bpmn:incoming>Flow_Sell_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Sell_Slip" name="out ≥ minXno and out &lt; poolXno?">
+      <bpmn:incoming>Flow_Sell_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_7</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Sell_8</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Sell_Reject" name="reject (slippage)">
+      <bpmn:incoming>Flow_Sell_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Sell_Record" name="push { tokenId, to, amountRaw, hash } into sellPayouts">
+      <bpmn:incoming>Flow_Sell_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_10</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- Operator -->
+    <bpmn:startEvent id="Event_Sell_Sweep" name="runSweep (cron / operator)">
+      <bpmn:incoming>Flow_Sell_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_11</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Sell_Idem" name="payoutSellsMulti: skip if paid.has(p.hash)">
+      <bpmn:documentation>Idempotency: `paid` set in the durable store prevents double-pay.</bpmn:documentation>
+      <bpmn:incoming>Flow_Sell_11</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_12</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Sell_Cosign" name="signGuardedPayout → remoteCosign(guardian) → signPayoutWithSignatures">
+      <bpmn:documentation>2-of-3: operator key + guardian co-signature over the same block hash.</bpmn:documentation>
+      <bpmn:incoming>Flow_Sell_12</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_13</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Sell_Broadcast" name="broadcastPayout (rpc action=process)">
+      <bpmn:incoming>Flow_Sell_13</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_14</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Sell_Paid" name="seller receives XNO">
+      <bpmn:incoming>Flow_Sell_14</bpmn:incoming>
+      <bpmn:incoming>Flow_Sell_9</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <!-- Guardian -->
+    <bpmn:serviceTask id="Task_Sell_GuardianSign" name="Guardian re-verifies + co-signs (flow 06)">
+      <bpmn:incoming>Flow_Sell_15</bpmn:incoming>
+      <bpmn:outgoing>Flow_Sell_16</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:sequenceFlow id="Flow_Sell_1" sourceRef="Event_Sell_Start" targetRef="Task_Sell_Commit"/>
+    <bpmn:sequenceFlow id="Flow_Sell_2" sourceRef="Task_Sell_Commit" targetRef="Task_Sell_Sign"/>
+    <bpmn:sequenceFlow id="Flow_Sell_3" sourceRef="Task_Sell_Sign" targetRef="Event_Sell_Done"/>
+    <bpmn:sequenceFlow id="Flow_Sell_4" sourceRef="Event_Sell_Done" targetRef="Task_Sell_Analyze"/>
+    <bpmn:sequenceFlow id="Flow_Sell_5" sourceRef="Task_Sell_Analyze" targetRef="Task_Sell_Apply"/>
+    <bpmn:sequenceFlow id="Flow_Sell_6" sourceRef="Task_Sell_Apply" targetRef="Gateway_Sell_Slip"/>
+    <bpmn:sequenceFlow id="Flow_Sell_7" sourceRef="Gateway_Sell_Slip" targetRef="Task_Sell_Record" name="ok"/>
+    <bpmn:sequenceFlow id="Flow_Sell_8" sourceRef="Gateway_Sell_Slip" targetRef="Task_Sell_Reject" name="slippage"/>
+    <bpmn:sequenceFlow id="Flow_Sell_9" sourceRef="Task_Sell_Reject" targetRef="Event_Sell_Paid"/>
+    <bpmn:sequenceFlow id="Flow_Sell_10" sourceRef="Task_Sell_Record" targetRef="Event_Sell_Sweep"/>
+    <bpmn:sequenceFlow id="Flow_Sell_11" sourceRef="Event_Sell_Sweep" targetRef="Task_Sell_Idem"/>
+    <bpmn:sequenceFlow id="Flow_Sell_12" sourceRef="Task_Sell_Idem" targetRef="Task_Sell_Cosign"/>
+    <bpmn:sequenceFlow id="Flow_Sell_13" sourceRef="Task_Sell_Cosign" targetRef="Task_Sell_Broadcast"/>
+    <bpmn:sequenceFlow id="Flow_Sell_14" sourceRef="Task_Sell_Broadcast" targetRef="Event_Sell_Paid"/>
+    <bpmn:sequenceFlow id="Flow_Sell_15" sourceRef="Task_Sell_Cosign" targetRef="Task_Sell_GuardianSign"/>
+    <bpmn:sequenceFlow id="Flow_Sell_16" sourceRef="Task_Sell_GuardianSign" targetRef="Task_Sell_Cosign"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Sell">
+    <bpmndi:BPMNPlane id="BPMNPlane_Sell" bpmnElement="Process_Sell">
+      <bpmndi:BPMNShape id="Shape_Lane_Sell_Seller" bpmnElement="Lane_Sell_Seller" isHorizontal="true">
+        <dc:Bounds x="30" y="30" width="1180" height="130"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Sell_Indexer" bpmnElement="Lane_Sell_Indexer" isHorizontal="true">
+        <dc:Bounds x="30" y="160" width="1180" height="150"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Sell_Operator" bpmnElement="Lane_Sell_Operator" isHorizontal="true">
+        <dc:Bounds x="30" y="310" width="1180" height="150"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Sell_Guardian" bpmnElement="Lane_Sell_Guardian" isHorizontal="true">
+        <dc:Bounds x="30" y="460" width="1180" height="110"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Sell_Start" bpmnElement="Event_Sell_Start"><dc:Bounds x="60" y="75" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Commit" bpmnElement="Task_Sell_Commit"><dc:Bounds x="150" y="63" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Sign" bpmnElement="Task_Sell_Sign"><dc:Bounds x="370" y="63" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Done" bpmnElement="Event_Sell_Done"><dc:Bounds x="590" y="75" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Analyze" bpmnElement="Task_Sell_Analyze"><dc:Bounds x="150" y="205" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Apply" bpmnElement="Task_Sell_Apply"><dc:Bounds x="370" y="205" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Slip" bpmnElement="Gateway_Sell_Slip" isMarkerVisible="true"><dc:Bounds x="590" y="210" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Record" bpmnElement="Task_Sell_Record"><dc:Bounds x="690" y="205" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Reject" bpmnElement="Task_Sell_Reject"><dc:Bounds x="590" y="280" width="140" height="40"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Sweep" bpmnElement="Event_Sell_Sweep"><dc:Bounds x="60" y="365" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Idem" bpmnElement="Task_Sell_Idem"><dc:Bounds x="150" y="353" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Cosign" bpmnElement="Task_Sell_Cosign"><dc:Bounds x="370" y="353" width="200" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Broadcast" bpmnElement="Task_Sell_Broadcast"><dc:Bounds x="620" y="353" width="160" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_Paid" bpmnElement="Event_Sell_Paid"><dc:Bounds x="840" y="365" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Sell_GuardianSign" bpmnElement="Task_Sell_GuardianSign"><dc:Bounds x="150" y="485" width="200" height="60"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Sell_1" bpmnElement="Flow_Sell_1"><di:waypoint x="96" y="93"/><di:waypoint x="150" y="93"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_2" bpmnElement="Flow_Sell_2"><di:waypoint x="320" y="93"/><di:waypoint x="370" y="93"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_3" bpmnElement="Flow_Sell_3"><di:waypoint x="540" y="93"/><di:waypoint x="590" y="93"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_4" bpmnElement="Flow_Sell_4"><di:waypoint x="608" y="111"/><di:waypoint x="235" y="205"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_5" bpmnElement="Flow_Sell_5"><di:waypoint x="320" y="235"/><di:waypoint x="370" y="235"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_6" bpmnElement="Flow_Sell_6"><di:waypoint x="540" y="235"/><di:waypoint x="590" y="235"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_7" bpmnElement="Flow_Sell_7"><di:waypoint x="640" y="235"/><di:waypoint x="690" y="235"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_8" bpmnElement="Flow_Sell_8"><di:waypoint x="615" y="260"/><di:waypoint x="615" y="280"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_9" bpmnElement="Flow_Sell_9"><di:waypoint x="730" y="300"/><di:waypoint x="858" y="365"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_10" bpmnElement="Flow_Sell_10"><di:waypoint x="780" y="265"/><di:waypoint x="78" y="365"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_11" bpmnElement="Flow_Sell_11"><di:waypoint x="96" y="383"/><di:waypoint x="150" y="383"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_12" bpmnElement="Flow_Sell_12"><di:waypoint x="320" y="383"/><di:waypoint x="370" y="383"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_13" bpmnElement="Flow_Sell_13"><di:waypoint x="570" y="383"/><di:waypoint x="620" y="383"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_14" bpmnElement="Flow_Sell_14"><di:waypoint x="780" y="383"/><di:waypoint x="840" y="383"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_15" bpmnElement="Flow_Sell_15"><di:waypoint x="470" y="413"/><di:waypoint x="250" y="485"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Sell_16" bpmnElement="Flow_Sell_16"><di:waypoint x="250" y="545"/><di:waypoint x="470" y="413"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+<!-- ======================================================================
+  Flow 04 — Stake / unstake / claim (the "holding is the game" engine)
+  ======================================================================
+  Rewards are clocked by Nano confirmation HEIGHT (not wall time), so the math
+  is deterministic and timestamp-free. Unstake pays a 20% exit tax that splits
+  80/15/5: 80% back to the user, 15% to the rebate vault (holders), 5% burned
+  (permanent deflation — supply can only ever decrease).
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Staking" name="Stake / unstake / claim" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Staking">
+      <bpmn:lane id="Lane_Staking_User" name="Holder">
+        <bpmn:flowNodeRef>Event_Stake_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Stake_Which</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Stake_Sign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Unstake_Sign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Claim_Sign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Stake_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Staking_Indexer" name="Indexer (applyOp)">
+        <bpmn:flowNodeRef>Gateway_Stake_Kind</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Stake_ApplyStake</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Stake_ApplyUnstake</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Stake_ApplyClaim</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Stake_IdxDone</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <!-- User -->
+    <bpmn:startEvent id="Event_Stake_Start" name="Holder signs an op">
+      <bpmn:outgoing>Flow_Stake_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:exclusiveGateway id="Gateway_Stake_Which" name="which op?">
+      <bpmn:incoming>Flow_Stake_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_2</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Stake_3</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Stake_4</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Stake_Sign" name="stake op (link = tokenId|amount)">
+      <bpmn:incoming>Flow_Stake_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_Unstake_Sign" name="unstake op (link = tokenId|amount)">
+      <bpmn:incoming>Flow_Stake_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:serviceTask id="Task_Claim_Sign" name="claim op (link = tokenId)">
+      <bpmn:incoming>Flow_Stake_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Stake_Done" name="Broadcasted">
+      <bpmn:incoming>Flow_Stake_5</bpmn:incoming>
+      <bpmn:incoming>Flow_Stake_6</bpmn:incoming>
+      <bpmn:incoming>Flow_Stake_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_8</bpmn:outgoing>
+    </bpmn:endEvent>
+
+    <!-- Indexer -->
+    <bpmn:exclusiveGateway id="Gateway_Stake_Kind" name="op kind">
+      <bpmn:incoming>Flow_Stake_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_9</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Stake_10</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Stake_11</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Stake_ApplyStake" name="stake: settlePoints() → staked += amount">
+      <bpmn:documentation>accrue(s,h) + settlePoints(s, sender, h) settle the debt before moving stake.</bpmn:documentation>
+      <bpmn:incoming>Flow_Stake_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_12</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Stake_ApplyUnstake" name="unstake: tax 20% → burn 5% + rebate 15% + user 80%">
+      <bpmn:documentation>supply -= burn (deflation); rebateVault += rebate; syncRewards(s, rebate).</bpmn:documentation>
+      <bpmn:incoming>Flow_Stake_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_13</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Stake_ApplyClaim" name="claim: pending = points·rewardPerPoint/PRECISION − rewardDebt">
+      <bpmn:documentation>Pay from rebateVault (clamped to available); carry shortfall via debt.</bpmn:documentation>
+      <bpmn:incoming>Flow_Stake_11</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stake_14</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Stake_IdxDone" name="state updated">
+      <bpmn:incoming>Flow_Stake_12</bpmn:incoming>
+      <bpmn:incoming>Flow_Stake_13</bpmn:incoming>
+      <bpmn:incoming>Flow_Stake_14</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Stake_1" sourceRef="Event_Stake_Start" targetRef="Gateway_Stake_Which"/>
+    <bpmn:sequenceFlow id="Flow_Stake_2" sourceRef="Gateway_Stake_Which" targetRef="Task_Stake_Sign" name="stake"/>
+    <bpmn:sequenceFlow id="Flow_Stake_3" sourceRef="Gateway_Stake_Which" targetRef="Task_Unstake_Sign" name="unstake"/>
+    <bpmn:sequenceFlow id="Flow_Stake_4" sourceRef="Gateway_Stake_Which" targetRef="Task_Claim_Sign" name="claim"/>
+    <bpmn:sequenceFlow id="Flow_Stake_5" sourceRef="Task_Stake_Sign" targetRef="Event_Stake_Done"/>
+    <bpmn:sequenceFlow id="Flow_Stake_6" sourceRef="Task_Unstake_Sign" targetRef="Event_Stake_Done"/>
+    <bpmn:sequenceFlow id="Flow_Stake_7" sourceRef="Task_Claim_Sign" targetRef="Event_Stake_Done"/>
+    <bpmn:sequenceFlow id="Flow_Stake_8" sourceRef="Event_Stake_Done" targetRef="Gateway_Stake_Kind"/>
+    <bpmn:sequenceFlow id="Flow_Stake_9" sourceRef="Gateway_Stake_Kind" targetRef="Task_Stake_ApplyStake" name="stake"/>
+    <bpmn:sequenceFlow id="Flow_Stake_10" sourceRef="Gateway_Stake_Kind" targetRef="Task_Stake_ApplyUnstake" name="unstake"/>
+    <bpmn:sequenceFlow id="Flow_Stake_11" sourceRef="Gateway_Stake_Kind" targetRef="Task_Stake_ApplyClaim" name="claim"/>
+    <bpmn:sequenceFlow id="Flow_Stake_12" sourceRef="Task_Stake_ApplyStake" targetRef="Event_Stake_IdxDone"/>
+    <bpmn:sequenceFlow id="Flow_Stake_13" sourceRef="Task_Stake_ApplyUnstake" targetRef="Event_Stake_IdxDone"/>
+    <bpmn:sequenceFlow id="Flow_Stake_14" sourceRef="Task_Stake_ApplyClaim" targetRef="Event_Stake_IdxDone"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Staking">
+    <bpmndi:BPMNPlane id="BPMNPlane_Staking" bpmnElement="Process_Staking">
+      <bpmndi:BPMNShape id="Shape_Lane_Staking_User" bpmnElement="Lane_Staking_User" isHorizontal="true">
+        <dc:Bounds x="30" y="30" width="1180" height="220"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Staking_Indexer" bpmnElement="Lane_Staking_Indexer" isHorizontal="true">
+        <dc:Bounds x="30" y="250" width="1180" height="220"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Stake_Start" bpmnElement="Event_Stake_Start"><dc:Bounds x="60" y="120" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_Which" bpmnElement="Gateway_Stake_Which" isMarkerVisible="true"><dc:Bounds x="160" y="113" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_Sign" bpmnElement="Task_Stake_Sign"><dc:Bounds x="280" y="60" width="150" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Unstake_Sign" bpmnElement="Task_Unstake_Sign"><dc:Bounds x="280" y="120" width="150" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Claim_Sign" bpmnElement="Task_Claim_Sign"><dc:Bounds x="280" y="180" width="150" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_Done" bpmnElement="Event_Stake_Done"><dc:Bounds x="520" y="120" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_Kind" bpmnElement="Gateway_Stake_Kind" isMarkerVisible="true"><dc:Bounds x="160" y="330" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_ApplyStake" bpmnElement="Task_Stake_ApplyStake"><dc:Bounds x="280" y="280" width="190" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_ApplyUnstake" bpmnElement="Task_Stake_ApplyUnstake"><dc:Bounds x="280" y="340" width="210" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_ApplyClaim" bpmnElement="Task_Stake_ApplyClaim"><dc:Bounds x="280" y="400" width="210" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Stake_IdxDone" bpmnElement="Event_Stake_IdxDone"><dc:Bounds x="560" y="340" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Stake_1" bpmnElement="Flow_Stake_1"><di:waypoint x="96" y="138"/><di:waypoint x="160" y="138"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_2" bpmnElement="Flow_Stake_2"><di:waypoint x="185" y="113"/><di:waypoint x="280" y="85"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_3" bpmnElement="Flow_Stake_3"><di:waypoint x="210" y="138"/><di:waypoint x="280" y="145"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_4" bpmnElement="Flow_Stake_4"><di:waypoint x="185" y="163"/><di:waypoint x="280" y="205"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_5" bpmnElement="Flow_Stake_5"><di:waypoint x="430" y="85"/><di:waypoint x="520" y="138"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_6" bpmnElement="Flow_Stake_6"><di:waypoint x="430" y="145"/><di:waypoint x="520" y="138"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_7" bpmnElement="Flow_Stake_7"><di:waypoint x="430" y="205"/><di:waypoint x="520" y="156"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_8" bpmnElement="Flow_Stake_8"><di:waypoint x="538" y="156"/><di:waypoint x="185" y="330"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_9" bpmnElement="Flow_Stake_9"><di:waypoint x="185" y="355"/><di:waypoint x="280" y="305"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_10" bpmnElement="Flow_Stake_10"><di:waypoint x="210" y="355"/><di:waypoint x="280" y="365"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_11" bpmnElement="Flow_Stake_11"><di:waypoint x="185" y="380"/><di:waypoint x="280" y="425"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_12" bpmnElement="Flow_Stake_12"><di:waypoint x="470" y="305"/><di:waypoint x="560" y="358"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_13" bpmnElement="Flow_Stake_13"><di:waypoint x="490" y="365"/><di:waypoint x="560" y="358"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Stake_14" bpmnElement="Flow_Stake_14"><di:waypoint x="490" y="425"/><di:waypoint x="560" y="376"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+<!-- ======================================================================
+  Flow 05 — Indexer / deterministic replay (the substitute for a VM)
+  ======================================================================
+  Reads raw Nano blocks, decodes the `link` into { tokenId, op }, folds them in
+  confirmation-height order, and flags invalid ops WITHOUT throwing, so the
+  canonical state of everything before a bad block is still served.
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Indexer" name="Indexer replay" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Indexer">
+      <bpmn:lane id="Lane_Idx_Source" name="Block source (NanoRpcSource)">
+        <bpmn:flowNodeRef>Event_Idx_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Idx_History</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Idx_BlocksInfo</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Idx_Decode" name="Decoder (MultiIndexer)">
+        <bpmn:flowNodeRef>Task_Idx_Decode</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Idx_IsOp</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Idx_Commit</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Idx_ResolveCommit</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Idx_DecodeCompact</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Idx_BindBuy</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Idx_Replay" name="Replay (replayMulti)">
+        <bpmn:flowNodeRef>Task_Idx_Sort</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Idx_Fold</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Idx_Valid</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Idx_Flag</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Idx_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <bpmn:startEvent id="Event_Idx_Start" name="watched account">
+      <bpmn:outgoing>Flow_Idx_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Idx_History" name="rpc account_history (paged, count 500)">
+      <bpmn:documentation>NanoRpcSource.listBlocks — paginates backwards with `head`.</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Idx_BlocksInfo" name="rpc blocks_info (json_block)">
+      <bpmn:documentation>Gets link, previous, representative, amount, height, timestamp per hash.</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Idx_Decode" name="decode(block)">
+      <bpmn:documentation>Skip non-op blocks: amount != 1 raw (value transfers / receive/open).</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Idx_IsOp" name="carries an op?">
+      <bpmn:incoming>Flow_Idx_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_5</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Idx_skip</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:exclusiveGateway id="Gateway_Idx_Commit" name="commit-reveal (0xFF prefix)?">
+      <bpmn:incoming>Flow_Idx_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_6</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Idx_7</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Idx_ResolveCommit" name="commitResolver(link) + verifyCommit(tokenId, op, link)">
+      <bpmn:documentation>Re-hashes the revealed op and checks it equals the on-chain commit.</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Idx_DecodeCompact" name="decodeOpLink(link) → { tokenId, op }">
+      <bpmn:documentation>launch: tokenId = tokenIdFromLaunchHash(block.hash).</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Idx_BindBuy" name="if buy → bind xno from block.previous deposit">
+      <bpmn:documentation>Value-bound: op.xno = deposit native amount (flow 02).</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_8</bpmn:incoming>
+      <bpmn:incoming>Flow_Idx_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_10</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Idx_Sort" name="sort events by confirmation height">
+      <bpmn:incoming>Flow_Idx_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_11</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Idx_Fold" name="replayMulti(events) → applyBlock → applyOp">
+      <bpmn:documentation>Pure fold into MultiState = Map&lt;tokenId, State&gt;.</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_11</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_12</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Idx_Valid" name="applyOp throws?">
+      <bpmn:incoming>Flow_Idx_12</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_13</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Idx_14</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Idx_Flag" name="flag invalid (keep previous state)">
+      <bpmn:documentation>invalid.push({ index, reason }) — never throws, keeps serving.</bpmn:documentation>
+      <bpmn:incoming>Flow_Idx_14</bpmn:incoming>
+      <bpmn:outgoing>Flow_Idx_15</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Idx_Done" name="canonical MultiState">
+      <bpmn:incoming>Flow_Idx_13</bpmn:incoming>
+      <bpmn:incoming>Flow_Idx_15</bpmn:incoming>
+      <bpmn:incoming>Flow_Idx_skip</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Idx_1" sourceRef="Event_Idx_Start" targetRef="Task_Idx_History"/>
+    <bpmn:sequenceFlow id="Flow_Idx_2" sourceRef="Task_Idx_History" targetRef="Task_Idx_BlocksInfo"/>
+    <bpmn:sequenceFlow id="Flow_Idx_3" sourceRef="Task_Idx_BlocksInfo" targetRef="Task_Idx_Decode"/>
+    <bpmn:sequenceFlow id="Flow_Idx_4" sourceRef="Task_Idx_Decode" targetRef="Gateway_Idx_IsOp"/>
+    <bpmn:sequenceFlow id="Flow_Idx_5" sourceRef="Gateway_Idx_IsOp" targetRef="Gateway_Idx_Commit" name="yes"/>
+    <bpmn:sequenceFlow id="Flow_Idx_skip" sourceRef="Gateway_Idx_IsOp" targetRef="Event_Idx_Done" name="no (skip)"/>
+    <bpmn:sequenceFlow id="Flow_Idx_6" sourceRef="Gateway_Idx_Commit" targetRef="Task_Idx_ResolveCommit" name="commit-reveal"/>
+    <bpmn:sequenceFlow id="Flow_Idx_7" sourceRef="Gateway_Idx_Commit" targetRef="Task_Idx_DecodeCompact" name="compact"/>
+    <bpmn:sequenceFlow id="Flow_Idx_8" sourceRef="Task_Idx_ResolveCommit" targetRef="Task_Idx_BindBuy"/>
+    <bpmn:sequenceFlow id="Flow_Idx_9" sourceRef="Task_Idx_DecodeCompact" targetRef="Task_Idx_BindBuy"/>
+    <bpmn:sequenceFlow id="Flow_Idx_10" sourceRef="Task_Idx_BindBuy" targetRef="Task_Idx_Sort"/>
+    <bpmn:sequenceFlow id="Flow_Idx_11" sourceRef="Task_Idx_Sort" targetRef="Task_Idx_Fold"/>
+    <bpmn:sequenceFlow id="Flow_Idx_12" sourceRef="Task_Idx_Fold" targetRef="Gateway_Idx_Valid"/>
+    <bpmn:sequenceFlow id="Flow_Idx_13" sourceRef="Gateway_Idx_Valid" targetRef="Event_Idx_Done" name="ok"/>
+    <bpmn:sequenceFlow id="Flow_Idx_14" sourceRef="Gateway_Idx_Valid" targetRef="Task_Idx_Flag" name="throws"/>
+    <bpmn:sequenceFlow id="Flow_Idx_15" sourceRef="Task_Idx_Flag" targetRef="Event_Idx_Done"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Indexer">
+    <bpmndi:BPMNPlane id="BPMNPlane_Indexer" bpmnElement="Process_Indexer">
+      <bpmndi:BPMNShape id="Shape_Lane_Idx_Source" bpmnElement="Lane_Idx_Source" isHorizontal="true">
+        <dc:Bounds x="30" y="30" width="1180" height="120"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Idx_Decode" bpmnElement="Lane_Idx_Decode" isHorizontal="true">
+        <dc:Bounds x="30" y="150" width="1180" height="210"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Idx_Replay" bpmnElement="Lane_Idx_Replay" isHorizontal="true">
+        <dc:Bounds x="30" y="360" width="1180" height="180"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Idx_Start" bpmnElement="Event_Idx_Start"><dc:Bounds x="60" y="70" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_History" bpmnElement="Task_Idx_History"><dc:Bounds x="150" y="58" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_BlocksInfo" bpmnElement="Task_Idx_BlocksInfo"><dc:Bounds x="380" y="58" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_Decode" bpmnElement="Task_Idx_Decode"><dc:Bounds x="150" y="190" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_IsOp" bpmnElement="Gateway_Idx_IsOp" isMarkerVisible="true"><dc:Bounds x="370" y="195" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_Commit" bpmnElement="Gateway_Idx_Commit" isMarkerVisible="true"><dc:Bounds x="470" y="195" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_ResolveCommit" bpmnElement="Task_Idx_ResolveCommit"><dc:Bounds x="570" y="150" width="200" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_DecodeCompact" bpmnElement="Task_Idx_DecodeCompact"><dc:Bounds x="570" y="245" width="200" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_BindBuy" bpmnElement="Task_Idx_BindBuy"><dc:Bounds x="830" y="190" width="200" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_Sort" bpmnElement="Task_Idx_Sort"><dc:Bounds x="150" y="415" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_Fold" bpmnElement="Task_Idx_Fold"><dc:Bounds x="380" y="415" width="200" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_Valid" bpmnElement="Gateway_Idx_Valid" isMarkerVisible="true"><dc:Bounds x="630" y="420" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_Flag" bpmnElement="Task_Idx_Flag"><dc:Bounds x="730" y="415" width="200" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Idx_Done" bpmnElement="Event_Idx_Done"><dc:Bounds x="1000" y="427" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Idx_1" bpmnElement="Flow_Idx_1"><di:waypoint x="96" y="88"/><di:waypoint x="150" y="88"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_2" bpmnElement="Flow_Idx_2"><di:waypoint x="330" y="88"/><di:waypoint x="380" y="88"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_3" bpmnElement="Flow_Idx_3"><di:waypoint x="470" y="118"/><di:waypoint x="235" y="190"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_4" bpmnElement="Flow_Idx_4"><di:waypoint x="320" y="220"/><di:waypoint x="370" y="220"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_5" bpmnElement="Flow_Idx_5"><di:waypoint x="420" y="220"/><di:waypoint x="470" y="220"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_skip" bpmnElement="Flow_Idx_skip"><di:waypoint x="395" y="245"/><di:waypoint x="1018" y="427"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_6" bpmnElement="Flow_Idx_6"><di:waypoint x="495" y="195"/><di:waypoint x="570" y="180"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_7" bpmnElement="Flow_Idx_7"><di:waypoint x="495" y="245"/><di:waypoint x="570" y="275"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_8" bpmnElement="Flow_Idx_8"><di:waypoint x="770" y="180"/><di:waypoint x="830" y="220"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_9" bpmnElement="Flow_Idx_9"><di:waypoint x="770" y="275"/><di:waypoint x="930" y="250"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_10" bpmnElement="Flow_Idx_10"><di:waypoint x="930" y="250"/><di:waypoint x="240" y="415"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_11" bpmnElement="Flow_Idx_11"><di:waypoint x="330" y="445"/><di:waypoint x="380" y="445"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_12" bpmnElement="Flow_Idx_12"><di:waypoint x="580" y="445"/><di:waypoint x="630" y="445"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_13" bpmnElement="Flow_Idx_13"><di:waypoint x="680" y="445"/><di:waypoint x="730" y="445"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_14" bpmnElement="Flow_Idx_14"><di:waypoint x="655" y="470"/><di:waypoint x="1000" y="463"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Idx_15" bpmnElement="Flow_Idx_15"><di:waypoint x="930" y="445"/><di:waypoint x="1000" y="445"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+<!-- ======================================================================
+  Flow 06 — 2-of-3 multisig custody (how the XNO is guarded with no contract)
+  ======================================================================
+  Three independent Ed25519 keys: the OPERATOR key (HD-derived from POOL_SEED)
+  plus GUARDIAN-1 and GUARDIAN-2 (independently generated, held off-machine).
+  A payout block is valid only when it carries 2 of 3 signatures over the same
+  block hash. The guardian never signs blind — it re-verifies the target pool,
+  the balance, and a fresh requestId (anti-replay) before co-signing.
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Custody" name="2-of-3 multisig payout" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Custody">
+      <bpmn:lane id="Lane_Custody_Operator" name="Operator (custody)">
+        <bpmn:flowNodeRef>Event_Custody_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Custody_Hash</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Custody_OpSig</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Custody_Collect</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Custody_Quorum</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Custody_Assemble</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Custody_Work</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Custody_Broadcast</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Custody_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Custody_Guardian" name="Guardian (guardian.ts)">
+        <bpmn:flowNodeRef>Event_Custody_Recv</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Custody_Auth</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Custody_Replay</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Custody_Guard</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Custody_Balance</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Custody_Rehash</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Custody_GuardSign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Custody_Respond</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <!-- Operator -->
+    <bpmn:startEvent id="Event_Custody_Start" name="payout to sign">
+      <bpmn:outgoing>Flow_Custody_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Custody_Hash" name="payoutBlockHash(pool, payout)">
+      <bpmn:documentation>Hash the exact block: account, previous, representative, newBalance, link.</bpmn:documentation>
+      <bpmn:incoming>Flow_Custody_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Custody_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Custody_OpSig" name="cosignHash(pool.secretKey, hash) → operator signature">
+      <bpmn:incoming>Flow_Custody_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Custody_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Custody_Collect" name="remoteCosign(url, apiKey, {account, previous, balance, link})">
+      <bpmn:documentation>POST /sign to each guardian; collect signatures.</bpmn:documentation>
+      <bpmn:incoming>Flow_Custody_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Custody_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Custody_Quorum" name="≥ 2 of 3 signatures?">
+      <bpmn:incoming>Flow_Custody_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Custody_5</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Custody_6</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Custody_Assemble" name="signPayoutWithSignatures(pool, payout, rpcKey, cosigs)">
+      <bpmn:documentation>block.signatures = [operatorSig, ...cosignerSigs].</bpmn:documentation>
+      <bpmn:incoming>Flow_Custody_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Custody_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Custody_Work" name="rpc work_generate (send difficulty)">
+      <bpmn:incoming>Flow_Custody_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Custody_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Custody_Broadcast" name="broadcastPayout (rpc action=process)">
+      <bpmn:incoming>Flow_Custody_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Custody_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Custody_Done" name="payout confirmed">
+      <bpmn:incoming>Flow_Custody_9</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:endEvent id="Event_Custody_NoQuorum" name="abort (no quorum)">
+      <bpmn:incoming>Flow_Custody_6</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <!-- Guardian -->
+    <bpmn:startEvent id="Event_Custody_Recv" name="POST /sign received">
+      <bpmn:outgoing>Flow_Custody_10</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Custody_Auth" name="check apiKey == GUARDIAN_KEY">
+      <bpmn:incoming>Flow_Custody_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_Custody_11</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Custody_Replay" name="requestId anti-replay (seen map, 1h window)">
+      <bpmn:incoming>Flow_Custody_11</bpmn:incoming>
+      <bpmn:outgoing>Flow_Custody_12</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Custody_Guard" name="account ∈ GUARDED_POOLS?">
+      <bpmn:incoming>Flow_Custody_12</bpmn:incoming>
+      <bpmn:outgoing>Flow_Custody_13</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Custody_Balance" name="balance covers payout (balance > 0, numeric)?">
+      <bpmn:incoming>Flow_Custody_13</bpmn:incoming>
+      <bpmn:outgoing>Flow_Custody_14</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Custody_Rehash" name="hashBlock(account, previous, representative, balance, link)">
+      <bpmn:documentation>Never trust a caller hash — recompute it.</bpmn:documentation>
+      <bpmn:incoming>Flow_Custody_14</bpmn:incoming>
+      <bpmn:outgoing>Flow_Custody_15</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Custody_GuardSign" name="signBlock({ hash, secretKey: GUARDIAN_SEED })">
+      <bpmn:incoming>Flow_Custody_15</bpmn:incoming>
+      <bpmn:outgoing>Flow_Custody_16</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Custody_Respond" name="200 { signature, publicKey, account }">
+      <bpmn:incoming>Flow_Custody_16</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Custody_1" sourceRef="Event_Custody_Start" targetRef="Task_Custody_Hash"/>
+    <bpmn:sequenceFlow id="Flow_Custody_2" sourceRef="Task_Custody_Hash" targetRef="Task_Custody_OpSig"/>
+    <bpmn:sequenceFlow id="Flow_Custody_3" sourceRef="Task_Custody_OpSig" targetRef="Task_Custody_Collect"/>
+    <bpmn:sequenceFlow id="Flow_Custody_4" sourceRef="Task_Custody_Collect" targetRef="Gateway_Custody_Quorum"/>
+    <bpmn:sequenceFlow id="Flow_Custody_5" sourceRef="Gateway_Custody_Quorum" targetRef="Task_Custody_Assemble" name="quorum"/>
+    <bpmn:sequenceFlow id="Flow_Custody_6" sourceRef="Gateway_Custody_Quorum" targetRef="Event_Custody_NoQuorum" name="no quorum"/>
+    <bpmn:sequenceFlow id="Flow_Custody_7" sourceRef="Task_Custody_Assemble" targetRef="Task_Custody_Work"/>
+    <bpmn:sequenceFlow id="Flow_Custody_8" sourceRef="Task_Custody_Work" targetRef="Task_Custody_Broadcast"/>
+    <bpmn:sequenceFlow id="Flow_Custody_9" sourceRef="Task_Custody_Broadcast" targetRef="Event_Custody_Done"/>
+    <bpmn:sequenceFlow id="Flow_Custody_10" sourceRef="Event_Custody_Recv" targetRef="Task_Custody_Auth"/>
+    <bpmn:sequenceFlow id="Flow_Custody_11" sourceRef="Task_Custody_Auth" targetRef="Task_Custody_Replay"/>
+    <bpmn:sequenceFlow id="Flow_Custody_12" sourceRef="Task_Custody_Replay" targetRef="Task_Custody_Guard"/>
+    <bpmn:sequenceFlow id="Flow_Custody_13" sourceRef="Task_Custody_Guard" targetRef="Task_Custody_Balance"/>
+    <bpmn:sequenceFlow id="Flow_Custody_14" sourceRef="Task_Custody_Balance" targetRef="Task_Custody_Rehash"/>
+    <bpmn:sequenceFlow id="Flow_Custody_15" sourceRef="Task_Custody_Rehash" targetRef="Task_Custody_GuardSign"/>
+    <bpmn:sequenceFlow id="Flow_Custody_16" sourceRef="Task_Custody_GuardSign" targetRef="Event_Custody_Respond"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Custody">
+    <bpmndi:BPMNPlane id="BPMNPlane_Custody" bpmnElement="Process_Custody">
+      <bpmndi:BPMNShape id="Shape_Lane_Custody_Operator" bpmnElement="Lane_Custody_Operator" isHorizontal="true">
+        <dc:Bounds x="30" y="30" width="1180" height="220"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Custody_Guardian" bpmnElement="Lane_Custody_Guardian" isHorizontal="true">
+        <dc:Bounds x="30" y="250" width="1180" height="230"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Custody_Start" bpmnElement="Event_Custody_Start"><dc:Bounds x="60" y="110" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_Hash" bpmnElement="Task_Custody_Hash"><dc:Bounds x="150" y="98" width="160" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_OpSig" bpmnElement="Task_Custody_OpSig"><dc:Bounds x="360" y="98" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_Collect" bpmnElement="Task_Custody_Collect"><dc:Bounds x="580" y="98" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_Quorum" bpmnElement="Gateway_Custody_Quorum" isMarkerVisible="true"><dc:Bounds x="810" y="103" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_Assemble" bpmnElement="Task_Custody_Assemble"><dc:Bounds x="910" y="98" width="190" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_Work" bpmnElement="Task_Custody_Work"><dc:Bounds x="150" y="180" width="160" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_Broadcast" bpmnElement="Task_Custody_Broadcast"><dc:Bounds x="360" y="180" width="160" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_Done" bpmnElement="Event_Custody_Done"><dc:Bounds x="580" y="187" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_NoQuorum" bpmnElement="Event_Custody_NoQuorum"><dc:Bounds x="830" y="185" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Custody_Recv" bpmnElement="Event_Custody_Recv"><dc:Bounds x="60" y="340" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_Auth" bpmnElement="Task_Custody_Auth"><dc:Bounds x="150" y="328" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_Replay" bpmnElement="Task_Custody_Replay"><dc:Bounds x="370" y="328" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_Guard" bpmnElement="Task_Custody_Guard"><dc:Bounds x="590" y="328" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_Balance" bpmnElement="Task_Custody_Balance"><dc:Bounds x="810" y="328" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_Rehash" bpmnElement="Task_Custody_Rehash"><dc:Bounds x="370" y="420" width="190" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_GuardSign" bpmnElement="Task_Custody_GuardSign"><dc:Bounds x="610" y="420" width="190" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Custody_Respond" bpmnElement="Event_Custody_Respond"><dc:Bounds x="860" y="427" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Custody_1" bpmnElement="Flow_Custody_1"><di:waypoint x="96" y="128"/><di:waypoint x="150" y="128"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Custody_2" bpmnElement="Flow_Custody_2"><di:waypoint x="310" y="128"/><di:waypoint x="360" y="128"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Custody_3" bpmnElement="Flow_Custody_3"><di:waypoint x="530" y="128"/><di:waypoint x="580" y="128"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Custody_4" bpmnElement="Flow_Custody_4"><di:waypoint x="760" y="128"/><di:waypoint x="810" y="128"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Custody_5" bpmnElement="Flow_Custody_5"><di:waypoint x="860" y="128"/><di:waypoint x="910" y="128"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Custody_6" bpmnElement="Flow_Custody_6"><di:waypoint x="835" y="153"/><di:waypoint x="848" y="185"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Custody_7" bpmnElement="Flow_Custody_7"><di:waypoint x="1005" y="158"/><di:waypoint x="230" y="180"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Custody_8" bpmnElement="Flow_Custody_8"><di:waypoint x="310" y="205"/><di:waypoint x="360" y="205"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Custody_9" bpmnElement="Flow_Custody_9"><di:waypoint x="520" y="205"/><di:waypoint x="580" y="205"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Custody_10" bpmnElement="Flow_Custody_10"><di:waypoint x="96" y="358"/><di:waypoint x="150" y="358"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Custody_11" bpmnElement="Flow_Custody_11"><di:waypoint x="320" y="358"/><di:waypoint x="370" y="358"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Custody_12" bpmnElement="Flow_Custody_12"><di:waypoint x="540" y="358"/><di:waypoint x="590" y="358"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Custody_13" bpmnElement="Flow_Custody_13"><di:waypoint x="760" y="358"/><di:waypoint x="810" y="358"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Custody_14" bpmnElement="Flow_Custody_14"><di:waypoint x="895" y="388"/><di:waypoint x="465" y="420"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Custody_15" bpmnElement="Flow_Custody_15"><di:waypoint x="560" y="445"/><di:waypoint x="610" y="445"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Custody_16" bpmnElement="Flow_Custody_16"><di:waypoint x="800" y="445"/><di:waypoint x="860" y="445"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+<!-- ======================================================================
+  Flow 07 — Rejected-buy refund (deterministic reconciliation, never trusts
+           the buyer's declared amount)
+  ======================================================================
+  When a buy is rejected (slippage / no liquidity), its XNO arrived at the pool
+  but was never credited. The refund rule is:
+      refund[sender] = poolReceived[sender] − creditedBuyXno[sender]   (if > 0)
+  A sender who never actually sent XNO has poolReceived 0 and can never drain
+  the pool. This is the "value-bound" guarantee carried through to settlement.
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Refund" name="Rejected-buy refund" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Refund">
+      <bpmn:lane id="Lane_Refund_Indexer" name="Indexer / Reconciliation">
+        <bpmn:flowNodeRef>Event_Refund_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Refund_Events</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Refund_Credited</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Refund_Received</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Refund_Compute</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Refund_Owed</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Refund_Operator" name="Operator (sweep)">
+        <bpmn:flowNodeRef>Task_Refund_Sign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Refund_Broadcast</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Refund_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <bpmn:startEvent id="Event_Refund_Start" name="after sweep">
+      <bpmn:outgoing>Flow_Refund_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Refund_Events" name="idx.collectEvents(watched)">
+      <bpmn:incoming>Flow_Refund_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Refund_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Refund_Credited" name="creditedBuys(events) → tokenId → (sender → xno)">
+      <bpmn:documentation>Only VALID buy ops are credited (rejected ops are skipped).</bpmn:documentation>
+      <bpmn:incoming>Flow_Refund_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Refund_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Refund_Received" name="readPoolDeposits(rpcKey, pool) → sender → received">
+      <bpmn:documentation>Sum of the pool's received deposits ledger + still-pending sends.</bpmn:documentation>
+      <bpmn:incoming>Flow_Refund_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Refund_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Refund_Compute" name="computeRefunds(poolReceived, credited)">
+      <bpmn:documentation>refund = received − credited (only when positive).</bpmn:documentation>
+      <bpmn:incoming>Flow_Refund_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Refund_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Refund_Owed" name="any refunds > 0?">
+      <bpmn:incoming>Flow_Refund_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Refund_6</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Refund_7</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Refund_Sign" name="refundRejectedBuys: for each sender → signPayout (2-of-3)">
+      <bpmn:documentation>Chained: each refund updates the pool frontier/balance sequentially.</bpmn:documentation>
+      <bpmn:incoming>Flow_Refund_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_Refund_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Refund_Broadcast" name="broadcastPayout (rpc action=process)">
+      <bpmn:incoming>Flow_Refund_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Refund_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Refund_Done" name="refunded">
+      <bpmn:incoming>Flow_Refund_9</bpmn:incoming>
+      <bpmn:incoming>Flow_Refund_7</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Refund_1" sourceRef="Event_Refund_Start" targetRef="Task_Refund_Events"/>
+    <bpmn:sequenceFlow id="Flow_Refund_2" sourceRef="Task_Refund_Events" targetRef="Task_Refund_Credited"/>
+    <bpmn:sequenceFlow id="Flow_Refund_3" sourceRef="Task_Refund_Credited" targetRef="Task_Refund_Received"/>
+    <bpmn:sequenceFlow id="Flow_Refund_4" sourceRef="Task_Refund_Received" targetRef="Task_Refund_Compute"/>
+    <bpmn:sequenceFlow id="Flow_Refund_5" sourceRef="Task_Refund_Compute" targetRef="Gateway_Refund_Owed"/>
+    <bpmn:sequenceFlow id="Flow_Refund_6" sourceRef="Gateway_Refund_Owed" targetRef="Task_Refund_Sign" name="yes"/>
+    <bpmn:sequenceFlow id="Flow_Refund_7" sourceRef="Gateway_Refund_Owed" targetRef="Event_Refund_Done" name="none"/>
+    <bpmn:sequenceFlow id="Flow_Refund_8" sourceRef="Task_Refund_Sign" targetRef="Task_Refund_Broadcast"/>
+    <bpmn:sequenceFlow id="Flow_Refund_9" sourceRef="Task_Refund_Broadcast" targetRef="Event_Refund_Done"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Refund">
+    <bpmndi:BPMNPlane id="BPMNPlane_Refund" bpmnElement="Process_Refund">
+      <bpmndi:BPMNShape id="Shape_Lane_Refund_Indexer" bpmnElement="Lane_Refund_Indexer" isHorizontal="true">
+        <dc:Bounds x="30" y="30" width="1180" height="190"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Refund_Operator" bpmnElement="Lane_Refund_Operator" isHorizontal="true">
+        <dc:Bounds x="30" y="220" width="1180" height="150"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Refund_Start" bpmnElement="Event_Refund_Start"><dc:Bounds x="60" y="100" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Events" bpmnElement="Task_Refund_Events"><dc:Bounds x="150" y="88" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Credited" bpmnElement="Task_Refund_Credited"><dc:Bounds x="370" y="88" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Received" bpmnElement="Task_Refund_Received"><dc:Bounds x="600" y="88" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Compute" bpmnElement="Task_Refund_Compute"><dc:Bounds x="830" y="88" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Owed" bpmnElement="Gateway_Refund_Owed" isMarkerVisible="true"><dc:Bounds x="1060" y="93" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Sign" bpmnElement="Task_Refund_Sign"><dc:Bounds x="150" y="265" width="200" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Broadcast" bpmnElement="Task_Refund_Broadcast"><dc:Bounds x="400" y="265" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Refund_Done" bpmnElement="Event_Refund_Done"><dc:Bounds x="640" y="277" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Refund_1" bpmnElement="Flow_Refund_1"><di:waypoint x="96" y="118"/><di:waypoint x="150" y="118"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_2" bpmnElement="Flow_Refund_2"><di:waypoint x="320" y="118"/><di:waypoint x="370" y="118"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_3" bpmnElement="Flow_Refund_3"><di:waypoint x="550" y="118"/><di:waypoint x="600" y="118"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_4" bpmnElement="Flow_Refund_4"><di:waypoint x="780" y="118"/><di:waypoint x="830" y="118"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_5" bpmnElement="Flow_Refund_5"><di:waypoint x="1010" y="118"/><di:waypoint x="1060" y="118"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_6" bpmnElement="Flow_Refund_6"><di:waypoint x="1085" y="143"/><di:waypoint x="250" y="265"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_7" bpmnElement="Flow_Refund_7"><di:waypoint x="1110" y="118"/><di:waypoint x="658" y="277"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_8" bpmnElement="Flow_Refund_8"><di:waypoint x="350" y="295"/><di:waypoint x="400" y="295"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Refund_9" bpmnElement="Flow_Refund_9"><di:waypoint x="580" y="295"/><di:waypoint x="640" y="295"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+<!-- ======================================================================
+  Flow 08 — Commit-reveal (for ops that don't fit the 32-byte link)
+  ======================================================================
+  A Nano `link` is exactly 32 bytes. Ops with two amounts or a string payload
+  (transfer, sell-with-minXno, seedLiq, addLiq) are committed on-chain and the
+  full op is served off-chain. An indexer re-hashes the revealed op and checks
+  it equals the commitment before trusting it.
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Commit" name="Commit-reveal" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Commit">
+      <bpmn:lane id="Lane_Commit_Client" name="Client">
+        <bpmn:flowNodeRef>Event_Commit_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Commit_Link</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Commit_Register</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Commit_Sign</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Commit_Broadcast</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Commit_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Commit_Indexer" name="Indexer">
+        <bpmn:flowNodeRef>Task_Commit_Resolve</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Commit_Verify</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Commit_Match</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Commit_Accept</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Commit_Reject</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <bpmn:startEvent id="Event_Commit_Start" name="op needs commit (2 amounts / string)">
+      <bpmn:outgoing>Flow_Commit_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Commit_Link" name="commitLink(tokenId, op)">
+      <bpmn:documentation>link = 0xFF ‖ blake2b-256(tokenId ‖ encodeOp(op))[0..30].</bpmn:documentation>
+      <bpmn:incoming>Flow_Commit_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Commit_Register" name="registerCommit(tokenId, op) → store reveal off-chain">
+      <bpmn:documentation>server/commits.ts: persist {tokenId, op} keyed by the commit link.</bpmn:documentation>
+      <bpmn:incoming>Flow_Commit_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Commit_Sign" name="Sign block with link = commitLink">
+      <bpmn:incoming>Flow_Commit_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Commit_Broadcast" name="Broadcast block">
+      <bpmn:incoming>Flow_Commit_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Commit_Done" name="on-chain">
+      <bpmn:incoming>Flow_Commit_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_6</bpmn:outgoing>
+    </bpmn:endEvent>
+
+    <bpmn:serviceTask id="Task_Commit_Resolve" name="commitResolver(link) → reveal {tokenId, op}">
+      <bpmn:incoming>Flow_Commit_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Commit_Verify" name="verifyCommit(tokenId, op, link)">
+      <bpmn:documentation>Recompute commitLink(tokenId, op) and compare to on-chain link.</bpmn:documentation>
+      <bpmn:incoming>Flow_Commit_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Commit_Match" name="hash matches?">
+      <bpmn:incoming>Flow_Commit_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_9</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Commit_10</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Commit_Accept" name="apply op to state">
+      <bpmn:incoming>Flow_Commit_9</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_11</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Commit_Reject" name="reject (commit mismatch)">
+      <bpmn:incoming>Flow_Commit_10</bpmn:incoming>
+      <bpmn:outgoing>Flow_Commit_12</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Commit_IdxDone" name="resolved">
+      <bpmn:incoming>Flow_Commit_11</bpmn:incoming>
+      <bpmn:incoming>Flow_Commit_12</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Commit_1" sourceRef="Event_Commit_Start" targetRef="Task_Commit_Link"/>
+    <bpmn:sequenceFlow id="Flow_Commit_2" sourceRef="Task_Commit_Link" targetRef="Task_Commit_Register"/>
+    <bpmn:sequenceFlow id="Flow_Commit_3" sourceRef="Task_Commit_Register" targetRef="Task_Commit_Sign"/>
+    <bpmn:sequenceFlow id="Flow_Commit_4" sourceRef="Task_Commit_Sign" targetRef="Task_Commit_Broadcast"/>
+    <bpmn:sequenceFlow id="Flow_Commit_5" sourceRef="Task_Commit_Broadcast" targetRef="Event_Commit_Done"/>
+    <bpmn:sequenceFlow id="Flow_Commit_6" sourceRef="Event_Commit_Done" targetRef="Task_Commit_Resolve"/>
+    <bpmn:sequenceFlow id="Flow_Commit_7" sourceRef="Task_Commit_Resolve" targetRef="Task_Commit_Verify"/>
+    <bpmn:sequenceFlow id="Flow_Commit_8" sourceRef="Task_Commit_Verify" targetRef="Gateway_Commit_Match"/>
+    <bpmn:sequenceFlow id="Flow_Commit_9" sourceRef="Gateway_Commit_Match" targetRef="Task_Commit_Accept" name="match"/>
+    <bpmn:sequenceFlow id="Flow_Commit_10" sourceRef="Gateway_Commit_Match" targetRef="Task_Commit_Reject" name="mismatch"/>
+    <bpmn:sequenceFlow id="Flow_Commit_11" sourceRef="Task_Commit_Accept" targetRef="Event_Commit_IdxDone"/>
+    <bpmn:sequenceFlow id="Flow_Commit_12" sourceRef="Task_Commit_Reject" targetRef="Event_Commit_IdxDone"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Commit">
+    <bpmndi:BPMNPlane id="BPMNPlane_Commit" bpmnElement="Process_Commit">
+      <bpmndi:BPMNShape id="Shape_Lane_Commit_Client" bpmnElement="Lane_Commit_Client" isHorizontal="true">
+        <dc:Bounds x="30" y="30" width="1180" height="160"/>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Commit_Indexer" bpmnElement="Lane_Commit_Indexer" isHorizontal="true">
+        <dc:Bounds x="30" y="190" width="1180" height="180"/>
+      </bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Commit_Start" bpmnElement="Event_Commit_Start"><dc:Bounds x="60" y="90" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Link" bpmnElement="Task_Commit_Link"><dc:Bounds x="150" y="78" width="160" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Register" bpmnElement="Task_Commit_Register"><dc:Bounds x="360" y="78" width="180" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Sign" bpmnElement="Task_Commit_Sign"><dc:Bounds x="590" y="78" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Broadcast" bpmnElement="Task_Commit_Broadcast"><dc:Bounds x="810" y="78" width="150" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Done" bpmnElement="Event_Commit_Done"><dc:Bounds x="1010" y="90" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Resolve" bpmnElement="Task_Commit_Resolve"><dc:Bounds x="150" y="245" width="190" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Verify" bpmnElement="Task_Commit_Verify"><dc:Bounds x="390" y="245" width="170" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Match" bpmnElement="Gateway_Commit_Match" isMarkerVisible="true"><dc:Bounds x="610" y="250" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Accept" bpmnElement="Task_Commit_Accept"><dc:Bounds x="710" y="245" width="150" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_Reject" bpmnElement="Task_Commit_Reject"><dc:Bounds x="610" y="330" width="150" height="40"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Commit_IdxDone" bpmnElement="Event_Commit_IdxDone"><dc:Bounds x="930" y="252" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Commit_1" bpmnElement="Flow_Commit_1"><di:waypoint x="96" y="108"/><di:waypoint x="150" y="108"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_2" bpmnElement="Flow_Commit_2"><di:waypoint x="310" y="108"/><di:waypoint x="360" y="108"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_3" bpmnElement="Flow_Commit_3"><di:waypoint x="540" y="108"/><di:waypoint x="590" y="108"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_4" bpmnElement="Flow_Commit_4"><di:waypoint x="760" y="108"/><di:waypoint x="810" y="108"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_5" bpmnElement="Flow_Commit_5"><di:waypoint x="960" y="108"/><di:waypoint x="1010" y="108"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_6" bpmnElement="Flow_Commit_6"><di:waypoint x="1028" y="126"/><di:waypoint x="245" y="245"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_7" bpmnElement="Flow_Commit_7"><di:waypoint x="340" y="275"/><di:waypoint x="390" y="275"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_8" bpmnElement="Flow_Commit_8"><di:waypoint x="560" y="275"/><di:waypoint x="610" y="275"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_9" bpmnElement="Flow_Commit_9"><di:waypoint x="660" y="275"/><di:waypoint x="710" y="275"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_10" bpmnElement="Flow_Commit_10"><di:waypoint x="635" y="300"/><di:waypoint x="635" y="330"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_11" bpmnElement="Flow_Commit_11"><di:waypoint x="860" y="275"/><di:waypoint x="930" y="270"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Commit_12" bpmnElement="Flow_Commit_12"><di:waypoint x="760" y="350"/><di:waypoint x="948" y="288"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
