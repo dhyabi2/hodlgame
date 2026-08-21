@@ -4,6 +4,7 @@
 // state deltas, op/account/token drill-downs, and the trust dashboard.
 
 import { useEffect, useState } from "react";
+import { verifyInBrowser, type VerifyResult } from "../lib/clientIndexer";
 
 type View =
   | { kind: "feed" }
@@ -155,16 +156,26 @@ export default function Explorer() {
         : view.kind === "results"
         ? { view: "search", q: view.q }
         : { view: view.kind, q: view.q };
-    api(params)
-      .then((j) => {
-        if (!live) return;
-        if (j.error) setErr(j.error);
-        else setData(j);
-      })
-      .catch((e) => live && setErr(e.message))
-      .finally(() => live && setLoading(false));
+    const load = (first: boolean) =>
+      api(params)
+        .then((j) => {
+          if (!live) return;
+          if (j.error) {
+            if (first) setErr(j.error);
+          } else {
+            setData(j);
+            setErr("");
+          }
+        })
+        .catch((e) => live && first && setErr(e.message))
+        .finally(() => live && first && setLoading(false));
+    load(true);
+    // Live refresh on the always-changing views (feed + trust dashboard).
+    const t =
+      view.kind === "feed" || view.kind === "trust" ? setInterval(() => load(false), 5000) : null;
     return () => {
       live = false;
+      if (t) clearInterval(t);
     };
   }, [JSON.stringify(view)]);
 
@@ -409,6 +420,47 @@ function TokenDetailX({ d, go }: { d: any; go: (v: View) => void }) {
   );
 }
 
+function VerifyButton({ serverRoot }: { serverRoot: string }) {
+  const [state, setState] = useState<"idle" | "running" | "done">("idle");
+  const [res, setRes] = useState<VerifyResult | null>(null);
+  async function run() {
+    setState("running");
+    try {
+      setRes(await verifyInBrowser());
+    } catch (e: any) {
+      setRes({ ok: false, localRoot: "", serverRoot, tokens: 0, ops: 0, accounts: 0, error: e.message });
+    }
+    setState("done");
+  }
+  return (
+    <div className="mt-2">
+      <button
+        onClick={run}
+        disabled={state === "running"}
+        className="rounded-xl bg-green-500 px-4 py-2 text-xs font-bold text-black hover:bg-green-400 disabled:opacity-40"
+      >
+        {state === "running" ? "recomputing in your browser…" : "Verify in your browser"}
+      </button>
+      {res && (
+        <div className="mt-2 text-xs">
+          {res.error ? (
+            <p className="text-amber-400">verify error: {res.error}</p>
+          ) : (
+            <>
+              <p className={res.ok ? "text-green-400 font-bold" : "text-red-400 font-bold"}>
+                {res.ok ? "✓ VERIFIED — your browser reproduced the server's root" : "✗ MISMATCH — server root differs from your recomputation"}
+              </p>
+              <Row k="your root"><span className={mono}>{res.localRoot || "—"}</span></Row>
+              <Row k="server root"><span className={mono}>{res.serverRoot || "—"}</span></Row>
+              <Row k="replayed">{res.accounts} accounts · {res.tokens} tokens · {res.ops} ops (no secrets)</Row>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TrustPanel({ d, go }: { d: any; go: (v: View) => void }) {
   return (
     <div className="space-y-3">
@@ -418,6 +470,7 @@ function TrustPanel({ d, go }: { d: any; go: (v: View) => void }) {
         <Row k="tokens / ops">{d.tokens} / {d.events}</Row>
         <Row k="anchor account"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.anchor })}>{short(d.anchor, 12)}</span></Row>
         <Row k="verify yourself"><span className={mono}>npx tsx scripts/verify.ts</span> recomputes this root with zero secrets</Row>
+        <VerifyButton serverRoot={d.stateRoot} />
       </div>
       <div className={card}>
         <h3 className="font-black text-sm mb-2">Proof of reserves — all pools</h3>

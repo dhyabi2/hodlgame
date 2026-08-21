@@ -1,5 +1,14 @@
 # HoldFun Explorer — full item list
 
+> **Status (2026-08-21): COMPLETE.** All A–E items shipped (Scan tab,
+> `server/explorer.ts` + `server/explorerApi.ts` + `/api/explorer`,
+> `components/Explorer.tsx`), plus all four hard problems: H1 delta replay,
+> H2 frontier-keyed incremental cache (`indexer/blockSource.ts`), H3
+> in-browser verification (`web/app/lib/clientIndexer.ts` — the browser
+> re-runs the exact pipeline via `core/blockVerify.ts` and compares roots),
+> H4 payout attribution. Live auto-refresh on feed/trust views.
+
+
 Etherscan-parity mapped onto this stack, plus the trustless-native features a
 contract-chain explorer cannot have. Grouped by page/layer; each item names
 the data source that already exists (or the gap). "HARD" items get a
