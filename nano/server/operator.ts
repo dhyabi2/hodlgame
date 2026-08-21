@@ -28,22 +28,30 @@ export function watched(): string[] {
 // instance has its own isolated memory, a freshly-launched coin whose
 // creator only ONE instance's cache had discovered would vanish and
 // reappear depending on which instance handled a given request, entirely
-// independent of chain state. discoverAccounts() walks the anchor's full
-// verified block history every call — the same deterministic input
-// (core/anchor.ts, core/blockVerify.ts) always produces the same output, so
-// there is nothing correct for a cache to save here; only a way for a
-// serverless instance to disagree with reality. A transient RPC failure
-// degrades a single request to env-only (self-healing on the very next
-// call, per blockSource.ts's nano.to → nano-gpt.com fallback) rather than
-// poisoning every future request on that instance for the next 30s.
+// independent of chain state.
+//
+// Queried TWICE per call — once with the rpc.nano.to API key, once without —
+// and the results are unioned. Root-caused live (2026-08-22): the exact same
+// request, at the exact same moment, returns DIFFERENT counterparty data
+// depending on whether the key is sent — rpc.nano.to's keyed tier lagged
+// behind its own public/keyless tier for a specific account, silently
+// dropping a real, chain-confirmed coin from discovery. Both calls hit only
+// the two endpoints the strict RPC rule (lib/rpc.ts) already permits — this
+// isn't a new endpoint, just refusing to trust either single response as
+// complete. Blocks are self-verifying (ed25519-blake2b, core/blockVerify.ts),
+// so a wrongly-INCLUDED account is impossible; the only real risk was ever a
+// wrongly-EXCLUDED one, which unioning eliminates as long as at least one of
+// the two calls has current data.
 export async function watchedAccounts(): Promise<string[]> {
   const env = watched();
-  try {
-    const d = await discoverAccounts(new NanoRpcSource(loadNanoRpcKey()), ANCHOR_ADDRESS);
-    return [...new Set([...d.users, ...env])].sort();
-  } catch {
-    return env;
-  }
+  const [keyed, keyless] = await Promise.allSettled([
+    discoverAccounts(new NanoRpcSource(loadNanoRpcKey()), ANCHOR_ADDRESS),
+    discoverAccounts(new NanoRpcSource(""), ANCHOR_ADDRESS),
+  ]);
+  const users = new Set(env);
+  if (keyed.status === "fulfilled") for (const u of keyed.value.users) users.add(u);
+  if (keyless.status === "fulfilled") for (const u of keyless.value.users) users.add(u);
+  return [...users].sort();
 }
 
 export async function indexer(): Promise<MultiIndexer> {
