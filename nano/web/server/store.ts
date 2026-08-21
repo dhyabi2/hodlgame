@@ -13,10 +13,15 @@ function dir(): string {
 }
 
 function upstash(): { url: string; token: string } | null {
-  if (process.env.STORE !== "upstash") return null;
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  return url && token ? { url: url.replace(/\/$/, ""), token } : null;
+  // Accept explicit Upstash env vars OR the vars that Vercel's Marketplace
+  // "Upstash for Redis" integration auto-injects (KV_REST_API_*). If REST
+  // credentials are present the store uses them automatically — no STORE flag
+  // needed — so provisioning + connecting the integration is the only step.
+  const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+  if (!url || !token) return null;
+  if (process.env.STORE && process.env.STORE !== "upstash") return null; // explicit opt-out
+  return { url: url.replace(/\/$/, ""), token };
 }
 
 async function upstashGet(key: string, u: { url: string; token: string }): Promise<string | null> {
