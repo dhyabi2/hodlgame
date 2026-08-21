@@ -1156,6 +1156,17 @@ function TokenDetail({
   const [sendAmount, setSendAmount] = useState("");
   const [seedXno, setSeedXno] = useState("");
   const [seedTokens, setSeedTokens] = useState("");
+  const [xnoBal, setXnoBal] = useState("0");
+
+  // Live XNO balance for the trade/seed MAX buttons.
+  useEffect(() => {
+    if (!keys) { setXnoBal("0"); return; }
+    let live = true;
+    const load = () => rpc("account_info", { account: keys.address }).then((i) => live && setXnoBal(i.balance ?? "0")).catch(() => live && setXnoBal("0"));
+    load();
+    const t = setInterval(load, 8000);
+    return () => { live = false; clearInterval(t); };
+  }, [keys?.address, busy]);
 
   const myHolding = keys ? token.topHolders.find((h) => h.account === keys.address) : undefined;
   const isCreator = keys?.address === token.creator;
@@ -1329,7 +1340,7 @@ function TokenDetail({
           </div>
         </div>
         {token.series.length >= 2 ? (
-          <PriceChart series={token.series} trades={token.trades} decimals={token.decimals} symbol={token.symbol} />
+          <PriceChart series={token.series} trades={token.trades} decimals={token.decimals} symbol={tokSym(token)} />
         ) : (
           <div className="h-40 flex items-center justify-center text-neutral-400 text-sm">trades chart the price</div>
         )}
@@ -1355,6 +1366,7 @@ function TokenDetail({
           <TradePanel
             token={token}
             myHolding={myHolding}
+            xnoBal={xnoBal}
             amount={amount}
             setAmount={setAmount}
             slippage={slippage}
@@ -1448,6 +1460,7 @@ function ProgressBar({ token }: { token: Token }) {
 function TradePanel({
   token,
   myHolding,
+  xnoBal,
   amount,
   setAmount,
   slippage,
@@ -1459,6 +1472,7 @@ function TradePanel({
 }: {
   token: Token;
   myHolding: Holder | undefined;
+  xnoBal: string;
   amount: string;
   setAmount: (s: string) => void;
   slippage: string;
@@ -1502,7 +1516,7 @@ function TradePanel({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between text-[11px] text-neutral-500">
-        <span>your balance: {fmtTok(myHolding?.balanceRaw, token.decimals)} {token.symbol}</span>
+        <span>balance: {side === "buy" ? `${fmtXno(xnoBal)} XNO` : `${fmtTok(myHolding?.balanceRaw, token.decimals)} ${tokSym(token)}`}</span>
         <label className="flex items-center gap-1.5">
           <span className="text-neutral-400">slippage %</span>
           <input
@@ -1536,6 +1550,15 @@ function TradePanel({
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
         />
+        {side === "buy" && (
+          <button
+            className="shrink-0 rounded-none bg-neutral-100 px-3 text-xs font-bold text-neutral-700 hover:bg-neutral-200 disabled:opacity-40"
+            disabled={BigInt(xnoBal) <= 0n}
+            onClick={() => { const usable = BigInt(xnoBal) - 10n ** 24n; setAmount(usable > 0n ? fmtXno(usable.toString()) : "0"); }}
+          >
+            Max
+          </button>
+        )}
         {side === "sell" && myHolding && (
           <button
             className="shrink-0 rounded-none bg-neutral-100 px-3 text-xs font-bold text-neutral-700 hover:bg-neutral-200"

@@ -293,7 +293,7 @@ function ChartPanel({ token }: { token: Token }) {
     <div className="flex h-full flex-col">
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-bold text-neutral-700">{token.symbol}/XNO</span>
+          <span className="text-sm font-bold text-neutral-700">{token.symbol || token.tokenId.slice(0, 4).toUpperCase()}/XNO</span>
           <span className="text-xs text-neutral-500">{fmtXno(token.price)} XNO</span>
           <span className={"text-xs " + chColor(token.change24h)}>{pctStr(token.change24h)}</span>
         </div>
