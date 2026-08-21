@@ -84,7 +84,7 @@ export default function PriceChart({
   dataRef.current = { series, trades, decimals };
 
   const [type, setType] = useState<"area" | "candles">("candles");
-  const [tf, setTf] = useState(2); // 1h
+  const [tf, setTf] = useState(0); // 5m
   const [legend, setLegend] = useState<{ o?: number; h?: number; l?: number; c: number } | null>(null);
 
   // (re)build the chart only when the render type or timeframe changes.

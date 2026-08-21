@@ -285,7 +285,7 @@ function WalletBadge({ keys, setKeys, say }: { keys: Keys | null; setKeys: (k: K
 
 // ── candlestick chart ───────────────────────────────────────────────────────
 function ChartPanel({ token }: { token: Token }) {
-  const [tf, setTf] = useState(2); // default 1h
+  const [tf, setTf] = useState(0); // default 5m
   const candles = useMemo(() => buildCandles(token.series, TF[tf].s), [token.series, tf]);
   const vol = useMemo(() => buildVolume(token.trades, TF[tf].s, token.decimals), [token.trades, tf, token.decimals]);
 
