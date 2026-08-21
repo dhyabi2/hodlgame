@@ -4,10 +4,23 @@
 > (fragment links), W5 (ipfs:// images), W7 (anchor discovery), W8
 > (chain-derived pools + verify CLI), W9 (RPC failover + local block
 > verification), W10 (dissolved by W2/W4), plus signed comments, LICENSE,
-> and CI with vendored-drift gate from W6. REMAINING — W1 custody ladder
-> (needs steward selection), W4 residue (epoch snapshot anchors,
-> makeImmutable/setAuthority on-chain anchors), W6 org/second-owner steps
-> (account owner only).
+> and CI with vendored-drift gate from W6. REMAINING — W1 custody
+> (needs steward selection), W4 residue (makeImmutable/setAuthority on-chain
+> anchors), W6 org/second-owner steps (account owner only). Epoch snapshot
+> anchoring + Shamir seed tooling shipped as zero-risk custody prep.
+>
+> **W1 revision (2026-08-21 audit of ~/verifyXNOPrivacyProtocol):** the
+> founder's BlackBird/VELA project already runs a PRODUCTION blake2b-FROST
+> **2-of-3** for Nano pool custody — dealerless DKG, ceremony CLI, verifying
+> cosigners (each recomputes the block hash, checks its own ledger view, and
+> refuses non-whitelisted block shapes), and a journaled single-key→threshold
+> migration (`scripts/migrate_pool.py`, `docs/FROST_MIGRATION.md`). This
+> collapses the ladder: skip Layer 1 (musig-nano 2-of-2) entirely and lift
+> BlackBird's `frost/src/suite.rs` ciphersuite + DKG/sign CLI + coordinator
+> orchestration for the endgame directly. The key adoption beyond threshold
+> signing itself: **cosigner-as-verifier** — HoldFun's second signer must
+> re-derive expected payouts from its own indexer replay before releasing a
+> share (settlement is already deterministic, so this check is cheap).
 
 Goal: HoldFun keeps working if the founder — or any single person, secret, or
 company account — disappears. Each section is one finding from the continuity
