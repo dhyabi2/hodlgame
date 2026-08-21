@@ -21,6 +21,8 @@ const TF = [
   { k: "1d", s: 86400 },
 ] as const;
 
+const UP = "#26a69a";  // soft green
+const DOWN = "#ef5350"; // soft red
 const priceNum = (raw: string) => Number(BigInt(raw)) / 1e30;
 const fmtP = (v: number) => (v === 0 ? "0" : v < 1e-6 ? v.toExponential(2) : v < 1 ? v.toPrecision(4) : v.toFixed(5));
 
@@ -52,7 +54,7 @@ function buildVolume(trades: Trade[], tf: number, dec: number) {
     .map(([time, v]) => ({
       time: time as UTCTimestamp,
       value: v.buy + v.sell,
-      color: "rgba(0,0,0,0.28)",
+      color: v.buy >= v.sell ? "rgba(38,166,154,0.45)" : "rgba(239,83,80,0.45)",
     }));
 }
 
@@ -102,14 +104,15 @@ export default function PriceChart({
     const price =
       type === "candles"
         ? chart.addCandlestickSeries({
-            // monochrome: up = hollow (white body, black border), down = filled black
-            upColor: "#ffffff", downColor: "#000000", borderVisible: true,
-            borderUpColor: "#000000", borderDownColor: "#000000",
-            wickUpColor: "#000000", wickDownColor: "#000000",
+            // soft green/red candles (muted TradingView palette) on the otherwise
+            // monochrome page — pleasant, not harsh.
+            upColor: UP, downColor: DOWN, borderVisible: true,
+            borderUpColor: UP, borderDownColor: DOWN,
+            wickUpColor: UP, wickDownColor: DOWN,
             priceFormat: { type: "custom", formatter: (p: number) => fmtP(p), minMove: 1e-18 },
           })
         : chart.addAreaSeries({
-            lineColor: "#000000", topColor: "rgba(0,0,0,0.10)", bottomColor: "rgba(0,0,0,0)", lineWidth: 2,
+            lineColor: UP, topColor: "rgba(38,166,154,0.14)", bottomColor: "rgba(38,166,154,0)", lineWidth: 2,
             priceFormat: { type: "custom", formatter: (p: number) => fmtP(p), minMove: 1e-18 },
           });
     priceRef.current = price as any;
@@ -181,10 +184,10 @@ export default function PriceChart({
         <div className="pointer-events-none absolute left-2 top-10 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] font-mono tabular-nums">
           {legend.o != null ? (
             <>
-              <span className="text-neutral-500">O <span className={up ? "text-black" : "text-black"}>{fmtP(legend.o)}</span></span>
-              <span className="text-neutral-500">H <span className={up ? "text-black" : "text-black"}>{fmtP(legend.h!)}</span></span>
-              <span className="text-neutral-500">L <span className={up ? "text-black" : "text-black"}>{fmtP(legend.l!)}</span></span>
-              <span className="text-neutral-500">C <span className={up ? "text-black" : "text-black"}>{fmtP(legend.c)}</span></span>
+              <span className="text-neutral-500">O <span style={{ color: up ? UP : DOWN }}>{fmtP(legend.o)}</span></span>
+              <span className="text-neutral-500">H <span style={{ color: up ? UP : DOWN }}>{fmtP(legend.h!)}</span></span>
+              <span className="text-neutral-500">L <span style={{ color: up ? UP : DOWN }}>{fmtP(legend.l!)}</span></span>
+              <span className="text-neutral-500">C <span style={{ color: up ? UP : DOWN }}>{fmtP(legend.c)}</span></span>
             </>
           ) : (
             <span className="text-neutral-500">{symbol || "price"} <span className="text-black">{fmtP(legend.c)} XNO</span></span>

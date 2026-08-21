@@ -400,7 +400,7 @@ function CandleCanvas({ candles, vol }: { candles: Candle[]; vol: Map<number, { 
     candles.forEach((c, i) => {
       const x = padL + i * cw + cw / 2;
       const up = c.c >= c.o;
-      const col = up ? "#000000" : "#888888";
+      const col = up ? "#26a69a" : "#ef5350";
       // wick
       ctx.strokeStyle = col; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(x, yOf(c.h)); ctx.lineTo(x, yOf(c.l)); ctx.stroke();
@@ -414,7 +414,7 @@ function CandleCanvas({ candles, vol }: { candles: Candle[]; vol: Map<number, { 
       if (v && vMax > 0) {
         const vv = (v.buy + v.sell) / vMax;
         const bh2 = vv * (volH - 4);
-        ctx.fillStyle = v.buy >= v.sell ? "rgba(0,0,0,0.28)" : "rgba(0,0,0,0.16)";
+        ctx.fillStyle = v.buy >= v.sell ? "rgba(38,166,154,0.4)" : "rgba(239,83,80,0.4)";
         ctx.fillRect(x - bodyW / 2, h - bh2, bodyW, bh2);
       }
     });
@@ -422,11 +422,11 @@ function CandleCanvas({ candles, vol }: { candles: Candle[]; vol: Map<number, { 
     // last price line
     const last = candles[n - 1];
     const ly = yOf(last.c);
-    ctx.strokeStyle = last.c >= last.o ? "#000000" : "#888888";
+    ctx.strokeStyle = last.c >= last.o ? "#26a69a" : "#ef5350";
     ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(padL, ly); ctx.lineTo(padL + plotW, ly); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = last.c >= last.o ? "#000000" : "#888888";
+    ctx.fillStyle = last.c >= last.o ? "#26a69a" : "#ef5350";
     ctx.fillRect(padL + plotW + 1, ly - 7, padR - 2, 14);
     ctx.fillStyle = "#fff"; ctx.font = "9px ui-monospace, monospace";
     ctx.fillText(fmtAxis(last.c), padL + plotW + 4, ly + 3);
