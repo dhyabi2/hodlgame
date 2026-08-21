@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import * as nanocurrency from "nanocurrency";
-import { replayWithDeltas, classifyLink, attributePoolSends } from "./explorer";
+import { replayWithDeltas, classifyLink, attributePoolSends, annotateLink } from "./explorer";
 import type { IndexedEvent } from "../indexer/multiIndexer";
 import type { NanoBlock } from "../indexer/blockSource";
 import type { SellPayout } from "./analytics";
@@ -111,6 +111,23 @@ function ev(op: any, sender: string, height: bigint, hash: string): IndexedEvent
     [["s1", "100"], ["s2", "20"]],
     "partial send consumes queue in order"
   );
+}
+
+// ── annotateLink (raw hexdump view) ─────────────────────────────────────────
+{
+
+  const buy = annotateLink(encodeOpLink(TOKEN, { kind: "buy", xno: 0n, minTokens: 5n }));
+  assert.equal(buy.kind, "compact-op");
+  assert.equal(buy.segments[0].value, "buy", "opcode labeled");
+  assert.equal(buy.segments.reduce((a, s) => a + s.bytes.length, 0), 64, "segments cover all 32 bytes");
+
+  const launch = annotateLink(encodeOpLink(TOKEN, { kind: "launch", supply: 1n, name: "", symbol: "", decimals: 6, image: "" }));
+  assert.ok(launch.segments.some((s) => s.label === "decimals+1"), "launch shows decimals byte");
+
+  const [fa] = encodeFragLinks(TOKEN, { kind: "sell", tokens: 1n, minXno: 1n });
+  assert.equal(annotateLink(fa).kind, "fragment-a");
+  assert.equal(annotateLink("9".repeat(64)).kind, "send");
+  assert.equal(annotateLink("zz").kind, "unknown");
 }
 
 console.log("✅ explorer engine tests passed");

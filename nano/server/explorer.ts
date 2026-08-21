@@ -154,6 +154,45 @@ export function classifyLink(
   return { kind: "send" };
 }
 
+// ── Annotated link hexdump (explorer raw view) ──────────────────────────────
+
+export interface LinkSegment {
+  bytes: string; // hex slice
+  label: string;
+  value?: string;
+}
+
+/** Break a 64-hex block link into labeled byte segments for the raw-data view.
+ * Mirrors the codecs so the reader sees exactly what each byte means. */
+export function annotateLink(link: string): { kind: string; segments: LinkSegment[] } {
+  const l = (link ?? "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(l)) return { kind: "unknown", segments: [{ bytes: l, label: "not a 32-byte link" }] };
+  const b0 = parseInt(l.slice(0, 2), 16);
+  const seg = (a: number, b: number, label: string, value?: string): LinkSegment => ({ bytes: l.slice(a * 2, b * 2), label, value });
+
+  if (isFragA(l)) {
+    const code = b0 & 0x0f;
+    return {
+      kind: "fragment-a",
+      segments: [seg(0, 1, "marker+opcode", code === OP_CODE.transfer ? "0xE2 transfer" : "0xE4 sell"), seg(1, 17, "tokenId (16B)"), seg(17, 32, "body[0..15)")],
+    };
+  }
+  if (isCommitLink(l)) return { kind: "commit-op", segments: [seg(0, 1, "commit marker", "0xFF"), seg(1, 32, "blake2b(tokenId‖op)[0..30]")] };
+  if (isImmutableAnchor(l)) return { kind: "meta-anchor-immutable", segments: [seg(0, 1, "marker", "0xEE"), seg(1, 17, "tokenId (16B)"), seg(17, 32, "zero padding")] };
+  if (isSetAuthorityAnchorA(l)) return { kind: "meta-anchor-set-authority", segments: [seg(0, 1, "marker", "0xEA"), seg(1, 17, "tokenId (16B)"), seg(17, 32, "newAuthorityPub[0..15)")] };
+  try {
+    const d = decodeOpLink(l);
+    const amtLabel = d.op.kind === "launch" ? "supply" : d.op.kind === "buy" ? "minTokens" : d.op.kind === "sell" ? "tokens" : "amount";
+    const segs: LinkSegment[] = [seg(0, 1, "opcode", d.op.kind)];
+    if (d.op.kind === "launch") segs.push(seg(1, 2, "decimals+1", String((d.op as any).decimals)), seg(2, 17, "zero (tokenId from hash)"));
+    else segs.push(seg(1, 17, "tokenId (16B)", d.tokenId.slice(0, 12) + "…"));
+    segs.push(seg(17, 32, `${amtLabel} (15B)`));
+    return { kind: "compact-op", segments: segs };
+  } catch {
+    return { kind: "send", segments: [seg(0, 32, "destination pubkey (32B)")] };
+  }
+}
+
 // ── H4: payout attribution (which sells/refunds a pool send covered) ────────
 
 export interface PayoutCoverage {

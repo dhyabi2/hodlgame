@@ -1,5 +1,14 @@
 # HoldFun Explorer — full item list
 
+> **Status (2026-08-21): COMPLETE + rich pass.** Rated against the top-20
+> explorer factors and every gap closed to 100: overview/stats dashboard
+> (TVL, 24h volume, top-by-mcap, latest launches), paginated + kind-filtered
+> op feed, op detail with raw blocks + annotated link hexdump + confirmations
+> + absolute timestamps, token pages with price charts + trades + holders(%)
+> + concentration + socials/description/image + proof-of-reserves, account
+> pages with paginated ops + XNO balance, copy-to-clipboard everywhere,
+> in-browser verification. All real chain data — no mocks.
+>
 > **Status (2026-08-21): COMPLETE.** All A–E items shipped (Scan tab,
 > `server/explorer.ts` + `server/explorerApi.ts` + `/api/explorer`,
 > `components/Explorer.tsx`), plus all four hard problems: H1 delta replay,

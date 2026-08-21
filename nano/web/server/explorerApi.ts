@@ -1,11 +1,12 @@
 // Explorer API assembly: joins the raw market internals (events, indexer,
-// payouts) with the pure explorer engine (deltas, classification, payout
-// attribution) into the JSON each explorer view needs. Everything re-derives
-// from chain-derived data on request — no explorer-owned storage.
+// analytics, payouts) with the pure explorer engine (deltas, classification,
+// payout attribution, link annotation) into the JSON each explorer view needs.
+// Everything re-derives from chain-derived data on request — no explorer-owned
+// storage, no mock data.
 
 import * as nanocurrency from "nanocurrency";
 import { raw } from "./market";
-import { replayWithDeltas, classifyLink, attributePoolSends, type OpDelta } from "./explorer";
+import { replayWithDeltas, classifyLink, attributePoolSends, annotateLink, type OpDelta } from "./explorer";
 import { computeRefunds, creditedBuys } from "./reconcile";
 import { readPoolDepositsFromChain } from "./sweep";
 import { poolOutgoingByRecipient, entitlementsFor, netObligations } from "./settled";
@@ -16,27 +17,95 @@ import { NanoRpcSource } from "../indexer/blockSource";
 import { loadNanoRpcKey, nanoRpc } from "../lib/rpc";
 import { isTokenId, isNanoAddress } from "./validate";
 
-
 const pubToAddress = (pub: string) => nanocurrency.deriveAddress(pub.toLowerCase(), { useNanoPrefix: true });
 
+type Raw = Awaited<ReturnType<typeof raw>>;
+
 function meta(regRow: any) {
-  return { name: regRow?.name ?? "", symbol: regRow?.symbol ?? "", image: regRow?.image ?? "" };
+  return {
+    name: regRow?.name ?? "",
+    symbol: regRow?.symbol ?? "",
+    image: regRow?.image ?? "",
+    description: regRow?.description ?? "",
+    website: regRow?.website ?? "",
+    twitter: regRow?.twitter ?? "",
+    telegram: regRow?.telegram ?? "",
+  };
 }
 
-function enrich(deltas: OpDelta[], m: Awaited<ReturnType<typeof raw>>) {
+function enrich(deltas: OpDelta[], m: Raw) {
   const edges = m.idx.getDepositEdges();
-  return deltas.map((d) => ({
-    ...d,
-    ...meta(m.meta.get(d.tokenId)),
-    depositEdge: edges.get(d.hash) ?? null,
-  }));
+  return deltas.map((d) => {
+    const r = m.meta.get(d.tokenId);
+    return { ...d, name: r?.name ?? "", symbol: r?.symbol ?? "", depositEdge: edges.get(d.hash) ?? null };
+  });
 }
 
-export async function feed(limit = 100) {
+/** % price change over `secondsAgo`, from the analytics series. */
+function changePct(series: { time: number; priceRaw: string }[] | undefined, secondsAgo: number): number | null {
+  if (!series || series.length < 2) return null;
+  const last = series[series.length - 1];
+  const target = last.time - secondsAgo;
+  let base = series[0];
+  for (const p of series) if (p.time >= target) { base = p; break; }
+  const cur = BigInt(last.priceRaw), prev = BigInt(base.priceRaw);
+  if (prev === 0n) return null;
+  const pct = Number((cur - prev) * 10_000n / prev) / 100;
+  return Number.isFinite(pct) ? pct : null;
+}
+
+// ── Overview / stats dashboard ──────────────────────────────────────────────
+
+export async function stats() {
   const m = await raw();
   const { deltas } = replayWithDeltas(m.events);
-  return { items: enrich(deltas, m).reverse().slice(0, limit), total: deltas.length };
+  let tvl = 0n, vol24 = 0n, holders = 0, invalid = 0;
+  const now = Math.floor(Date.now() / 1000);
+  const tokens: any[] = [];
+  for (const [tokenId, s] of m.state) {
+    const a = m.byToken.get(tokenId);
+    tvl += s.poolXno;
+    holders += s.balances.size;
+    if (a) {
+      for (const t of a.trades) if (now - t.time <= 86400) vol24 += BigInt(t.amountRaw);
+      tokens.push({
+        tokenId, ...meta(m.meta.get(tokenId)),
+        priceRaw: a.priceRaw, marketCapRaw: a.marketCapRaw, holders: s.balances.size,
+        change24h: changePct(a.series, 86400), createdAt: a.launchTime,
+      });
+    }
+  }
+  for (const d of deltas) if (!d.valid) invalid++;
+  const topByMcap = [...tokens].sort((x, y) => (BigInt(y.marketCapRaw) > BigInt(x.marketCapRaw) ? 1 : -1)).slice(0, 10);
+  const latest = [...tokens].sort((x, y) => y.createdAt - x.createdAt).slice(0, 10);
+  return {
+    totalTokens: m.state.size,
+    totalOps: deltas.length,
+    invalidOps: invalid,
+    totalHolders: holders,
+    tvlRaw: tvl.toString(),
+    volume24hRaw: vol24.toString(),
+    stateRoot: stateRoot(m.state),
+    topByMcap,
+    latest,
+  };
 }
+
+// ── Op feed (paginated + filterable) ────────────────────────────────────────
+
+export async function feed(opts: { cursor?: number; limit?: number; kind?: string; token?: string } = {}) {
+  const m = await raw();
+  const { deltas } = replayWithDeltas(m.events);
+  let items = enrich(deltas, m).reverse(); // newest first
+  if (opts.kind) items = items.filter((d) => d.kind === opts.kind);
+  if (opts.token) items = items.filter((d) => d.tokenId === opts.token!.toLowerCase());
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+  const cursor = Math.max(opts.cursor ?? 0, 0);
+  const page = items.slice(cursor, cursor + limit);
+  return { items: page, total: items.length, cursor, nextCursor: cursor + limit < items.length ? cursor + limit : null };
+}
+
+// ── Op detail (deltas + edges + payout story + raw + confirmations) ─────────
 
 export async function opDetail(hash: string) {
   const m = await raw();
@@ -45,33 +114,45 @@ export async function opDetail(hash: string) {
   const item = deltas.find((d) => d.hash.toLowerCase() === h || d.carriers?.some((c) => c.toLowerCase() === h));
   if (!item) return null;
   const [enriched] = enrich([item], m);
+  const key = loadNanoRpcKey();
+
+  // Raw block(s) + confirmation + absolute time from the chain.
+  const hashes = item.carriers ?? [item.hash];
+  const blocks: any[] = [];
+  let confirmed = false, timestamp: number | undefined;
+  for (const bh of hashes) {
+    const info = await nanoRpc(key, { action: "block_info", hash: bh, json_block: true }).catch(() => null);
+    if (info?.contents) {
+      confirmed = confirmed || info.confirmed === "true" || info.confirmed === true;
+      if (info.local_timestamp) timestamp = Number(info.local_timestamp);
+      blocks.push({ hash: bh, account: info.block_account, link: info.contents.link, representative: info.contents.representative, balance: info.contents.balance, previous: info.contents.previous, signature: info.contents.signature, annotation: annotateLink(info.contents.link ?? "") });
+    }
+  }
 
   // Sell ops: attribute the pool payout send(s) that covered this sell.
   let coverage = null;
   const poolPub = m.idx.getChainPools().get(item.tokenId);
   if (item.kind === "sell" && item.valid && poolPub) {
     try {
-      const src = new NanoRpcSource(loadNanoRpcKey());
+      const src = new NanoRpcSource(key);
       const poolAddress = pubToAddress(poolPub);
       const poolBlocks = await src.listBlocks(poolAddress);
-      const poolReceived = await readPoolDepositsFromChain(
-        loadNanoRpcKey(),
-        { address: poolAddress, publicKey: poolPub, secretKey: "" } as any,
-        poolBlocks
-      );
+      const poolReceived = await readPoolDepositsFromChain(key, { address: poolAddress, publicKey: poolPub, secretKey: "" } as any, poolBlocks);
       const credits = creditedBuys(m.events).get(item.tokenId) ?? new Map();
       const refunds = computeRefunds(poolReceived, credits);
       const sells = m.sellPayouts.filter((p) => p.tokenId === item.tokenId);
       const all = attributePoolSends(poolBlocks, sells, refunds, pubToAddress);
       coverage = all.filter((c) => c.covers.some((x) => x.hash?.toLowerCase() === item.hash.toLowerCase()));
     } catch {
-      coverage = null; // RPC hiccup → story panel degrades, page still renders
+      coverage = null;
     }
   }
-  return { ...enriched, poolPub: poolPub ?? null, payoutCoverage: coverage };
+  return { ...enriched, timestamp: timestamp ?? enriched.timestamp, confirmed, poolPub: poolPub ?? null, payoutCoverage: coverage, blocks };
 }
 
-export async function accountView(address: string) {
+// ── Account (holdings + labels + ops + XNO flows, paginated) ─────────────────
+
+export async function accountView(address: string, cursor = 0, limit = 50) {
   const m = await raw();
   const { deltas } = replayWithDeltas(m.events);
   const holdings: any[] = [];
@@ -82,12 +163,14 @@ export async function accountView(address: string) {
     const stk = s.staked.get(address) ?? 0n;
     const bank = s.banked.get(address) ?? 0n;
     if (bal > 0n || stk > 0n || bank > 0n) {
-      holdings.push({ tokenId, ...meta(m.meta.get(tokenId)), balance: bal.toString(), staked: stk.toString(), banked: bank.toString(), decimals: m.meta.get(tokenId)?.decimals ?? 6 });
+      const a = m.byToken.get(tokenId);
+      holdings.push({ tokenId, ...meta(m.meta.get(tokenId)), balance: bal.toString(), staked: stk.toString(), banked: bank.toString(), decimals: s.decimals, priceRaw: a?.priceRaw ?? "0" });
     }
     if (s.creator === address) createdTokens.push(tokenId);
     if (m.metaAuthority.get(tokenId)?.authority === address) authorityOf.push(tokenId);
   }
-  const ops = enrich(deltas.filter((d) => d.sender === address), m).reverse().slice(0, 100);
+  const allOps = enrich(deltas.filter((d) => d.sender === address), m).reverse();
+  const page = allOps.slice(cursor, cursor + limit);
   const labels: string[] = [];
   if (address === ANCHOR_ADDRESS) labels.push("protocol anchor");
   for (const [tokenId, pub] of m.idx.getChainPools()) {
@@ -102,58 +185,88 @@ export async function accountView(address: string) {
     holdings,
     createdTokens,
     authorityOf,
-    ops,
+    ops: page,
+    opsTotal: allOps.length,
+    cursor,
+    nextCursor: cursor + limit < allOps.length ? cursor + limit : null,
   };
 }
 
-export async function tokenExplorer(tokenId: string) {
+// ── Token page (full: analytics, socials, trades, series, holders, reserves) ─
+
+export async function tokenExplorer(tokenId: string, holderCursor = 0) {
   const m = await raw();
   const s = m.state.get(tokenId);
   if (!s) return null;
   const { deltas } = replayWithDeltas(m.events);
-  const holders = [...s.balances.entries()]
-    .sort((a, b) => (b[1] > a[1] ? 1 : -1))
-    .map(([account, bal]) => ({ account, balance: bal.toString() }));
+  const a = m.byToken.get(tokenId);
+  const supply = s.supply;
+  const allHolders = [...s.balances.entries()].sort((x, y) => (y[1] > x[1] ? 1 : -1));
+  const holders = allHolders.slice(holderCursor, holderCursor + 50).map(([account, bal]) => ({
+    account, balance: bal.toString(), pct: supply > 0n ? Number((bal * 10_000n) / supply) / 100 : 0,
+  }));
+  // Concentration: top-10 share of circulating (balances).
+  const circ = [...s.balances.values()].reduce((x, y) => x + y, 0n);
+  const top10 = allHolders.slice(0, 10).reduce((x, [, y]) => x + y, 0n);
+  const top10Pct = circ > 0n ? Number((top10 * 10_000n) / circ) / 100 : 0;
+
   const poolPub = m.idx.getChainPools().get(tokenId) ?? null;
   let reserves = null;
   if (poolPub) {
-    const info = await nanoRpc(loadNanoRpcKey(), { action: "account_info", account: pubToAddress(poolPub) }).catch(() => null);
-    const pendRaw = await nanoRpc(loadNanoRpcKey(), { action: "pending", account: pubToAddress(poolPub), count: 100, threshold: "1" }).catch(() => null);
+    const key = loadNanoRpcKey();
+    const addr = pubToAddress(poolPub);
+    const info = await nanoRpc(key, { action: "account_info", account: addr }).catch(() => null);
+    const pendRaw = await nanoRpc(key, { action: "pending", account: addr, count: 100, threshold: "1" }).catch(() => null);
     reserves = {
-      poolAddress: pubToAddress(poolPub),
+      poolAddress: addr,
       indexedPoolXno: s.poolXno.toString(),
       onchainBalance: info?.balance ?? "0",
       pendingCount: Array.isArray(pendRaw?.blocks) ? pendRaw.blocks.length : Object.keys(pendRaw?.blocks ?? {}).length,
+      backed: info ? BigInt(info.balance) >= s.poolXno : null,
     };
   }
   const launch = deltas.find((d) => d.tokenId === tokenId && d.kind === "launch");
-  const initialSupply = BigInt(launch?.fields?.supply?.after ?? s.supply.toString());
+  const initialSupply = BigInt(launch?.fields?.supply?.after ?? supply.toString());
   return {
     tokenId,
     ...meta(m.meta.get(tokenId)),
-    decimals: m.meta.get(tokenId)?.decimals ?? 6,
+    decimals: s.decimals,
     creator: s.creator,
     launched: s.launched,
     launchHash: launch?.hash ?? null,
-    supply: s.supply.toString(),
+    createdAt: a?.launchTime ?? launch?.timestamp ?? null,
+    supply: supply.toString(),
     treasury: s.treasury.toString(),
     poolTokens: s.poolTokens.toString(),
     totalStaked: s.totalStaked.toString(),
     rebateVault: s.rebateVault.toString(),
-    burned: (initialSupply - s.supply).toString(),
+    burned: (initialSupply - supply).toString(),
+    priceRaw: a?.priceRaw ?? "0",
+    marketCapRaw: a?.marketCapRaw ?? "0",
+    change1h: changePct(a?.series, 3600),
+    change24h: changePct(a?.series, 86400),
+    buyVolumeRaw: a?.buyVolumeRaw ?? "0",
+    sellVolumeRaw: a?.sellVolumeRaw ?? "0",
+    series: a?.series ?? [],
+    trades: (a?.trades ?? []).slice(-50).reverse(),
     authority: m.metaAuthority.get(tokenId) ?? null,
     holders,
+    holdersTotal: allHolders.length,
+    holderCursor,
+    holderNextCursor: holderCursor + 50 < allHolders.length ? holderCursor + 50 : null,
+    concentration: { top10Pct, holderCount: allHolders.length },
     reserves,
-    ops: enrich(deltas.filter((d) => d.tokenId === tokenId), m).reverse().slice(0, 200),
+    ops: enrich(deltas.filter((d) => d.tokenId === tokenId), m).reverse().slice(0, 100),
   };
 }
+
+// ── Trust dashboard (proof of reserves) ─────────────────────────────────────
 
 export async function trustDashboard() {
   const m = await raw();
   const key = loadNanoRpcKey();
   const src = new NanoRpcSource(key);
   const root = stateRoot(m.state);
-
   const pools: any[] = [];
   const credits = creditedBuys(m.events);
   for (const [tokenId, pub] of m.idx.getChainPools()) {
@@ -168,37 +281,20 @@ export async function trustDashboard() {
       const refunds = computeRefunds(poolReceived, credits.get(tokenId) ?? new Map());
       const entitled = entitlementsFor(tokenId, m.sellPayouts, refunds);
       const obligations = netObligations(entitled, poolOutgoingByRecipient(poolBlocks));
-      outstanding = obligations.reduce((a, o) => a + o.amountRaw, 0n).toString();
+      outstanding = obligations.reduce((x, o) => x + o.amountRaw, 0n).toString();
     } catch {
       outstanding = "rpc-error";
     }
-    pools.push({
-      tokenId,
-      symbol: m.meta.get(tokenId)?.symbol ?? "",
-      poolAddress: address,
-      indexedPoolXno: s.poolXno.toString(),
-      onchainBalance: info?.balance ?? "0",
-      outstandingObligations: outstanding,
-    });
+    pools.push({ tokenId, symbol: m.meta.get(tokenId)?.symbol ?? "", poolAddress: address, indexedPoolXno: s.poolXno.toString(), onchainBalance: info?.balance ?? "0", outstandingObligations: outstanding });
   }
-
   const snap = await exportSnapshot();
   let snapshotAnchored = false;
-  try {
-    snapshotAnchored = isAnchored(await src.listBlocks(ANCHOR_ADDRESS), snap.hash);
-  } catch {}
-
-  return {
-    stateRoot: root,
-    tokens: m.state.size,
-    events: m.events.length,
-    pools,
-    snapshot: { hash: snap.hash, bytes: snap.json.length, anchored: snapshotAnchored },
-    anchor: ANCHOR_ADDRESS,
-  };
+  try { snapshotAnchored = isAnchored(await src.listBlocks(ANCHOR_ADDRESS), snap.hash); } catch {}
+  return { stateRoot: root, tokens: m.state.size, events: m.events.length, pools, snapshot: { hash: snap.hash, bytes: snap.json.length, anchored: snapshotAnchored }, anchor: ANCHOR_ADDRESS };
 }
 
-/** E1 unified search: route a query to the right view. */
+// ── Unified search ──────────────────────────────────────────────────────────
+
 export async function search(q: string) {
   const query = q.trim();
   if (isTokenId(query)) {
@@ -209,29 +305,23 @@ export async function search(q: string) {
   if (/^[0-9a-fA-F]{64}$/.test(query)) {
     const op = await opDetail(query);
     if (op) return { type: "op", data: op };
-    // Not one of ours — classify the raw block for context.
     const info = await nanoRpc(loadNanoRpcKey(), { action: "block_info", hash: query, json_block: true }).catch(() => null);
     if (info?.contents) {
       const m = await raw();
       const poolByPub = new Map([...m.idx.getChainPools()].map(([t, p]) => [p, t]));
-      const cls = classifyLink(info.contents.link ?? "", {
-        amount: info.amount,
-        representative: info.contents.representative,
-        poolByPub,
-      });
-      return { type: "block", data: { hash: query, account: info.block_account, amount: info.amount, subtype: (info as any).subtype, classification: cls } };
+      const cls = classifyLink(info.contents.link ?? "", { amount: info.amount, representative: info.contents.representative, poolByPub });
+      return { type: "block", data: { hash: query, account: info.block_account, amount: info.amount, subtype: (info as any).subtype, confirmed: info.confirmed === "true" || info.confirmed === true, classification: cls, annotation: annotateLink(info.contents.link ?? "") } };
     }
     return { type: "not-found", data: null };
   }
-  // Name/symbol match. (Cast: the isNanoAddress guard above negative-narrows
-  // an already-string value to `never` on the else path.)
   const m = await raw();
   const ql = (query as string).toLowerCase();
   const matches: any[] = [];
   for (const [tokenId, s] of m.state) {
     const row = m.meta.get(tokenId);
     if ((row?.name ?? "").toLowerCase().includes(ql) || (row?.symbol ?? "").toLowerCase().includes(ql)) {
-      matches.push({ tokenId, ...meta(row), supply: s.supply.toString() });
+      const a = m.byToken.get(tokenId);
+      matches.push({ tokenId, ...meta(row), supply: s.supply.toString(), priceRaw: a?.priceRaw ?? "0", marketCapRaw: a?.marketCapRaw ?? "0", holders: s.balances.size });
     }
   }
   return { type: "tokens", data: matches };
