@@ -9,6 +9,7 @@ import {
   type ISeriesApi,
   type UTCTimestamp,
 } from "lightweight-charts";
+import { fmtNum } from "../lib/trade";
 
 interface Point { time: number; priceRaw: string }
 interface Trade { kind: "buy" | "sell"; amountRaw: string; priceRaw: string; time: number }
@@ -24,7 +25,7 @@ const TF = [
 const UP = "#26a69a";  // soft green
 const DOWN = "#ef5350"; // soft red
 const priceNum = (raw: string) => Number(BigInt(raw)) / 1e30;
-const fmtP = (v: number) => (v === 0 ? "0" : v < 1e-6 ? v.toExponential(2) : v < 1 ? v.toPrecision(4) : v.toFixed(5));
+const fmtP = (v: number) => fmtNum(v, 4);
 
 interface Candle { time: UTCTimestamp; open: number; high: number; low: number; close: number }
 
@@ -87,9 +88,18 @@ export default function PriceChart({
   const [tf, setTf] = useState(0); // 5m
   const [legend, setLegend] = useState<{ o?: number; h?: number; l?: number; c: number } | null>(null);
 
+  // Token prices can be astronomically small (1e-14 XNO). lightweight-charts'
+  // tick calculator breaks on such magnitudes (minMove 1e-18 → base 1e18 loses
+  // float precision → "unexpected base" throw → blank chart). So the chart is
+  // fed SCALED values (~1..10) and every label divides the scale back out.
+  const scaleRef = useRef(1);
+
   // (re)build the chart only when the render type or timeframe changes.
   useEffect(() => {
     if (!wrap.current) return;
+    const prices = dataRef.current.series.map((p) => priceNum(p.priceRaw)).filter((v) => Number.isFinite(v) && v > 0);
+    const maxP = prices.length ? Math.max(...prices) : 0;
+    scaleRef.current = maxP > 0 && maxP < 0.001 ? 10 ** Math.ceil(-Math.log10(maxP)) : 1;
     const chart = createChart(wrap.current, {
       width: wrap.current.clientWidth,
       height: 320,
@@ -109,11 +119,11 @@ export default function PriceChart({
             upColor: UP, downColor: DOWN, borderVisible: true,
             borderUpColor: UP, borderDownColor: DOWN,
             wickUpColor: UP, wickDownColor: DOWN,
-            priceFormat: { type: "custom", formatter: (p: number) => fmtP(p), minMove: 1e-18 },
+            priceFormat: { type: "custom", formatter: (p: number) => fmtP(p / scaleRef.current), minMove: 1e-8 },
           })
         : chart.addAreaSeries({
             lineColor: UP, topColor: "rgba(38,166,154,0.14)", bottomColor: "rgba(38,166,154,0)", lineWidth: 2,
-            priceFormat: { type: "custom", formatter: (p: number) => fmtP(p), minMove: 1e-18 },
+            priceFormat: { type: "custom", formatter: (p: number) => fmtP(p / scaleRef.current), minMove: 1e-8 },
           });
     priceRef.current = price as any;
 
@@ -125,9 +135,10 @@ export default function PriceChart({
 
     chart.subscribeCrosshairMove((param) => {
       const d = param.seriesData.get(price as any) as any;
+      const s = scaleRef.current;
       if (!d) { setLegend(null); return; }
-      if ("close" in d) setLegend({ o: d.open, h: d.high, l: d.low, c: d.close });
-      else setLegend({ c: d.value });
+      if ("close" in d) setLegend({ o: d.open / s, h: d.high / s, l: d.low / s, c: d.close / s });
+      else setLegend({ c: d.value / s });
     });
 
     const onResize = () => wrap.current && chart.applyOptions({ width: wrap.current.clientWidth });
@@ -144,10 +155,12 @@ export default function PriceChart({
     const p = priceRef.current, v = volRef.current;
     if (!p) return;
     const secs = TF[tf].s;
-    if (type === "candles") (p as ISeriesApi<"Candlestick">).setData(buildCandles(series, secs));
-    else (p as ISeriesApi<"Area">).setData(
-      buildCandles(series, secs).map((c) => ({ time: c.time, value: c.close }))
-    );
+    const s = scaleRef.current;
+    const scaled = buildCandles(series, secs).map((c) => ({
+      time: c.time, open: c.open * s, high: c.high * s, low: c.low * s, close: c.close * s,
+    }));
+    if (type === "candles") (p as ISeriesApi<"Candlestick">).setData(scaled);
+    else (p as ISeriesApi<"Area">).setData(scaled.map((c) => ({ time: c.time, value: c.close })));
     if (v) v.setData(buildVolume(trades, secs, decimals));
     const cands = buildCandles(series, secs);
     const last = cands[cands.length - 1];

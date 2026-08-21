@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from "react";
 import { verifyInBrowser, type VerifyResult } from "../lib/clientIndexer";
+import { fmtNum } from "../lib/trade";
 
 type View =
   | { kind: "stats" }
@@ -38,8 +39,7 @@ const fmtXno = (raw?: string) => {
   if (!raw || raw === "0") return "0";
   const neg = raw.startsWith("-");
   const n = Number(BigInt(neg ? raw.slice(1) : raw)) / 1e30;
-  const s = n < 0.000001 && n > 0 ? n.toExponential(2) : n.toLocaleString(undefined, { maximumFractionDigits: 8 });
-  return (neg ? "-" : "") + s;
+  return (neg ? "-" : "") + fmtNum(n);
 };
 const fmtTok = (raw: string, dec: number) => {
   const neg = raw.startsWith("-");

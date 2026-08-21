@@ -17,7 +17,7 @@ import Explorer from "./components/Explorer";
 import { loadWallet, saveWallet, removeWallet, encryptSeed, decryptSeed } from "./lib/wallet";
 import { useNanoWebsocket } from "./lib/nano-ws";
 import { QRCodeSVG } from "qrcode.react";
-import { toRaw, clampSlippage, isNanoAddr } from "./lib/trade";
+import { toRaw, clampSlippage, isNanoAddr, fmtNum, fmtXno, fmtXnoPlain } from "./lib/trade";
 
 const PriceChart = dynamic(() => import("./components/PriceChart"), { ssr: false });
 
@@ -174,14 +174,6 @@ const fmtTok = (raw: string | undefined, dec: number) => {
   const whole = n / d;
   const frac = (n % d).toString().padStart(dec, "0").replace(/0+$/, "");
   return frac ? `${whole}.${frac.slice(0, 6)}` : whole.toString();
-};
-
-const fmtXno = (raw: string | undefined) => {
-  if (!raw) return "0";
-  const n = Number(BigInt(raw)) / 1e30;
-  if (!Number.isFinite(n) || n === 0) return "0";
-  if (n < 0.000001) return n.toExponential(3);
-  return n.toFixed(9).replace(/0+$/, "").replace(/\.$/, "");
 };
 
 function timeAgo(ts: number) {
@@ -1079,7 +1071,7 @@ function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id:
                 {pctStr(t.change24h)}
               </span>
               <span className="truncate text-neutral-600">{fmtXno(t.price)} XNO</span>
-              <span className="shrink-0">{t.holders} hodl</span>
+              <span className="shrink-0">{t.holders} holder{t.holders === 1 ? "" : "s"} · {timeAgo(t.createdAt)}</span>
             </div>
           </button>
         ))}
@@ -1107,6 +1099,8 @@ const IPFS_GATEWAYS = [
 /** Resolve an image URL to an ordered candidate list (ipfs:// and legacy
  * gateway URLs fan out across gateways; anything else passes through). */
 function imageCandidates(url: string): string[] {
+  // Site-relative uploaded image (/api/image/<id>) — served by our own route.
+  if (/^\/api\/image\/[0-9a-f]{32}$/.test(url)) return [url];
   const m =
     url.match(/^ipfs:\/\/(?:ipfs\/)?([^/?#]+)(\/[^?#]*)?$/) ??
     url.match(/^https?:\/\/[^/]+\/ipfs\/([^/?#]+)(\/[^?#]*)?$/);
@@ -1325,7 +1319,13 @@ function TokenDetail({
               <h2 className="text-xl font-black truncate">{tokName(token)}</h2>
               <span className="text-[11px] text-neutral-500">${tokSym(token)}</span>
             </div>
-            <p className="text-[11px] text-neutral-400 font-mono truncate">{token.tokenId}</p>
+            <button
+              className="text-[11px] text-neutral-400 font-mono hover:text-neutral-600"
+              title={`token id ${token.tokenId} — click to copy`}
+              onClick={() => { try { navigator.clipboard.writeText(token.tokenId); } catch {} }}
+            >
+              {token.tokenId.slice(0, 6)}…{token.tokenId.slice(-4)} ⧉
+            </button>
           </div>
           <div className="text-right shrink-0">
             <p className="text-base sm:text-2xl font-black whitespace-nowrap">{fmtXno(token.marketCap)} XNO</p>
@@ -1340,10 +1340,12 @@ function TokenDetail({
           {token.twitter && <SocialLink href={token.twitter} label="X" />}
           {token.telegram && <SocialLink href={token.telegram} label="telegram" />}
         </div>
-        <div className="flex items-center gap-3 mt-4 text-[11px] text-neutral-500">
-          <span>dev {short(token.creator)}</span>
-          <span>holders {token.holders}</span>
+        <div className="flex items-center gap-3 mt-4 text-[11px] text-neutral-500 flex-wrap">
           <span>price {fmtXno(token.price)} XNO</span>
+          <span>liquidity {fmtXno(token.poolXno)} XNO</span>
+          <span>{token.holders} holder{token.holders === 1 ? "" : "s"}</span>
+          <span>created {timeAgo(token.createdAt)} ago</span>
+          <span>dev {short(token.creator)}</span>
         </div>
       </div>
 
@@ -1351,14 +1353,14 @@ function TokenDetail({
         <div className="flex items-center justify-between mb-3">
           <p className="text-sm font-bold text-neutral-700">Price</p>
           <div className="flex items-center gap-3 text-[11px] text-neutral-500">
-            <span>liq {fmtXno(token.poolXno)} XNO</span>
-            <span>reserve {fmtTok(token.poolTokens, token.decimals)} {tokSym(token)}</span>
+            <span>pool {fmtXno(token.poolXno)} XNO</span>
+            <span>pool {fmtNum(Number(BigInt(token.poolTokens)) / 10 ** token.decimals)} {tokSym(token)}</span>
           </div>
         </div>
         {token.series.length >= 2 ? (
           <PriceChart series={token.series} trades={token.trades} decimals={token.decimals} symbol={tokSym(token)} />
         ) : (
-          <div className="h-40 flex items-center justify-center text-neutral-400 text-sm">trades chart the price</div>
+          <div className="h-40 flex items-center justify-center text-neutral-400 text-sm">no trades yet — the chart appears after the first buy</div>
         )}
         <ProgressBar token={token} />
       </div>
@@ -1545,7 +1547,7 @@ function TradePanel({
           />
         </label>
       </div>
-      {slip > 0 && <p className="text-[10px] text-neutral-400">min-received enforced on-chain via fragment links</p>}
+      {slip > 0 && <p className="text-[10px] text-neutral-400">if the price moves more than {slip}% against you, the trade cancels instead of filling worse</p>}
       <div className="grid grid-cols-2 gap-2">
         <button
           className={"rounded-none py-2 text-sm font-bold " + (side === "buy" ? "bg-black text-white" : "bg-neutral-100 text-neutral-600")}
@@ -1572,7 +1574,7 @@ function TradePanel({
           <button
             className="shrink-0 rounded-none bg-neutral-100 px-3 text-xs font-bold text-neutral-700 hover:bg-neutral-200 disabled:opacity-40"
             disabled={BigInt(xnoBal) <= 0n}
-            onClick={() => { const usable = BigInt(xnoBal) - 10n ** 24n; setAmount(usable > 0n ? fmtXno(usable.toString()) : "0"); }}
+            onClick={() => { const usable = BigInt(xnoBal) - 10n ** 24n; setAmount(usable > 0n ? fmtXnoPlain(usable.toString()) : "0"); }}
           >
             Max
           </button>
@@ -1630,7 +1632,18 @@ function TradePanel({
 
       <StakeBox token={token} busy={busy} sendOp={sendOp} />
 
-      {token.pool && <p className="text-[11px] text-neutral-400 font-mono break-all">pool: {token.pool}</p>}
+      {token.pool && (
+        <p className="text-[11px] text-neutral-400">
+          liquidity pool account{" "}
+          <button
+            className="font-mono hover:text-neutral-600"
+            title={`${token.pool} — click to copy`}
+            onClick={() => { try { navigator.clipboard.writeText(token.pool!); } catch {} }}
+          >
+            {short(token.pool)} ⧉
+          </button>
+        </p>
+      )}
     </div>
   );
 }

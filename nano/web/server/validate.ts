@@ -74,10 +74,17 @@ export function sanitizeSymbol(v: unknown): string {
   return String(v ?? "").normalize("NFC").replace(/[^A-Za-z0-9._-]/g, "").slice(0, 16);
 }
 
+/** Site-relative uploaded-image path (`/api/image/<32hex>`), the form the
+ * upload route returns. Relative keeps it portable across domains/aliases and
+ * valid on plain-http local dev, where an absolute http: URL would be dropped. */
+const UPLOADED_IMAGE = /^\/api\/image\/[0-9a-f]{32}$/;
+
 /** Image URL: like safeUrl but rejects cleartext http: (mixed-content / tracking
- * beacon) — only https: and ipfs: may be an <img src>. */
+ * beacon) — only https:, ipfs:, or our own /api/image/<id> may be an <img src>. */
 export function safeImageUrl(v: unknown, max = 512): string {
-  const u = safeUrl(v, max);
+  const s = String(v ?? "").trim();
+  if (UPLOADED_IMAGE.test(s)) return s;
+  const u = safeUrl(s, max);
   if (!u) return "";
   return u.startsWith("http://") ? "" : u;
 }

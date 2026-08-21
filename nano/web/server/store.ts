@@ -53,7 +53,11 @@ async function blobPut(pathname: string, value: string, contentType: string): Pr
 }
 async function blobGet(pathname: string): Promise<string | null> {
   const { get } = await import("@vercel/blob");
-  const r: any = await get(pathname, { access: "private" as any });
+  // useCache:false is load-bearing: kv keys are overwritten in place at a fixed
+  // pathname, and the SDK's default CDN-cached read can return a copy from
+  // before the latest overwrite (up to cacheControlMaxAge, default 1 month).
+  // A stale read here silently loses registry rows on the next read-modify-write.
+  const r: any = await get(pathname, { access: "private" as any, useCache: false });
   if (!r || r.statusCode !== 200) return null;
   return await new Response(r.stream).text();
 }

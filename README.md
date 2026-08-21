@@ -5,6 +5,8 @@
 [![Nano](https://img.shields.io/badge/settles%20on-Nano%20(XNO)-4A90E2.svg)](https://nano.org)
 [![tests](https://img.shields.io/badge/tests-31%20deterministic%20suites-brightgreen.svg)](nano/package.json)
 
+**Live: [nanocrypto.fun](https://nanocrypto.fun)**
+
 > **The creator can never own more than 5%, and holding is the game.** 95% of every
 > token goes to the community; unstaking pays a 20% tax that burns 5% and hands the
 > rest to everyone still staked. No contract can be rugged because there is no

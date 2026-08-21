@@ -17,6 +17,7 @@ import {
   sendOp,
   receiveAll,
   fetchXnoBalance,
+  fmtNum,
 } from "../lib/trade";
 import { loadWallet, decryptSeed } from "../lib/wallet";
 
@@ -445,10 +446,7 @@ function CandleCanvas({ candles, vol }: { candles: Candle[]; vol: Map<number, { 
   );
 }
 function fmtAxis(p: number): string {
-  if (p === 0) return "0";
-  if (p < 1e-6) return p.toExponential(1);
-  if (p < 1) return p.toPrecision(3);
-  return p.toFixed(4);
+  return fmtNum(p, 3);
 }
 
 // ── order ticket ────────────────────────────────────────────────────────────
@@ -775,13 +773,7 @@ function Avatar({ image, symbol, size }: { image: string; symbol: string; size: 
   );
 }
 function fmtCompact(n: number): string {
-  if (!Number.isFinite(n)) return "0";
-  const abs = Math.abs(n);
-  if (abs >= 1e9) return (n / 1e9).toFixed(2) + "B";
-  if (abs >= 1e6) return (n / 1e6).toFixed(2) + "M";
-  if (abs >= 1e3) return (n / 1e3).toFixed(2) + "K";
-  if (abs > 0 && abs < 1e-4) return n.toExponential(1);
-  return n.toFixed(abs < 1 ? 4 : 2);
+  return fmtNum(n, 3);
 }
 
 const inp = "w-full rounded-none border border-neutral-300 bg-white px-3 py-2.5 text-sm text-black placeholder-neutral-400 focus:outline-none focus:border-black";

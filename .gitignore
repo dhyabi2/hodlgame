@@ -69,3 +69,4 @@ nano/web/data/
 nano/web/public/uploads/
 nano/web/.next/
 nano/web/tsconfig.tsbuildinfo
+.vercel

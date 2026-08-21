@@ -120,14 +120,15 @@ export async function POST(req: Request) {
     }
 
     // Store {contentType, base64} under a random id; serve via /api/image/<id>.
-    // Content type is the SNIFFED type, never the client's. Absolute URL so the
-    // metadata safeImageUrl keeps it.
+    // Content type is the SNIFFED type, never the client's. The URL is
+    // site-relative (safeImageUrl allows exactly this shape) so it survives
+    // domain/alias changes and plain-http local dev, where an absolute
+    // http://localhost origin would be sanitized away and block the launch.
     const id = crypto.randomBytes(16).toString("hex");
     const b64 = buf.toString("base64");
     // `t` (upload time) lets the orphan-image GC apply a grace period.
     await saveBlob(`img:${id}`, JSON.stringify({ ct: info.type, data: b64, t: Date.now() }));
-    const url = `${new URL(req.url).origin}/api/image/${id}`;
-    return NextResponse.json({ url });
+    return NextResponse.json({ url: `/api/image/${id}` });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? String(e) }, { status: 400 });
   }

@@ -72,13 +72,46 @@ export const fmtTok = (raw: string | undefined, dec: number) => {
   return frac ? `${whole}.${frac.slice(0, 6)}` : whole.toString();
 };
 
+// Human-readable numbers, never scientific notation ("1.27e-14" reads as
+// garbage to most people). Tiny values use the DEX-style zero-count form:
+// 0.0₁₃127 means "0., thirteen zeros, then 127". Large values compact to K/M/B.
+const SUBSCRIPT_DIGITS = "₀₁₂₃₄₅₆₇₈₉";
+const subNum = (n: number) => String(n).split("").map((c) => SUBSCRIPT_DIGITS[Number(c)]).join("");
+
+export function fmtNum(v: number, sig = 3): string {
+  if (!Number.isFinite(v) || v === 0) return "0";
+  const neg = v < 0 ? "-" : "";
+  const n = Math.abs(v);
+  const trim = (s: string) => s.replace(/\.?0+$/, "");
+  if (n >= 1e9) return neg + trim((n / 1e9).toFixed(2)) + "B";
+  if (n >= 1e6) return neg + trim((n / 1e6).toFixed(2)) + "M";
+  if (n >= 1e3) return neg + trim((n / 1e3).toFixed(2)) + "K";
+  if (n >= 0.0001) {
+    const dec = Math.min(8, Math.max(2, sig - 1 - Math.floor(Math.log10(n))));
+    return neg + n.toFixed(dec).replace(/0+$/, "").replace(/\.$/, "");
+  }
+  let zeros = -Math.floor(Math.log10(n)) - 1;
+  let digits = Math.round(n * 10 ** (zeros + sig));
+  if (String(digits).length > sig) { digits = Math.round(digits / 10); zeros -= 1; } // rounding carried a digit
+  const ds = String(digits).replace(/0+$/, "") || "0";
+  return `${neg}0.0${subNum(zeros)}${ds}`;
+}
+
 export const fmtXno = (raw: string | undefined) => {
   if (!raw) return "0";
-  const n = Number(BigInt(raw)) / 1e30;
-  if (!Number.isFinite(n) || n === 0) return "0";
-  if (n < 0.000001) return n.toExponential(3);
-  return n.toFixed(9).replace(/0+$/, "").replace(/\.$/, "");
+  return fmtNum(Number(BigInt(raw)) / 1e30);
 };
+
+/** Exact plain-decimal XNO string (parseable by toRaw) — for pre-filling
+ * inputs, e.g. the Max button. Display should use fmtXno instead. */
+export function fmtXnoPlain(raw: string | undefined): string {
+  if (!raw) return "0";
+  const n = BigInt(raw);
+  const d = 10n ** 30n;
+  const whole = n / d;
+  const frac = (n % d).toString().padStart(30, "0").replace(/0+$/, "");
+  return frac ? `${whole}.${frac}` : whole.toString();
+}
 
 /** Exact decimal-string → raw bigint. No Number involved, so no precision loss
  * (critical for XNO's 30 decimals — `Number("0.5")*1e30` is already inexact).
