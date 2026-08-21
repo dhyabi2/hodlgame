@@ -763,8 +763,19 @@ function HoldersList({ token }: { token: Token }) {
 function Empty({ label }: { label: string }) {
   return <div className="flex h-full items-center justify-center p-4 text-center text-xs text-neutral-400">{label}</div>;
 }
+// Uploaded images are served by our own /api/image/<id> route. Older uploads
+// stored an ABSOLUTE URL baked in with whatever domain/alias was live at
+// upload time; if that domain later starts redirecting itself (a *.vercel.app
+// alias, a moved custom domain), the old absolute URL breaks forever.
+// Normalizing to the CURRENT origin's relative path fixes it regardless of
+// which domain view the page loaded from.
+function normalizeImage(url: string): string {
+  const m = url.match(/^(?:https?:\/\/[^/]+)?\/api\/image\/([0-9a-f]{32})$/);
+  return m ? `/api/image/${m[1]}` : url;
+}
+
 function Avatar({ image, symbol, size }: { image: string; symbol: string; size: number }) {
-  if (image) return <img src={image} alt={symbol} width={size} height={size} className="rounded-full object-cover" style={{ width: size, height: size }} />;
+  if (image) return <img src={normalizeImage(image)} alt={symbol} width={size} height={size} className="rounded-full object-cover" style={{ width: size, height: size }} />;
   return (
     <div className="flex items-center justify-center rounded-full bg-neutral-200 font-black text-neutral-700"
       style={{ width: size, height: size, fontSize: size * 0.42 }}>

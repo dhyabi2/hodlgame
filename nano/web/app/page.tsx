@@ -1099,8 +1099,15 @@ const IPFS_GATEWAYS = [
 /** Resolve an image URL to an ordered candidate list (ipfs:// and legacy
  * gateway URLs fan out across gateways; anything else passes through). */
 function imageCandidates(url: string): string[] {
-  // Site-relative uploaded image (/api/image/<id>) — served by our own route.
-  if (/^\/api\/image\/[0-9a-f]{32}$/.test(url)) return [url];
+  // Uploaded image, served by our own route. Stored either site-relative
+  // (/api/image/<id>, current uploads) or as an ABSOLUTE URL baked in with
+  // whatever domain/alias was live at upload time (older uploads, before the
+  // route switched to relative — a *.vercel.app alias can later start
+  // redirecting/protecting itself, breaking any old absolute URL pointing at
+  // it forever). Either shape is normalized to the CURRENT origin's relative
+  // path, so a domain change never breaks a previously-uploaded image again.
+  const own = url.match(/^(?:https?:\/\/[^/]+)?\/api\/image\/([0-9a-f]{32})$/);
+  if (own) return [`/api/image/${own[1]}`];
   const m =
     url.match(/^ipfs:\/\/(?:ipfs\/)?([^/?#]+)(\/[^?#]*)?$/) ??
     url.match(/^https?:\/\/[^/]+\/ipfs\/([^/?#]+)(\/[^?#]*)?$/);

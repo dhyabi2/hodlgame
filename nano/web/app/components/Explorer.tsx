@@ -35,6 +35,14 @@ const absTime = (ts?: number) => {
   const t = ts > 1e12 ? ts : ts * 1000;
   return new Date(t).toLocaleString();
 };
+// Older uploads stored an ABSOLUTE /api/image/<id> URL baked in with
+// whatever domain was live at upload time; if that domain later starts
+// redirecting itself (an alias, a moved custom domain) the old absolute URL
+// breaks forever. Normalize to the CURRENT origin's relative path.
+const normalizeImage = (url: string): string => {
+  const m = url.match(/^(?:https?:\/\/[^/]+)?\/api\/image\/([0-9a-f]{32})$/);
+  return m ? `/api/image/${m[1]}` : url;
+};
 const fmtXno = (raw?: string) => {
   if (!raw || raw === "0") return "0";
   const neg = raw.startsWith("-");
@@ -397,7 +405,7 @@ function TokenDetailX({ d, go }: { d: any; go: (v: View) => void }) {
     <div className="space-y-3">
       <div className={card}>
         <div className="flex items-center gap-3">
-          {d.image ? <img src={d.image} alt="" className="w-12 h-12 rounded-full object-cover" onError={(e) => ((e.target as HTMLImageElement).style.display = "none")} /> : null}
+          {d.image ? <img src={normalizeImage(d.image)} alt="" className="w-12 h-12 rounded-full object-cover" onError={(e) => ((e.target as HTMLImageElement).style.display = "none")} /> : null}
           <div className="min-w-0">
             <h3 className="font-black">{d.name || short(d.tokenId, 8)} <span className="text-neutral-500">({d.symbol})</span> {d.authority?.immutable && <span className="px-2 py-0.5 rounded-full bg-purple-900/60 text-purple-300 text-[10px] font-bold">immutable</span>}</h3>
             <p className="text-sm">{fmtXno(d.priceRaw)} XNO <span className={pctColor(d.change24h)}>{pctStr(d.change24h)} 24h</span> · mcap {fmtXno(d.marketCapRaw)}</p>
