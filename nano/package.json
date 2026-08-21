@@ -5,7 +5,7 @@
   "description": "HoldFun Nano (XNO) Layer-2 — deterministic token ledger, indexer, client",
   "scripts": {
     "test": "tsx core/state.test.ts && tsx core/rewards.test.ts && tsx core/encoding.test.ts && tsx core/commit.test.ts && tsx core/multi.test.ts && tsx core/oplink.test.ts && tsx core/canonical.test.ts && tsx core/fraglink.test.ts && tsx core/metaAnchor.test.ts && tsx indexer/blockSource.test.ts && tsx indexer/discovery.test.ts && tsx indexer/indexer.test.ts && tsx indexer/multiIndexer.test.ts && tsx indexer/order.test.ts && tsx server/tokenCustody.test.ts && tsx server/analytics.test.ts && tsx server/commits.test.ts && tsx server/reconcile.test.ts && tsx server/settled.test.ts && tsx server/explorer.test.ts && tsx server/snapshot.test.ts && tsx lib/shamir.test.ts && tsx server/metaAuth.test.ts && tsx server/comments.test.ts && tsx client/nano.test.ts && tsx lib/work.test.ts",
-    "build-workgen": "cc -O3 -o bin/workgen tools/workgen.c",
+    "build-workgen": "mkdir -p bin && cc -O3 -o bin/workgen tools/workgen.c",
     "live-smoke": "tsx scripts/live-smoke.ts",
     "multitoken-e2e": "tsx scripts/multitoken-e2e.ts",
     "buy-e2e": "tsx scripts/buy-e2e.ts",
