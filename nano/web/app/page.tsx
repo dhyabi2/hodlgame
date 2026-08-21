@@ -995,9 +995,10 @@ function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id:
       if (q) {
         return t.name.toLowerCase().includes(q) || t.symbol.toLowerCase().includes(q) || t.tokenId.toLowerCase().includes(q);
       }
-      // No query → only "live" coins: has a name/symbol OR real liquidity. Hides
-      // launched-but-unseeded / metadata-less (incomplete) launches.
-      return Boolean(t.name || t.symbol) || BigInt(t.poolXno) > 0n;
+      // No query → "live" coins: has a name/symbol, real liquidity, OR you hold
+      // it (so a creator always sees their own coin even before naming/seeding).
+      // Hides only fully-abandoned launches you don't hold.
+      return Boolean(t.name || t.symbol) || BigInt(t.poolXno) > 0n || BigInt(t.myBalance) > 0n;
     })
     .slice()
     .sort((a, b) => {
@@ -1380,6 +1381,8 @@ function TokenDetail({
           <CommentThread tokenId={token.tokenId} comments={token.comments} keys={keys} isDev={keys?.address === token.creator} />
         )}
       </div>
+
+      {isCreator && keys && <EditCoinInfo token={token} keys={keys} say={say} />}
 
       {isCreator && (
         <div className="rounded-none border border-black bg-white p-5 space-y-2">
@@ -1796,6 +1799,85 @@ function CommentThread({ tokenId, comments, keys, isDev }: { tokenId: string; co
           Post
         </button>
       </div>
+    </div>
+  );
+}
+
+// Creator-only: (re)publish a coin's off-chain metadata for an existing token —
+// so a coin whose name/image failed to save at launch (or needs updating) can be
+// fixed without re-launching. Same signed-update path as CreateToken.
+function EditCoinInfo({ token, keys, say }: { token: Token; keys: Keys; say: (s: string) => void }) {
+  const [open, setOpen] = useState(!token.name && !token.symbol); // auto-open if unnamed
+  const [name, setName] = useState(token.name);
+  const [symbol, setSymbol] = useState(token.symbol);
+  const [image, setImage] = useState(token.image);
+  const [description, setDescription] = useState(token.description);
+  const [website, setWebsite] = useState(token.website);
+  const [twitter, setTwitter] = useState(token.twitter);
+  const [telegram, setTelegram] = useState(token.telegram);
+  const [uploading, setUploading] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function upload(file: File) {
+    if (!file.type.startsWith("image/")) return say("please choose an image file");
+    setUploading(true);
+    try {
+      let body: Blob = file;
+      try { body = (await resizeImageFile(file, 512)).blob; } catch {}
+      const fd = new FormData();
+      fd.append("file", body, "image.png");
+      const j = await (await fetch("/api/upload", { method: "POST", body: fd })).json();
+      if (j.url) setImage(j.url); else say("upload failed: " + (j.error ?? "unknown"));
+    } catch (e: any) { say("upload failed: " + e.message); }
+    finally { setUploading(false); }
+  }
+
+  async function save() {
+    if (!name.trim() || !symbol.trim()) return say("name and symbol are required");
+    setBusy(true);
+    try {
+      const meta = sanitizeMeta({ name, symbol, decimals: token.decimals, image, description, website, twitter, telegram });
+      const seq = Date.now();
+      const digest = metaSignDigest(token.tokenId, seq, "update", metaFieldsHash(meta));
+      const signature = nanocurrency.signBlock({ hash: digest, secretKey: keys.secretKey });
+      const r = await fetch("/api/tokens", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tokenId: token.tokenId, ...meta, account: keys.address, signature, seq, action: "update" }),
+      });
+      if (r.ok) { say("coin info saved ✓"); setOpen(false); }
+      else { const e = await r.json().catch(() => ({})); say("save failed: " + (e.error ?? r.status)); }
+    } catch (e: any) { say("save failed: " + e.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="rounded-none border border-black bg-white p-5 space-y-2">
+      <button className="flex w-full items-center justify-between" onClick={() => setOpen((v) => !v)}>
+        <span className="text-sm font-bold text-black">Coin info <span className="text-[11px] font-normal text-neutral-500">creator</span></span>
+        <span className="text-neutral-400 text-xs">{open ? "▾" : "▸"}</span>
+      </button>
+      {!token.name && !token.symbol && <p className="text-[11px] text-black">This coin has no name yet — set it here so it shows everywhere.</p>}
+      {open && (
+        <>
+          <div className="flex items-center gap-3">
+            <Avatar image={image} symbol={symbol || token.tokenId.slice(0, 2)} size={44} />
+            <label className="text-xs text-black cursor-pointer">
+              {uploading ? "uploading…" : "upload image"}
+              <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+            </label>
+          </div>
+          <input className={inputC} placeholder="image URL (optional)" value={image} onChange={(e) => setImage(e.target.value)} />
+          <div className="grid grid-cols-2 gap-2">
+            <input className={inputC} placeholder="name" value={name} onChange={(e) => setName(e.target.value)} />
+            <input className={inputC} placeholder="symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)} />
+          </div>
+          <textarea className={inputC} placeholder="description" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
+          <input className={inputC} placeholder="website (optional)" value={website} onChange={(e) => setWebsite(e.target.value)} />
+          <input className={inputC} placeholder="https://x.com/… (optional)" value={twitter} onChange={(e) => setTwitter(e.target.value)} />
+          <input className={inputC} placeholder="https://t.me/… (optional)" value={telegram} onChange={(e) => setTelegram(e.target.value)} />
+          <button className={btn} disabled={busy} onClick={save}>{busy ? "saving…" : "Save coin info"}</button>
+        </>
+      )}
     </div>
   );
 }
