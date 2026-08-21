@@ -100,26 +100,56 @@ export function assembleSetAuthority(aHex: string, bHex: string): { tokenId: Tok
 }
 
 /**
- * Fold anchors (canonical order) into per-token authority state, seeded by
- * each token's launch creator. Rules: only the CURRENT authority's anchors
- * count; immutable is one-way and freezes further transfers.
+ * Fold anchors into per-token authority state, seeded by each token's launch
+ * creator. The fold walks the CHAIN OF CUSTODY, not a global clock: `height`
+ * is per-account, so sorting all anchors by (height, hash) is NOT causal — an
+ * authority who received control on a fresh (low-height) account could have
+ * their own outgoing transfer sorted before the grant and silently dropped,
+ * letting them renege after selling control. Instead we start at the creator
+ * and, at each step, apply that authority's FIRST anchor by their OWN chain
+ * height, then follow it: setAuthority moves control to the named account,
+ * makeImmutable freezes one-way. A per-token visited set stops cycles
+ * (A→B→A). Deterministic and causal for every indexer.
  */
 export function deriveMetaAuthority(
   anchors: MetaAnchor[],
   creators: Map<string, string>
 ): Map<string, MetaAuthorityState> {
-  const sorted = [...anchors].sort((a, b) =>
-    a.height !== b.height ? (a.height < b.height ? -1 : 1) : a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0
-  );
+  // tokenId → sender → anchors, each sender's list in own-chain order.
+  const byToken = new Map<string, Map<string, MetaAnchor[]>>();
+  for (const a of anchors) {
+    const bySender = byToken.get(a.tokenId) ?? new Map<string, MetaAnchor[]>();
+    const list = bySender.get(a.sender) ?? [];
+    list.push(a);
+    bySender.set(a.sender, list);
+    byToken.set(a.tokenId, bySender);
+  }
+  const chainOrder = (x: MetaAnchor, y: MetaAnchor) =>
+    x.height !== y.height ? (x.height < y.height ? -1 : 1) : x.hash < y.hash ? -1 : x.hash > y.hash ? 1 : 0;
+
   const out = new Map<string, MetaAuthorityState>();
-  for (const [tokenId, creator] of creators) out.set(tokenId, { authority: creator, immutable: false });
-  for (const a of sorted) {
-    const st = out.get(a.tokenId);
-    if (!st) continue; // anchor for an unknown token → ignore
-    if (a.sender !== st.authority) continue; // only the current authority acts
-    if (st.immutable) continue; // frozen forever
-    if (a.kind === "immutable") st.immutable = true;
-    else if (a.kind === "setAuthority" && a.newAuthority) st.authority = a.newAuthority;
+  for (const [tokenId, creator] of creators) {
+    const bySender = byToken.get(tokenId);
+    let authority = creator;
+    let immutable = false;
+    const visited = new Set<string>();
+    while (bySender && !visited.has(authority)) {
+      visited.add(authority);
+      const list = bySender.get(authority);
+      if (!list || list.length === 0) break;
+      // The authority's effective action is their EARLIEST anchor for this token.
+      const first = [...list].sort(chainOrder)[0];
+      if (first.kind === "immutable") {
+        immutable = true;
+        break;
+      }
+      if (first.kind === "setAuthority" && first.newAuthority) {
+        authority = first.newAuthority;
+        continue;
+      }
+      break;
+    }
+    out.set(tokenId, { authority, immutable });
   }
   return out;
 }

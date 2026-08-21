@@ -96,8 +96,9 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { tokenId, account, balance: (s.balances.get(account) ?? 0n).toString() });
     }
     if (url.pathname === "/sweep" && req.method === "POST") {
+      // Fail CLOSED: an unset OPERATOR_KEY must not open the payout loop.
       const key = process.env.OPERATOR_KEY;
-      if (key && req.headers["x-operator-key"] !== key) {
+      if (!key || req.headers["x-operator-key"] !== key) {
         return json(res, 403, { error: "unauthorized" });
       }
       return json(res, 200, await runSweep(url.searchParams.get("token")));

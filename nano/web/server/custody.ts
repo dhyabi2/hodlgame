@@ -28,7 +28,14 @@ export function poolKeysFromSeed(seed: string): PoolKeys {
  * alone (HD-style; no per-token secret storage).
  */
 export function poolSeedForToken(masterSeed: string, tokenId: string): string {
-  return blake2bHex(Buffer.from(masterSeed + tokenId, "hex"), undefined, 32);
+  // Derive from the raw BYTES with validated fixed-length inputs — NOT a hex
+  // string concat. `Buffer.from(master + tokenId, "hex")` had a boundary
+  // ambiguity (("abcd","ef") and ("ab","cdef") produced the same key) and a
+  // non-hex tokenId would collapse every token to blake2b(master) (one shared
+  // key = total fund mixing). Enforce master=64-hex, tokenId=32-hex.
+  if (!/^[0-9a-fA-F]{64}$/.test(masterSeed)) throw new Error("master seed must be 64 hex");
+  if (!/^[0-9a-fA-F]{32}$/.test(tokenId)) throw new Error("tokenId must be 32 hex");
+  return blake2bHex(Buffer.concat([Buffer.from(masterSeed, "hex"), Buffer.from(tokenId, "hex")]), undefined, 32);
 }
 
 export function tokenPoolKeys(masterSeed: string, tokenId: string): PoolKeys {
@@ -179,11 +186,16 @@ export async function remoteCosign(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         apiKey,
+        requestId: `${args.tokenId}:${args.payout.frontier}:${args.payout.to}`,
         tokenId: args.tokenId,
         account: args.pool.address,
         previous: args.payout.frontier,
         representative: args.payout.representative,
         balance: newBalance,
+        // Explicit recipient + amount so the guardian binds its signature to
+        // them and verifies the balance math against chain.
+        to: args.payout.to,
+        amountRaw: args.payout.amountRaw,
         link: args.payout.to,
       }),
     });

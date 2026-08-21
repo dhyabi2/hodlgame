@@ -51,9 +51,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "action not allowed" }, { status: 403 });
   }
 
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
-  if ((action === "work_generate" && !rateLimit(ip + ":work", 20, 60_000)) ||
-      (action === "process" && !rateLimit(ip + ":process", 120, 60_000))) {
+  // Client IP: prefer the platform-verified header. The left-most
+  // x-forwarded-for entry is CLIENT-CONTROLLED (spoofable → per-request fresh
+  // bucket → limiter bypass), so never key throttling on it; Vercel sets
+  // x-real-ip to the true client, and x-forwarded-for's LAST hop is the one
+  // Vercel appended. Fall back to a shared bucket (fail-closed to a global cap)
+  // when neither is present, so an unknown-IP flood is still bounded.
+  const xff = req.headers.get("x-forwarded-for")?.split(",").map((s) => s.trim()).filter(Boolean);
+  const ip = req.headers.get("x-real-ip")?.trim() || (xff && xff.length ? xff[xff.length - 1] : "shared");
+  // Costly actions also get a GLOBAL ceiling (IP-independent) so no distribution
+  // of IPs can exhaust CPU (workgen spawns) or burn the paid key.
+  if (action === "work_generate" && (!rateLimit(ip + ":work", 20, 60_000) || !rateLimit("global:work", 120, 60_000))) {
+    return NextResponse.json({ error: "rate limited" }, { status: 429 });
+  }
+  if (action === "process" && (!rateLimit(ip + ":process", 120, 60_000) || !rateLimit("global:process", 600, 60_000))) {
     return NextResponse.json({ error: "rate limited" }, { status: 429 });
   }
 

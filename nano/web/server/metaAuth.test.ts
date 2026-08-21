@@ -130,4 +130,24 @@ function signed(keys: typeof CREATOR, seq: number, action = "update", meta: Meta
   );
 }
 
+// 10. REGRESSION — provisional-squat seq-DoS (a breaker finding): an attacker
+// grabs a not-yet-indexed token with seq=MAX_SAFE_INTEGER; the real creator
+// must NOT be locked out, and far-future seq must be rejected.
+{
+  const now = 1_000_000_000_000;
+  const squat = signed(ATTACKER, Number.MAX_SAFE_INTEGER);
+  // Far-future seq is rejected outright now.
+  const dFuture = decideMetaUpdate(squat, null, null, now);
+  assert.ok(!dFuture.ok && dFuture.code === 400, "far-future seq rejected");
+
+  // Even if a squatter set a high (but in-window) seq during the provisional
+  // window, the on-chain creator overriding an unlocked provisional row resets
+  // the seq floor and is accepted.
+  const provisional = { authority: ATTACKER.address, authorityLocked: false, seq: now - 1, immutable: false };
+  const creatorWrite = signed(CREATOR, now - 5000); // lower than squatter's seq
+  const d = decideMetaUpdate(creatorWrite, provisional, CREATOR.address, now);
+  assert.ok(d.ok, "real creator overrides provisional squat regardless of its seq");
+  assert.ok(d.ok && d.row.authorityLocked, "and locks authority");
+}
+
 console.log("✅ metadata auth tests passed");

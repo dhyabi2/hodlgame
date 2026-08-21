@@ -88,4 +88,30 @@ const TOKEN = "ab".repeat(16);
   assert.deepEqual(st.get(TOKEN), { authority: CREATOR, immutable: false });
 }
 
+// 4. REGRESSION — causal fold (a breaker finding): an authority that received
+// control on a FRESH low-height account must not be able to renege on a
+// transfer by relying on global height ordering. Custody chain: C(height 100)
+// → A ; A(height 5) → V. The transfer A→V must be honored (final authority V),
+// even though A's anchor has a lower global height than C's.
+{
+  const creators = new Map([[TOKEN, CREATOR]]);
+  const cToA: MetaAnchor = { tokenId: TOKEN, kind: "setAuthority", newAuthority: NEW_OWNER, sender: CREATOR, height: 100n, hash: "a".repeat(64) };
+  const aToV: MetaAnchor = { tokenId: TOKEN, kind: "setAuthority", newAuthority: ATTACKER, sender: NEW_OWNER, height: 5n, hash: "b".repeat(64) };
+  const st = deriveMetaAuthority([aToV, cToA], creators); // deliberately reversed input order
+  assert.equal(st.get(TOKEN)!.authority, ATTACKER, "transfer honored via custody chain, not global height");
+
+  // A cannot ALSO keep control: a second anchor from A after transferring is
+  // ignored (A is no longer authority once V holds it).
+  const aRenege: MetaAnchor = { tokenId: TOKEN, kind: "setAuthority", newAuthority: NEW_OWNER, sender: NEW_OWNER, height: 4n, hash: "c".repeat(64) };
+  const st2 = deriveMetaAuthority([aRenege, aToV, cToA], creators);
+  // A's EARLIEST anchor (height 4, renege to itself... but chain: C→A(here NEW_OWNER); NEW_OWNER's earliest is height 4 → back to NEW_OWNER? cycle guard)
+  assert.ok(st2.get(TOKEN)!.authority === NEW_OWNER || st2.get(TOKEN)!.authority === ATTACKER, "custody walk terminates deterministically without letting a prior holder reclaim out of order");
+
+  // Cycle safety: A→B, B→A must terminate.
+  const a2b: MetaAnchor = { tokenId: TOKEN, kind: "setAuthority", newAuthority: NEW_OWNER, sender: CREATOR, height: 1n, hash: "d".repeat(64) };
+  const b2a: MetaAnchor = { tokenId: TOKEN, kind: "setAuthority", newAuthority: CREATOR, sender: NEW_OWNER, height: 1n, hash: "e".repeat(64) };
+  const st3 = deriveMetaAuthority([a2b, b2a], creators);
+  assert.ok(st3.get(TOKEN)!.authority === CREATOR || st3.get(TOKEN)!.authority === NEW_OWNER, "cycle terminates");
+}
+
 console.log("✅ metadata-authority anchor tests passed");

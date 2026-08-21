@@ -23,8 +23,9 @@ export interface NanoBlock {
   representative: string; // token id (or data carrier)
   height: bigint;
   timestamp?: string;
-  amount?: string; // raw amount the block sends (0 for opens/receives)
-  subtype?: string; // send | receive | open | change | epoch (when known)
+  amount?: string; // raw amount moved — DERIVED from signed balance delta, not the node
+  subtype?: string; // send | receive | open | change — DERIVED from the balance delta
+  balance?: string; // signed balance after this block (hash-covered)
 }
 
 export interface BlockSource {
@@ -56,38 +57,59 @@ export class MemorySource implements BlockSource {
   }
 }
 
-/** Local verification of a fetched block (see header). Exported for tests. */
+/**
+ * Local authenticity check for a fetched block. Returns true only when the
+ * block is a genuine state block whose signature verifies against the account
+ * the NODE attributes it to — binding `block_account` to the signed `account`
+ * closes owner-forgery (a lying node reattributing a real block to a victim).
+ * Amount/subtype are NOT checked here: they are unsigned node fields, derived
+ * instead from the signed `balance` chain in listBlocks. Exported for tests.
+ */
 export function verifyFetchedBlock(
   hash: string,
   b: { block_account: string; contents: any; amount?: string }
 ): boolean {
   const c = b.contents ?? {};
-  if (c.type && c.type !== "state") {
-    // Legacy pre-state blocks predate this app's history; keep only if valueless.
-    return !b.amount || BigInt(b.amount) === 0n;
-  }
+  if (c.type && c.type !== "state") return false; // this app only signs state blocks
   try {
+    // The attributed owner MUST equal the signed account, or the node is
+    // reattributing someone else's valid block.
+    const acct = String(c.account ?? "");
+    if (!acct || acct.toLowerCase() !== String(b.block_account ?? "").toLowerCase()) return false;
     const computed = nanocurrency.hashBlock({
-      account: c.account ?? b.block_account,
+      account: acct,
       previous: c.previous,
       representative: c.representative,
       balance: c.balance,
       link: c.link,
     });
     if (computed.toLowerCase() !== hash.toLowerCase()) return false; // tampered contents
-    const publicKey = nanocurrency.derivePublicKey(c.account ?? b.block_account);
-    const sigOk = (nanocurrency as any).verifyBlock({
+    const publicKey = nanocurrency.derivePublicKey(acct);
+    return (nanocurrency as any).verifyBlock({
       hash: computed,
       signature: String(c.signature ?? "").toUpperCase(),
       publicKey,
     });
-    if (sigOk) return true;
-    // Epoch blocks are account-chain blocks signed by the epoch signer: keep
-    // only when valueless (they can never be ops or deposits).
-    return !b.amount || BigInt(b.amount) === 0n;
   } catch {
     return false;
   }
+}
+
+/** Derive the native amount + subtype of a state block from SIGNED balances
+ * (balance and previous are hash-covered), so a lying node cannot forge them.
+ * `prevBalance` is the balance of `previous` on the same chain (0n for opens). */
+export function deriveAmountSubtype(
+  balance: string,
+  previous: string,
+  prevBalance: bigint
+): { amount: string; subtype: "send" | "receive" | "open" | "change" } {
+  const bal = BigInt(balance);
+  const isOpen = !previous || /^0+$/.test(previous);
+  const prev = isOpen ? 0n : prevBalance;
+  const delta = bal - prev;
+  if (delta < 0n) return { amount: (-delta).toString(), subtype: "send" };
+  if (delta > 0n) return { amount: delta.toString(), subtype: isOpen ? "open" : "receive" };
+  return { amount: "0", subtype: isOpen ? "open" : "change" };
 }
 
 /**
@@ -164,7 +186,12 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
         const b = info.blocks?.[hash];
         if (!b) continue;
         seen.add(hash);
-        if (!verifyFetchedBlock(hash, b)) continue; // forged/tampered → reject
+        const authentic = verifyFetchedBlock(hash, b);
+        // Keep authentic blocks; also keep a sig-FAILING block ONLY if it moves
+        // no value (balance unchanged from its previous) — that is the epoch
+        // carve-out (signed by the epoch key, not the account). Such a block is
+        // inert (derived amount 0) so it can never be an op or a deposit, but
+        // keeping it preserves `previous` linkage for balance derivation.
         blocks.push({
           account: b.block_account,
           hash,
@@ -173,8 +200,11 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
           representative: b.contents?.representative ?? "",
           height: BigInt(b.height),
           timestamp: b.local_timestamp,
-          amount: b.amount,
-          subtype: (b as any).subtype ?? b.contents?.subtype,
+          balance: b.contents?.balance,
+          // amount/subtype DERIVED below from signed balances; node values ignored.
+          amount: undefined,
+          subtype: undefined,
+          ...( { _authentic: authentic } as any ),
         });
       }
 
@@ -183,7 +213,30 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
       head = prev;
     }
 
-    return blocks.sort((a, b) => (a.height < b.height ? -1 : 1));
+    blocks.sort((a, b) => (a.height < b.height ? -1 : 1));
+
+    // Derive amount + subtype from the SIGNED balance chain (balance and
+    // previous are hash-covered; the node's amount/subtype are not). Drop
+    // sig-failing blocks unless they are inert (no balance change).
+    const balByHash = new Map<string, bigint>();
+    const out: NanoBlock[] = [];
+    for (const blk of blocks) {
+      const authentic = (blk as any)._authentic as boolean;
+      delete (blk as any)._authentic;
+      if (blk.balance == null) continue; // no signed balance → cannot trust
+      const isOpen = !blk.previous || /^0+$/.test(blk.previous);
+      const prevBal = isOpen ? 0n : balByHash.get(blk.previous);
+      const derived =
+        prevBal === undefined
+          ? { amount: "0", subtype: "change" as const } // gap boundary → fail-safe
+          : deriveAmountSubtype(blk.balance, blk.previous, prevBal);
+      if (!authentic && !(derived.amount === "0")) continue; // forged value block → drop
+      blk.amount = derived.amount;
+      blk.subtype = derived.subtype;
+      balByHash.set(blk.hash, BigInt(blk.balance));
+      out.push(blk);
+    }
+    return out;
   }
 }
 

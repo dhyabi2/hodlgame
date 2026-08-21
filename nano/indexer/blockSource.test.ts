@@ -1,11 +1,10 @@
 import { strict as assert } from "node:assert";
 import * as nanocurrency from "nanocurrency";
-import { verifyFetchedBlock } from "./blockSource";
+import { verifyFetchedBlock, deriveAmountSubtype } from "./blockSource";
 
-// A real signed state block, as blocks_info would return it.
 const secretKey = nanocurrency.deriveSecretKey("5".repeat(64), 0);
 const publicKey = nanocurrency.derivePublicKey(secretKey);
-const address = nanocurrency.deriveAddress(publicKey, { useNanoPrefix: true });
+const address = nanocurrency.deriveAddress(publicKey, { useNanoPrefix: true }).replace(/^xrb_/, "nano_");
 
 const created = nanocurrency.createBlock(secretKey, {
   work: "0000000000000000",
@@ -16,38 +15,53 @@ const created = nanocurrency.createBlock(secretKey, {
 });
 const contents = {
   type: "state",
-  account: address.replace(/^xrb_/, "nano_"),
+  account: address,
   previous: "1".repeat(64),
-  representative: address.replace(/^xrb_/, "nano_"),
+  representative: address,
   balance: "1000000",
   link: "2".repeat(64),
   signature: created.block.signature,
 };
 const hash = created.hash;
 
-// 1. Genuine block verifies.
-assert.ok(verifyFetchedBlock(hash, { block_account: contents.account, contents, amount: "5" }), "genuine block accepted");
+// 1. Genuine block verifies (account bound to signed account).
+assert.ok(verifyFetchedBlock(hash, { block_account: address, contents, amount: "5" }), "genuine block accepted");
 
-// 2. Tampered contents (balance) → hash mismatch → rejected.
+// 2. OWNER FORGERY: a valid block relabeled to a victim block_account → REJECTED.
+const victim = nanocurrency.deriveAddress(
+  nanocurrency.derivePublicKey(nanocurrency.deriveSecretKey("6".repeat(64), 0)),
+  { useNanoPrefix: true }
+).replace(/^xrb_/, "nano_");
 assert.ok(
-  !verifyFetchedBlock(hash, { block_account: contents.account, contents: { ...contents, balance: "999" }, amount: "5" }),
+  !verifyFetchedBlock(hash, { block_account: victim, contents, amount: "5" }),
+  "block reattributed to a victim account is rejected"
+);
+
+// 3. Tampered contents (balance) → hash mismatch → rejected.
+assert.ok(
+  !verifyFetchedBlock(hash, { block_account: address, contents: { ...contents, balance: "999" }, amount: "5" }),
   "tampered balance rejected"
 );
 
-// 3. Forged signature on a value-bearing block → rejected.
+// 4. Forged signature → rejected (NO amount-based carve-out anymore; the epoch
+//    tolerance lives in listBlocks and is gated on a zero balance-delta).
 assert.ok(
-  !verifyFetchedBlock(hash, { block_account: contents.account, contents: { ...contents, signature: "0".repeat(128) }, amount: "5" }),
-  "forged signature on deposit rejected"
+  !verifyFetchedBlock(hash, { block_account: address, contents: { ...contents, signature: "0".repeat(128) }, amount: "0" }),
+  "forged signature rejected regardless of claimed amount"
 );
 
-// 4. Bad signature on a ZERO-amount block is kept (epoch-block carve-out — can
-//    never be an op or deposit, so it cannot influence state).
-assert.ok(
-  verifyFetchedBlock(hash, { block_account: contents.account, contents: { ...contents, signature: "0".repeat(128) }, amount: "0" }),
-  "valueless epoch-style block tolerated"
-);
-
-// 5. Wrong hash entirely → rejected.
-assert.ok(!verifyFetchedBlock("f".repeat(64), { block_account: contents.account, contents, amount: "5" }), "wrong hash rejected");
+// 5. AMOUNT FORGERY is structurally impossible now: verifyFetchedBlock ignores
+//    amount, and deriveAmountSubtype computes it from signed balances only.
+{
+  // send: balance 1000 → 900 ⇒ amount 100, subtype send (node's claimed amount irrelevant)
+  const send = deriveAmountSubtype("900", "1".repeat(64), 1000n);
+  assert.deepEqual(send, { amount: "100", subtype: "send" }, "send amount from balance delta");
+  const recv = deriveAmountSubtype("1100", "1".repeat(64), 1000n);
+  assert.deepEqual(recv, { amount: "100", subtype: "receive" }, "receive amount from balance delta");
+  const open = deriveAmountSubtype("500", "0".repeat(64), 0n);
+  assert.deepEqual(open, { amount: "500", subtype: "open" }, "open amount from balance");
+  const epoch = deriveAmountSubtype("1000", "1".repeat(64), 1000n);
+  assert.deepEqual(epoch, { amount: "0", subtype: "change" }, "unchanged balance ⇒ inert (amount 0)");
+}
 
 console.log("✅ block verification tests passed");

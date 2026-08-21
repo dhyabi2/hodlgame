@@ -36,6 +36,9 @@ function fromHex(hex: string): Uint8Array {
   return out;
 }
 function writeAmt(buf: Uint8Array, offset: number, n: bigint) {
+  // Fail loudly rather than silently truncating/wrapping a >120-bit or
+  // negative amount into a wrong-but-valid link.
+  if (n < 0n || n >= 1n << 120n) throw new Error("amount out of 120-bit range");
   for (let i = AMT_BYTES - 1; i >= 0; i--) {
     buf[offset + i] = Number(n & 0xffn);
     n >>= 8n;

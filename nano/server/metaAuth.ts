@@ -91,19 +91,36 @@ export function gateMetaAction(
  * the indexer's creator for this token (null if the launch isn't indexed yet).
  * Assumes the signature was already verified for `u.account`.
  */
+/** Max seconds a signed update's seq (a client timestamp, ms) may sit in the
+ * future. Bounds seq to real time so no signer can jump to MAX_SAFE_INTEGER
+ * and permanently lock out later (larger-seq-impossible) updates. */
+export const MAX_SEQ_SKEW_MS = 5 * 60 * 1000;
+
 export function decideMetaUpdate(
   u: SignedMetaUpdate,
   prev: MetaAuthRow | null,
-  onchainCreator: string | null
+  onchainCreator: string | null,
+  now: number = Date.now()
 ): MetaDecision {
   if (prev?.immutable) return { ok: false, code: 403, error: "metadata is immutable" };
+
+  // seq is a client wall-clock (ms). Reject far-future values so an attacker
+  // can't set seq = MAX_SAFE_INTEGER during the provisional window and lock
+  // out every later real-time update.
+  if (u.seq > now + MAX_SEQ_SKEW_MS) return { ok: false, code: 400, error: "seq too far in the future" };
 
   const authority = prev?.authorityLocked
     ? prev.authority ?? onchainCreator ?? u.account
     : onchainCreator ?? prev?.authority ?? u.account;
   if (u.account !== authority) return { ok: false, code: 403, error: "not the token authority" };
 
-  const prevSeq = prev?.seq ?? 0;
+  // The on-chain creator overriding an UNLOCKED provisional row set by someone
+  // else must not inherit that squatter's seq — otherwise a provisional writer
+  // who picked a huge seq would permanently gate the real creator. Reset the
+  // seq floor to 0 for that first authoritative write.
+  const overridingProvisional =
+    !prev?.authorityLocked && onchainCreator != null && u.account === onchainCreator && prev != null && prev.authority !== onchainCreator;
+  const prevSeq = overridingProvisional ? 0 : prev?.seq ?? 0;
   if (u.seq <= prevSeq) return { ok: false, code: 409, error: "stale seq (replay?)" };
 
   // Locked once the chain-verified creator has acted (directly or via transfer).

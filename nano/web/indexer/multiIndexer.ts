@@ -309,6 +309,10 @@ export class MultiIndexer {
       this.chainPools.get(tokenId) ?? this.poolKey?.(tokenId) ?? null;
 
     this.depositEdges = new Map();
+    // A deposit may back AT MOST ONE value-bound op. On a linear Nano chain two
+    // ops can't share a `previous`, but this guards against a forked/replayed
+    // history double-crediting one deposit (defense-in-depth).
+    const consumedDeposits = new Set<string>();
     const events: IndexedEvent[] = [];
     for (const { events: evs, byHash } of decoded.values()) {
       for (const { ev, prev } of evs) {
@@ -319,9 +323,10 @@ export class MultiIndexer {
           const amount = dep ? BigInt(dep.amount ?? "0") : 0n;
           const poolPub = poolOf(ev.tokenId);
           const routesToPool = Boolean(dep && poolPub && dep.link.toLowerCase() === poolPub.toLowerCase());
-          if (!dep || amount <= 0n || !routesToPool) continue; // malformed buy → skip
+          if (!dep || amount <= 0n || !routesToPool || consumedDeposits.has(dep.hash)) continue; // malformed/reused → skip
+          consumedDeposits.add(dep.hash);
           ev.op = { ...ev.op, xno: amount };
-          this.depositEdges.set(ev.hash, { deposit: dep!.hash, amountRaw: amount.toString() });
+          this.depositEdges.set(ev.hash, { deposit: dep.hash, amountRaw: amount.toString() });
         } else if (ev.op.kind === "seedLiq" || ev.op.kind === "addLiq") {
           // Value-bound liquidity: pool XNO only ever credits from a real
           // chained deposit send to this token's pool — the deposit's native
@@ -332,9 +337,10 @@ export class MultiIndexer {
           const amount = dep ? BigInt(dep.amount ?? "0") : 0n;
           const poolPub = poolOf(ev.tokenId);
           const routesToPool = Boolean(dep && poolPub && dep.link.toLowerCase() === poolPub.toLowerCase());
-          if (routesToPool && amount > 0n) {
+          if (routesToPool && amount > 0n && !consumedDeposits.has(dep!.hash)) {
+            consumedDeposits.add(dep!.hash);
             ev.op = { ...ev.op, xno: amount };
-            this.depositEdges.set(ev.hash, { deposit: byHash.get(prev)!.hash, amountRaw: amount.toString() });
+            this.depositEdges.set(ev.hash, { deposit: dep!.hash, amountRaw: amount.toString() });
           } else if (ev.op.xno > 0n) {
             continue; // declared-but-unbacked → skip
           }

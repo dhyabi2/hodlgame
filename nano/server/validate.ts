@@ -53,6 +53,10 @@ export function safeUrl(v: unknown, max = 512): string {
     return "";
   }
   if (u.protocol !== "http:" && u.protocol !== "https:" && u.protocol !== "ipfs:") return "";
+  // Strip embedded credentials (https://user:pass@host) — a phishing/UI aid
+  // with no legitimate use for an image/social link.
+  u.username = "";
+  u.password = "";
   return u.toString();
 }
 

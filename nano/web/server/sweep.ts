@@ -298,32 +298,67 @@ export async function refundRejectedBuys(
 // for transition tooling only. The functions below settle from chain state
 // alone — see server/settled.ts for the netting rule.
 
-/** Sender → Σ XNO deposited into the pool, derived from the pool's own chain
- * (confirmed receives + still-pending sends). Every source block is verified
- * locally before its sender/amount is trusted. */
+/** Fetch blocks_info for a set of hashes, returning only authentic (account-
+ * bound, signature-valid) contents keyed by hash. */
+async function fetchVerified(
+  rpcKey: string,
+  hashes: string[]
+): Promise<Map<string, { account: string; previous: string; balance: bigint }>> {
+  const out = new Map<string, { account: string; previous: string; balance: bigint }>();
+  const uniq = [...new Set(hashes.filter((h) => /^[0-9a-fA-F]{64}$/.test(h)))];
+  for (let i = 0; i < uniq.length; i += 200) {
+    const chunk = uniq.slice(i, i + 200);
+    const info = (await nanoRpc(rpcKey, { action: "blocks_info", hashes: chunk, json_block: true })) as any;
+    for (const h of chunk) {
+      const b = info.blocks?.[h];
+      if (!b?.block_account || !verifyFetchedBlock(h, b)) continue;
+      out.set(h, {
+        account: b.block_account,
+        previous: b.contents?.previous ?? "",
+        balance: BigInt(b.contents?.balance ?? "0"),
+      });
+    }
+  }
+  return out;
+}
+
+/** Sender → Σ XNO deposited into the pool, derived ENTIRELY from signed data.
+ * Confirmed deposits use the pool's own receive block's balance-derived amount
+ * (trustworthy) attributed to the source send's signed account. Pending
+ * deposits derive the amount from the source SEND's own signed balance delta
+ * (sourcePrevBalance − sourceBalance). The node's unsigned `amount` is never
+ * trusted — this closes the poolXno-inflation / over-refund forgery. */
 export async function readPoolDepositsFromChain(
   rpcKey: string,
   pool: PoolKeys,
   poolBlocks: NanoBlock[]
 ): Promise<Map<string, bigint>> {
-  const sourceHashes = poolBlocks
-    .filter((b) => (b.subtype === "receive" || b.subtype === "open") && /^[0-9a-fA-F]{64}$/.test(b.link))
-    .map((b) => b.link);
-  const pend = await nanoRpc(rpcKey, { action: "pending", account: pool.address, count: 500 }).catch(() => ({}));
-  const all = [...new Set([...sourceHashes, ...(((pend as any).blocks ?? []) as string[])])];
-
   const out = new Map<string, bigint>();
-  for (let i = 0; i < all.length; i += 200) {
-    const chunk = all.slice(i, i + 200);
-    const info = (await nanoRpc(rpcKey, { action: "blocks_info", hashes: chunk, json_block: true })) as any;
-    for (const h of chunk) {
-      const b = info.blocks?.[h];
-      if (!b?.block_account) continue;
-      if (!verifyFetchedBlock(h, b)) continue;
-      const amount = BigInt(b.amount ?? "0");
-      if (amount <= 0n) continue;
-      out.set(b.block_account, (out.get(b.block_account) ?? 0n) + amount);
-    }
+  const add = (acct: string, amt: bigint) => {
+    if (amt > 0n) out.set(acct, (out.get(acct) ?? 0n) + amt);
+  };
+
+  // 1. Confirmed: pool receive/open blocks carry the trustworthy (derived)
+  //    amount; attribute it to the signed account of the source send.
+  const received = poolBlocks.filter(
+    (b) => (b.subtype === "receive" || b.subtype === "open") && /^[0-9a-fA-F]{64}$/.test(b.link)
+  );
+  const srcMeta = await fetchVerified(rpcKey, received.map((b) => b.link));
+  for (const b of received) {
+    const src = srcMeta.get(b.link);
+    if (src) add(src.account, BigInt(b.amount ?? "0"));
+  }
+
+  // 2. Pending: derive the source send's amount from ITS OWN signed balance
+  //    delta (need the source and the source's previous, both verified).
+  const pend = await nanoRpc(rpcKey, { action: "pending", account: pool.address, count: 500 }).catch(() => ({}));
+  const pendingHashes = ((pend as any).blocks ?? []) as string[];
+  const pendMeta = await fetchVerified(rpcKey, pendingHashes);
+  const prevMeta = await fetchVerified(rpcKey, [...pendMeta.values()].map((m) => m.previous));
+  for (const [, m] of pendMeta) {
+    const prevBal = /^0+$/.test(m.previous) ? 0n : prevMeta.get(m.previous)?.balance;
+    if (prevBal === undefined) continue; // can't verify the delta → skip (fail-safe)
+    add(m.account, prevBal - m.balance); // a send: prev > current
   }
   return out;
 }
