@@ -58,6 +58,35 @@ export type MetaDecision =
   | { ok: false; code: number; error: string };
 
 /**
+ * Chain-anchor gate (W4): once a token's launch is indexed, the two
+ * irrecoverable actions are governed by ON-CHAIN anchors (core/metaAnchor.ts)
+ * — the store merely syncs. `chain` is the chain-derived authority state
+ * (null while the launch is unindexed → store-level rules apply alone).
+ */
+export function gateMetaAction(
+  action: string,
+  chain: import("../core/metaAnchor").MetaAuthorityState | null
+): { ok: true } | { ok: false; code: number; error: string } {
+  if (!chain) return { ok: true };
+  if (chain.immutable) {
+    // Only the one-time store-sync of an anchored freeze may still write.
+    return action === "makeImmutable"
+      ? { ok: true }
+      : { ok: false, code: 403, error: "metadata is immutable (anchored on-chain)" };
+  }
+  if (action === "makeImmutable") {
+    return { ok: false, code: 409, error: "broadcast the immutable anchor first (1-raw send, link = immutableAnchorLink(tokenId))" };
+  }
+  if (action.startsWith("setAuthority:")) {
+    const target = action.slice("setAuthority:".length);
+    if (chain.authority !== target) {
+      return { ok: false, code: 409, error: "broadcast the setAuthority anchor first (on-chain authority governs)" };
+    }
+  }
+  return { ok: true };
+}
+
+/**
  * Authorization policy. `prev` is the stored row (if any), `onchainCreator` is
  * the indexer's creator for this token (null if the launch isn't indexed yet).
  * Assumes the signature was already verified for `u.account`.

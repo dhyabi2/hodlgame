@@ -11,6 +11,7 @@ import { commentsFor, type Comment } from "./comments";
 import { commitResolver } from "./commits";
 import { loadNanoRpcKey } from "../lib/rpc";
 import { watchedAccounts } from "./operator";
+import { deriveMetaAuthority, type MetaAuthorityState } from "../core/metaAnchor";
 
 export interface TokenView {
   tokenId: string;
@@ -50,6 +51,7 @@ interface RawMarket {
   byToken: Map<string, TokenAnalytics>;
   meta: Map<string, any>;
   master: string;
+  metaAuthority: Map<string, MetaAuthorityState>;
 }
 
 let cache: { at: number; value: RawMarket } | null = null;
@@ -63,7 +65,12 @@ async function computeFresh(): Promise<RawMarket> {
   const idx = new MultiIndexer(new NanoRpcSource(loadNanoRpcKey()), (id) => reg.get(id) ?? EMPTY_META, commit, poolKey);
   const events = await idx.collectEvents(await watchedAccounts());
   const { state, byToken } = analyze(events);
-  return { state, byToken, meta: reg, master };
+  // Chain-derived metadata-authority state (core/metaAnchor.ts): seeded by
+  // each launch creator, folded over on-chain immutable/setAuthority anchors.
+  const creators = new Map<string, string>();
+  for (const [tokenId, s] of state) if (s.creator) creators.set(tokenId, s.creator);
+  const metaAuthority = deriveMetaAuthority(idx.getMetaAnchors(), creators);
+  return { state, byToken, meta: reg, master, metaAuthority };
 }
 
 /** Shared in-memory cache so burst requests (feed + detail + SSE) share one index. */
@@ -80,6 +87,17 @@ export async function creatorOf(tokenId: string): Promise<string | null> {
   try {
     const { state } = await compute();
     return state.get(tokenId)?.creator || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Chain-derived metadata-authority state for a token (creator seeded, folded
+ * over on-chain anchors), or null if the launch isn't indexed / RPC down. */
+export async function authorityStateOf(tokenId: string): Promise<MetaAuthorityState | null> {
+  try {
+    const { metaAuthority } = await compute();
+    return metaAuthority.get(tokenId) ?? null;
   } catch {
     return null;
   }

@@ -10,6 +10,13 @@ import { tokenIdFromLaunchHash, type TokenId } from "../core/token";
 import { decodeOpLink } from "../core/oplink";
 import { commitLink, isCommitLink, verifyCommit } from "../core/commit";
 import { isFragA, assembleFrag } from "../core/fraglink";
+import {
+  isImmutableAnchor,
+  isSetAuthorityAnchorA,
+  assembleSetAuthority,
+  tokenIdOfAnchor,
+  type MetaAnchor,
+} from "../core/metaAnchor";
 import type { Op } from "../core/ops";
 import { replayMulti } from "./replay";
 import type { BlockSource, NanoBlock } from "./blockSource";
@@ -93,6 +100,7 @@ export function canonicalOrder(a: IndexedEvent, b: IndexedEvent): number {
 export interface DecodedChain {
   events: { ev: IndexedEvent; prev: string }[];
   byHash: Map<string, NanoBlock>;
+  anchors: MetaAnchor[]; // metadata-authority anchors found on this chain
 }
 
 /**
@@ -181,6 +189,13 @@ export class MultiIndexer {
     return new Map(this.chainPools);
   }
 
+  /** Metadata-authority anchors found by the last collectEvents. */
+  private metaAnchors: MetaAnchor[] = [];
+
+  getMetaAnchors(): MetaAnchor[] {
+    return [...this.metaAnchors];
+  }
+
   /** Pull + decode all ops for the given accounts, in confirmation order.
    *
    * Two passes. Pass 1 derives each token's pool pubkey FROM CHAIN DATA: the
@@ -199,9 +214,40 @@ export class MultiIndexer {
     for (const b of blocks) childByPrev.set(b.previous, b);
     const consumed = new Set<string>();
     const events: { ev: IndexedEvent; prev: string }[] = [];
+    const anchors: MetaAnchor[] = [];
     for (const block of blocks) {
       if (consumed.has(block.hash)) continue;
       const isOpCarrier = block.amount == null || BigInt(block.amount) === 1n;
+      if (isOpCarrier && isImmutableAnchor(block.link)) {
+        anchors.push({
+          tokenId: tokenIdOfAnchor(block.link),
+          kind: "immutable",
+          sender: block.account,
+          height: block.height,
+          hash: block.hash,
+        });
+        continue;
+      }
+      if (isOpCarrier && isSetAuthorityAnchorA(block.link)) {
+        const child = childByPrev.get(block.hash);
+        if (!child) continue; // dangling A → wait for B
+        if (child.amount != null && BigInt(child.amount) !== 1n) continue;
+        try {
+          const d = assembleSetAuthority(block.link, child.link);
+          consumed.add(child.hash);
+          anchors.push({
+            tokenId: d.tokenId,
+            kind: "setAuthority",
+            newAuthority: d.newAuthority,
+            sender: block.account,
+            height: child.height,
+            hash: child.hash,
+          });
+        } catch {
+          /* malformed pair → deterministically ignored */
+        }
+        continue;
+      }
       if (isOpCarrier && isFragA(block.link)) {
         const child = childByPrev.get(block.hash);
         if (!child) continue; // dangling A → wait for B
@@ -225,7 +271,7 @@ export class MultiIndexer {
       const ev = this.decode(block);
       if (ev) events.push({ ev, prev: block.previous });
     }
-    return { events, byHash };
+    return { events, byHash, anchors };
   }
 
   async collectEvents(accounts: string[]): Promise<IndexedEvent[]> {
@@ -233,6 +279,7 @@ export class MultiIndexer {
     for (const account of accounts) decoded.set(account, this.decodeChain(await this.source.listBlocks(account)));
 
     this.chainPools = derivePoolKeysFromChain(decoded);
+    this.metaAnchors = [...decoded.values()].flatMap((d) => d.anchors);
     const poolOf = (tokenId: TokenId): string | null =>
       this.chainPools.get(tokenId) ?? this.poolKey?.(tokenId) ?? null;
 

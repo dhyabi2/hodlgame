@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import * as nanocurrency from "nanocurrency";
 import { metaFieldsHash, metaSignDigest, type MetaFields } from "../core/metaAuth";
-import { verifyMetaSignature, decideMetaUpdate, type SignedMetaUpdate } from "./metaAuth";
+import { verifyMetaSignature, decideMetaUpdate, gateMetaAction, type SignedMetaUpdate } from "./metaAuth";
 
 const SEED_A = "1".repeat(64);
 const SEED_B = "2".repeat(64);
@@ -109,6 +109,25 @@ function signed(keys: typeof CREATOR, seq: number, action = "update", meta: Meta
   const unknown = signed(CREATOR, 11, "selfdestruct");
   const d2 = decideMetaUpdate(unknown, null, CREATOR.address);
   assert.ok(!d2.ok && d2.code === 400, "unknown action rejected");
+}
+
+// 9. Chain-anchor gate (W4): on-chain state governs the two anchored actions.
+{
+  const live = { authority: CREATOR.address, immutable: false };
+  const frozen = { authority: CREATOR.address, immutable: true };
+
+  assert.ok(gateMetaAction("update", null).ok, "unindexed launch → store rules only");
+  assert.ok(gateMetaAction("update", live).ok, "plain update passes");
+  assert.ok(!gateMetaAction("update", frozen).ok, "frozen chain blocks updates");
+  assert.ok(gateMetaAction("makeImmutable", frozen).ok, "anchored freeze may sync to store");
+  const needAnchor = gateMetaAction("makeImmutable", live);
+  assert.ok(!needAnchor.ok && needAnchor.code === 409, "freeze without anchor → anchor-first");
+  const wrongTarget = gateMetaAction(`setAuthority:${ATTACKER.address}`, live);
+  assert.ok(!wrongTarget.ok && wrongTarget.code === 409, "transfer without matching anchor → anchor-first");
+  assert.ok(
+    gateMetaAction(`setAuthority:${CREATOR.address}`, { authority: CREATOR.address, immutable: false }).ok,
+    "transfer whose anchor already governs may sync"
+  );
 }
 
 console.log("✅ metadata auth tests passed");

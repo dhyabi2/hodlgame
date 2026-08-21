@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { loadMetaRow, saveMetaRow } from "../../../server/tokens";
 import { isTokenId, sanitizeMeta } from "../../../server/validate";
-import { verifyMetaSignature, decideMetaUpdate } from "../../../server/metaAuth";
-import { creatorOf } from "../../../server/market";
+import { verifyMetaSignature, decideMetaUpdate, gateMetaAction } from "../../../server/metaAuth";
+import { authorityStateOf } from "../../../server/market";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,8 +44,15 @@ export async function POST(req: Request) {
 
   try {
     const prev = await loadMetaRow(tokenId);
-    const onchainCreator = await creatorOf(tokenId);
-    const decision = decideMetaUpdate(update, prev, onchainCreator);
+    // Chain-derived authority state: launch creator folded over on-chain
+    // immutable/setAuthority anchors. Once indexed, it overrides the store —
+    // a successor with an empty database still enforces the right owner.
+    const chain = await authorityStateOf(tokenId);
+    const gate = gateMetaAction(update.action, chain);
+    if (!gate.ok) {
+      return NextResponse.json({ error: gate.error }, { status: gate.code });
+    }
+    const decision = decideMetaUpdate(update, prev, chain?.authority ?? null);
     if (!decision.ok) {
       return NextResponse.json({ error: decision.error }, { status: decision.code });
     }
