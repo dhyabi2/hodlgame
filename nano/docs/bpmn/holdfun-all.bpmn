@@ -52,7 +52,7 @@
       <bpmn:outgoing>Flow_Ov_4</bpmn:outgoing>
     </bpmn:serviceTask>
 
-    <bpmn:serviceTask id="Task_Ov_Fetch" name="fetch chains via RPC failover; verifyFetchedBlock (hash + signature)">
+    <bpmn:serviceTask id="Task_Ov_Fetch" name="fetch chains via rpc.nano.to (strict sole endpoint); verifyFetchedBlock (hash + signature)">
       <bpmn:documentation>lib/rpc.ts + indexer/blockSource.ts — untrusted endpoints can omit, never forge.</bpmn:documentation>
       <bpmn:incoming>Flow_Ov_4</bpmn:incoming>
       <bpmn:outgoing>Flow_Ov_5</bpmn:outgoing>
@@ -452,8 +452,8 @@
       <bpmn:outgoing>Flow_Replay_2</bpmn:outgoing>
     </bpmn:serviceTask>
 
-    <bpmn:serviceTask id="Task_Replay_Fetch" name="listBlocks via NANO_RPC_URLS failover; verifyFetchedBlock each">
-      <bpmn:documentation>lib/rpc.ts (circuit breakers, key only to nano.to, local PoW fallback) + blockSource.ts (recompute hash, check ed25519-blake2b signature; value-bearing failures rejected, valueless epoch blocks tolerated).</bpmn:documentation>
+    <bpmn:serviceTask id="Task_Replay_Fetch" name="listBlocks via rpc.nano.to (STRICT: sole endpoint); verifyFetchedBlock each">
+      <bpmn:documentation>lib/rpc.ts (STRICT RULE: rpc.nano.to exclusively; only fallback is LOCAL CPU proof-of-work) + blockSource.ts (recompute hash, check ed25519-blake2b signature; value-bearing failures rejected, valueless epoch blocks tolerated).</bpmn:documentation>
       <bpmn:incoming>Flow_Replay_2</bpmn:incoming>
       <bpmn:outgoing>Flow_Replay_3</bpmn:outgoing>
     </bpmn:serviceTask>

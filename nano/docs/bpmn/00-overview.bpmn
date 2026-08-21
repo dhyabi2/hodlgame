@@ -59,7 +59,7 @@
       <bpmn:outgoing>Flow_Ov_4</bpmn:outgoing>
     </bpmn:serviceTask>
 
-    <bpmn:serviceTask id="Task_Ov_Fetch" name="fetch chains via RPC failover; verifyFetchedBlock (hash + signature)">
+    <bpmn:serviceTask id="Task_Ov_Fetch" name="fetch chains via rpc.nano.to (strict sole endpoint); verifyFetchedBlock (hash + signature)">
       <bpmn:documentation>lib/rpc.ts + indexer/blockSource.ts — untrusted endpoints can omit, never forge.</bpmn:documentation>
       <bpmn:incoming>Flow_Ov_4</bpmn:incoming>
       <bpmn:outgoing>Flow_Ov_5</bpmn:outgoing>

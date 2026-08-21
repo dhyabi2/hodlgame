@@ -2,7 +2,7 @@
 
 > **Status (2026-08-21):** SHIPPED — W2 (chain-derived settlement), W3
 > (fragment links), W5 (ipfs:// images), W7 (anchor discovery), W8
-> (chain-derived pools + verify CLI), W9 (RPC failover + local block
+> (chain-derived pools + verify CLI), W9 (strict rpc.nano.to + local block
 > verification), W10 (dissolved by W2/W4), plus signed comments, LICENSE,
 > and CI with vendored-drift gate from W6. REMAINING — W1 custody only
 > (needs steward selection; see revision below), plus W6 org/second-owner
@@ -244,14 +244,14 @@ a new trust root); IPFS ledger hashes (Nano has no canonical global ledger
 hash; who signs the snapshot?); building an archive federation (the community
 node ecosystem already exists — consume it).
 
-**Winning design.** `NANO_RPC_URLS` ordered list (nano.to → SomeNano →
-rainstorm.city → localhost) with per-call failover and circuit breakers; key
-sent only to nano.to. **Verify blocks locally** — `nanocurrency` already
+**Winning design (REVISED by owner decision, 2026-08-21): STRICT single
+endpoint.** rpc.nano.to is the sole permitted RPC — do not add other
+endpoints, proxies, or work services anywhere in the codebase. **Verify blocks locally** — `nanocurrency` already
 ships `hashBlock`/`verifyBlock`: check hash, signature, and chain contiguity
 on everything fetched, so any untrusted endpoint becomes usable for reads
 (2-of-3 quorum rejected: integrity is self-certifying; quorum only helps
-omission and *hurts* liveness). Work: endpoint `work_generate` → local
-`computeWork` fallback → optional `NANO_WORK_URL` (nano-work-server).
+omission and *hurts* liveness). Work: rpc.nano.to `work_generate` → the only fallback is LOCAL CPU
+`computeWork` (offline, contacts no one).
 Document the self-hosted non-voting node (8GB RAM / 4-core / ~100GB ledger,
 400GB headroom) as the sovereign path. ~250–400 lines ×2 copies.
 
