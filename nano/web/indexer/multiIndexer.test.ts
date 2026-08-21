@@ -188,6 +188,52 @@ async function main() {
     }
   }
 
+  // 4c. Chain-derived pool resolution: with NO injected poolKey resolver, the
+  //     e2e flow replays to the identical state (the first creator-signed seed
+  //     deposit's link names the pool) — verification needs zero secrets.
+  {
+    const launchA: Op = { kind: "launch", supply: 1_000_000_000_000n, name: "A", symbol: "A", decimals: 6, image: "" };
+    const seed: Op = { kind: "seedLiq", xno: 1_000_000_000n, tokens: 950_000_000_000n };
+    const hashA = "f2".padEnd(64, "0");
+    const ta = tokenIdFromLaunchHash(hashA);
+    const POOL_PUB = "8".repeat(64);
+    const seedDepHash = "a2".padEnd(64, "0");
+    const buyDepHash = "b2".padEnd(64, "0");
+
+    const source = new MemorySource();
+    source.push(mkBlock(CREATOR, encodeOpLink("", launchA), 1n, hashA));
+    source.push(mkBlock(CREATOR, POOL_PUB, 2n, seedDepHash, { amount: "1000000000" }));
+    source.push(mkBlock(CREATOR, commitLink(ta, seed), 3n, "c2".padEnd(64, "0"), { previous: seedDepHash }));
+    source.push(mkBlock(ALICE, POOL_PUB, 3n, buyDepHash, { amount: "100000000" }));
+    source.push(mkBlock(ALICE, encodeOpLink(ta, { kind: "buy", xno: 0n, minTokens: 0n }), 4n, "d2".padEnd(64, "0"), { previous: buyDepHash, amount: "1" }));
+
+    const commits = commitMapResolver([{ tokenId: ta, op: seed }]);
+    // Secretless verifier: no poolKey resolver at all.
+    const verifier = new MultiIndexer(source, undefined, commits);
+    const { invalid } = await verifier.sync([CREATOR, ALICE]);
+    assert.equal(invalid, 0);
+    assert.equal(verifier.getChainPools().get(ta), POOL_PUB.toLowerCase(), "pool pubkey derived from chain");
+
+    // Operator indexer with the custody resolver reaches the identical state.
+    const operator = new MultiIndexer(source, undefined, commits, (id) => (id === ta ? POOL_PUB : null));
+    await operator.sync([CREATOR, ALICE]);
+    assert.deepEqual(verifier.getState(), operator.getState(), "secretless replay == operator replay");
+    assert.equal(verifier.getState().get(ta)!.poolXno, 1_100_000_000n, "seed 1e9 + buy 1e8 credited");
+
+    // Attack: a NON-creator "seed" chained from a deposit to an attacker
+    // account must not establish the pool (creator-signed only).
+    const evilSeed: Op = { kind: "seedLiq", xno: 1n, tokens: 1n };
+    const EVIL_POOL = "6".repeat(64);
+    const evilDep = "e2".padEnd(64, "0");
+    const source2 = new MemorySource();
+    source2.push(mkBlock(CREATOR, encodeOpLink("", launchA), 1n, hashA));
+    source2.push(mkBlock(ALICE, EVIL_POOL, 1n, evilDep, { amount: "5" }));
+    source2.push(mkBlock(ALICE, commitLink(ta, evilSeed), 2n, "f5".padEnd(64, "0"), { previous: evilDep }));
+    const v2 = new MultiIndexer(source2, undefined, commitMapResolver([{ tokenId: ta, op: evilSeed }]));
+    await v2.sync([CREATOR, ALICE]);
+    assert.equal(v2.getChainPools().get(ta), undefined, "non-creator cannot establish a pool");
+  }
+
   // 5. amount guard: a value transfer (amount > 1 raw) is never decoded as an op,
   //    even if its destination pubkey's first byte looks like an opcode.
   {

@@ -87,6 +87,45 @@ export function canonicalOrder(a: IndexedEvent, b: IndexedEvent): number {
   return a.hash < b.hash ? -1 : 1;
 }
 
+/**
+ * Pass-1 pool discovery: a token's pool pubkey is the `link` of the deposit
+ * that its FIRST (canonical order) creator-signed seedLiq chains from.
+ * First-wins and immutable thereafter; a non-creator can never establish a
+ * pool (the launch signer is authoritative), and every honest indexer
+ * converges on the same map because inputs and ordering are chain-defined.
+ */
+export function derivePoolKeysFromChain(
+  chains: Map<string, NanoBlock[]>,
+  decode: (b: NanoBlock) => IndexedEvent | null
+): Map<string, string> {
+  const creators = new Map<string, string>();
+  const candidates: { tokenId: string; sender: string; height: bigint; hash: string; poolPub: string }[] = [];
+  for (const blocks of chains.values()) {
+    const byHash = new Map(blocks.map((b) => [b.hash, b]));
+    for (const block of blocks) {
+      const ev = decode(block);
+      if (!ev) continue;
+      if (ev.op.kind === "launch") creators.set(ev.tokenId, ev.sender);
+      if (ev.op.kind === "seedLiq") {
+        const dep = byHash.get(block.previous);
+        if (dep && BigInt(dep.amount ?? "0") > 0n) {
+          candidates.push({ tokenId: ev.tokenId, sender: ev.sender, height: ev.height, hash: ev.hash, poolPub: dep.link });
+        }
+      }
+    }
+  }
+  candidates.sort((a, b) =>
+    a.height !== b.height ? (a.height < b.height ? -1 : 1) : a.hash < b.hash ? -1 : a.hash > b.hash ? 1 : 0
+  );
+  const pools = new Map<string, string>();
+  for (const c of candidates) {
+    if (pools.has(c.tokenId)) continue;
+    if (creators.get(c.tokenId) !== c.sender) continue;
+    pools.set(c.tokenId, c.poolPub.toLowerCase());
+  }
+  return pools;
+}
+
 export class MultiIndexer {
   private state: MultiState = multiEmpty();
 
@@ -132,11 +171,33 @@ export class MultiIndexer {
     return { tokenId, op, sender: block.account, height: block.height, timestamp, hash: block.hash };
   }
 
-  /** Pull + decode all ops for the given accounts, in confirmation order. */
+  /** tokenId → pool pubkey (lowercase hex) derived from chain history by the
+   * last collectEvents. Empty until a sync/collect has run. */
+  private chainPools = new Map<string, string>();
+
+  getChainPools(): Map<string, string> {
+    return new Map(this.chainPools);
+  }
+
+  /** Pull + decode all ops for the given accounts, in confirmation order.
+   *
+   * Two passes. Pass 1 derives each token's pool pubkey FROM CHAIN DATA: the
+   * first (canonical order) creator-signed seedLiq that chains from a real
+   * XNO send names the pool in that deposit's `link`. This makes replay
+   * verifiable with zero secrets — POOL_SEED is only needed to SIGN payouts,
+   * never to validate history. The injected `poolKey` resolver remains as a
+   * fallback for tokens with no seed yet (bootstrap) and MUST agree with the
+   * chain-derived key for serviced tokens (the sweep asserts this). */
   async collectEvents(accounts: string[]): Promise<IndexedEvent[]> {
+    const chains = new Map<string, NanoBlock[]>();
+    for (const account of accounts) chains.set(account, await this.source.listBlocks(account));
+
+    this.chainPools = derivePoolKeysFromChain(chains, (b) => this.decode(b));
+    const poolOf = (tokenId: TokenId): string | null =>
+      this.chainPools.get(tokenId) ?? this.poolKey?.(tokenId) ?? null;
+
     const events: IndexedEvent[] = [];
-    for (const account of accounts) {
-      const blocks = await this.source.listBlocks(account);
+    for (const blocks of chains.values()) {
       const byHash = new Map(blocks.map((b) => [b.hash, b]));
       for (const block of blocks) {
         const ev = this.decode(block);
@@ -146,7 +207,7 @@ export class MultiIndexer {
           // deposit block the op chains from (previous), not any declared value.
           const dep = byHash.get(block.previous);
           const amount = dep ? BigInt(dep.amount ?? "0") : 0n;
-          const poolPub = this.poolKey?.(ev.tokenId);
+          const poolPub = poolOf(ev.tokenId);
           const routesToPool = Boolean(dep && poolPub && dep.link.toLowerCase() === poolPub.toLowerCase());
           if (!dep || amount <= 0n || !routesToPool) continue; // malformed buy → skip
           ev.op = { ...ev.op, xno: amount };
@@ -157,7 +218,7 @@ export class MultiIndexer {
           // they never sent. Token-only adds (xno = 0) need no deposit.
           const dep = byHash.get(block.previous);
           const amount = dep ? BigInt(dep.amount ?? "0") : 0n;
-          const poolPub = this.poolKey?.(ev.tokenId);
+          const poolPub = poolOf(ev.tokenId);
           const routesToPool = Boolean(dep && poolPub && dep.link.toLowerCase() === poolPub.toLowerCase());
           if (!dep || amount <= 0n || !routesToPool) continue; // unbacked xno → skip
           ev.op = { ...ev.op, xno: amount };

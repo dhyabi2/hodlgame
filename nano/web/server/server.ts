@@ -4,6 +4,7 @@
 import * as http from "node:http";
 import type { State } from "../core/state";
 import { watched, indexer, runSweep } from "./operator";
+import { stateRoot } from "../core/canonical";
 
 const PORT = Number(process.env.PORT ?? 8080);
 
@@ -62,6 +63,12 @@ const server = http.createServer(async (req, res) => {
   try {
     if (url.pathname === "/health") {
       return json(res, 200, { ok: true, poolSeed: Boolean(process.env.POOL_SEED) });
+    }
+    if (url.pathname === "/root") {
+      // Consensus state root — anyone can recompute it with scripts/verify.ts
+      // (no secrets needed) and hold this indexer accountable.
+      const idx = await indexer();
+      return json(res, 200, { root: stateRoot(idx.getState()), tokens: idx.getState().size });
     }
     if (url.pathname === "/tokens") {
       const idx = await indexer();

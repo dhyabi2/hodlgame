@@ -44,11 +44,29 @@ export async function runSweep(onlyToken: string | null) {
     const { sellPayouts } = analyze(events);
 
     const known = [...idx.getState().keys()];
-    const targets = onlyToken ? (known.includes(onlyToken) ? [onlyToken] : []) : known;
+    let targets = onlyToken ? (known.includes(onlyToken) ? [onlyToken] : []) : known;
+
+    // Custody consistency: the chain-derived pool (what the deterministic
+    // ledger validated deposits against) must be the custody-derived account
+    // (what we can sign for). A mismatch means the creator seeded a pool we
+    // don't hold — never service it: receives/payouts would either fail or
+    // pay from the wrong account.
+    const chainPools = idx.getChainPools();
+    const mismatched: string[] = [];
+    targets = targets.filter((tokenId) => {
+      const chainPub = chainPools.get(tokenId);
+      if (chainPub && chainPub !== tokenPoolKeys(masterSeed, tokenId).publicKey.toLowerCase()) {
+        mismatched.push(tokenId);
+        return false;
+      }
+      return true;
+    });
+    if (mismatched.length) console.warn("skipping non-custody pools:", mismatched.map((t) => t.slice(0, 12)).join(", "));
 
     const received = await receivePoolsMulti(key, masterSeed, targets);
 
-    const payouts = onlyToken ? sellPayouts.filter((p) => p.tokenId === onlyToken) : sellPayouts;
+    const serviceable = new Set(targets);
+    const payouts = sellPayouts.filter((p) => serviceable.has(p.tokenId));
     const { paid, skipped } = await payoutSellsMulti(key, masterSeed, payouts, []);
 
     const refunds: string[] = [];
