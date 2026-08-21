@@ -52,6 +52,15 @@ indexer (who re-checks the commitment). BlackBird uses the same pattern.
 - Indexer state is a `MultiState = Map<tokenId, State>` (`core/multi.ts`); each
   token has its own `supply`/`poolXno`/`poolTokens`/`balances`/`treasury` and its
   own XNO pool account.
+- **Off-chain metadata is signed** (`core/metaAuth.ts`, `server/metaAuth.ts`):
+  every registry write carries an ed25519-blake2b signature by the token's
+  authority over `blake2b("holdfun-meta-v1" ‖ tokenId ‖ seq ‖ action ‖
+  hash(sanitized fields))`. Authority = the on-chain launch signer (a
+  provisional first-writer holds it only until the launch is indexed, then the
+  creator overrides and the row locks). A strictly-increasing `seq` blocks
+  replay; `makeImmutable` freezes a row one-way; `setAuthority:<addr>`
+  transfers control. The domain prefix keeps metadata signatures and Nano
+  block signatures in disjoint digest spaces.
 
 ### 2.2 Per-token custody (HD)
 
@@ -129,7 +138,12 @@ totalStaked += amount` (settle `rewardDebt` first).
 0; pay from `rebateVault`; clamp to available; settle debt (carry shortfall).
 
 **seedLiq / addLiq(xno, tokens)** — creator only; move `tokens` from `treasury`
-into the pool; XNO is sent to the pool account.
+into the pool; XNO is sent to the pool account. **Value-bound like buys**: when
+`xno > 0` the commit op block must chain (`previous`) from a real XNO send to
+the token's pool account, and that deposit's native amount overrides the
+declared `xno` (an unbacked declaration is skipped entirely). `xno = 0`
+token-only adds need no deposit. Credited seed/add deposits are excluded from
+the sweep's refund rule so a creator's seed is never refunded back out.
 
 ## 6. Rewards (height clock)
 

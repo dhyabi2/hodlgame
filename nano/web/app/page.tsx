@@ -6,6 +6,8 @@ import dynamic from "next/dynamic";
 import { encodeOpLink } from "../core/oplink";
 import { tokenIdFromLaunchHash } from "../core/token";
 import { stringify } from "../core/json";
+import { metaFieldsHash, metaSignDigest } from "../core/metaAuth";
+import { sanitizeMeta } from "../server/validate";
 import type { Op } from "../core/ops";
 import { Sparkline } from "./components/Sparkline";
 import { loadWallet, saveWallet, removeWallet, encryptSeed, decryptSeed } from "./lib/wallet";
@@ -1065,10 +1067,16 @@ function CreateToken({
         1n
       );
       const tokenId = tokenIdFromLaunchHash(hash);
+      // Sign the SANITIZED fields (the server verifies against its own
+      // sanitized copy) with the launch key — only the creator can publish.
+      const meta = sanitizeMeta({ name, symbol, decimals, image, description, website, twitter, telegram });
+      const seq = Date.now();
+      const digest = metaSignDigest(tokenId, seq, "update", metaFieldsHash(meta));
+      const signature = nanocurrency.signBlock({ hash: digest, secretKey: keys.secretKey });
       await fetch("/api/tokens", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tokenId, name, symbol, decimals, image, description, website, twitter, telegram }),
+        body: JSON.stringify({ tokenId, ...meta, account: keys.address, signature, seq, action: "update" }),
       });
       say(`launch ✓ ${hash.slice(0, 10)}…`);
       onCreated(tokenId);

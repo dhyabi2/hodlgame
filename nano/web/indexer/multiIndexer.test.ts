@@ -106,9 +106,14 @@ async function main() {
     const POOL_PUB = "8".repeat(64);
     const depHash = "2".repeat(64);
 
+    const seedDepHash = "5".repeat(64);
+
     const source = new MemorySource();
     source.push(mkBlock(CREATOR, encodeOpLink("", launchA), 1n, hashA));
-    source.push(mkBlock(CREATOR, commitLink(ta, seed), 2n, "1".repeat(64)));
+    // seed deposit (CREATOR sends 1e9 raw XNO to token A's pool, value-bound seedLiq part 1)
+    source.push(mkBlock(CREATOR, POOL_PUB, 2n, seedDepHash, { amount: "1000000000" }));
+    // seedLiq commit op chained after the seed deposit (part 2)
+    source.push(mkBlock(CREATOR, commitLink(ta, seed), 3n, "1".repeat(64), { previous: seedDepHash }));
     // deposit (ALICE sends 100_000_000 raw XNO to token A's pool)
     source.push(mkBlock(ALICE, POOL_PUB, 3n, depHash, { amount: "100000000" }));
     // buy op chained after the deposit
@@ -127,6 +132,60 @@ async function main() {
     assert.ok(s.poolXno > 1_000_000_000n && s.poolXno <= 1_100_000_000n, "pool XNO = seedLiq 1e9 + buy 1e8 − sell out");
     assert.ok(s.poolTokens > 0n, "token has liquidity after seedLiq");
     assert.ok((s.balances.get(ALICE) ?? 0n) > 0n, "buyer holds tokens after buy/sell");
+  }
+
+  // 4b. Value-bound seedLiq: declared pool XNO that was never sent is skipped,
+  //     and a real deposit's amount OVERRIDES an inflated declaration.
+  {
+    const launchA: Op = { kind: "launch", supply: 1_000_000_000_000n, name: "A", symbol: "A", decimals: 6, image: "" };
+    const inflated: Op = { kind: "seedLiq", xno: 999_000_000_000n, tokens: 950_000_000_000n };
+    const hashA = "a1".padEnd(64, "0");
+    const ta = tokenIdFromLaunchHash(hashA);
+    const POOL_PUB = "7".repeat(64);
+    const poolKey = (id: string) => (id === ta ? POOL_PUB : null);
+
+    // Attack 1: inflated seedLiq with NO deposit chained → op is skipped entirely.
+    {
+      const source = new MemorySource();
+      source.push(mkBlock(CREATOR, encodeOpLink("", launchA), 1n, hashA));
+      source.push(mkBlock(CREATOR, commitLink(ta, inflated), 2n, "b1".padEnd(64, "0")));
+      const commits = commitMapResolver([{ tokenId: ta, op: inflated }]);
+      const idx = new MultiIndexer(source, undefined, commits, poolKey);
+      const { applied, invalid } = await idx.sync([CREATOR]);
+      assert.equal(invalid, 0, "unbacked seedLiq is skipped, not applied-invalid");
+      assert.equal(applied, 1, "only the launch applied");
+      assert.equal(idx.getState().get(ta)!.poolXno, 0n, "no phantom pool XNO");
+    }
+
+    // Attack 2: inflated declaration but a real (smaller) deposit → the deposit
+    // amount is authoritative.
+    {
+      const depHash = "c1".padEnd(64, "0");
+      const source = new MemorySource();
+      source.push(mkBlock(CREATOR, encodeOpLink("", launchA), 1n, hashA));
+      source.push(mkBlock(CREATOR, POOL_PUB, 2n, depHash, { amount: "1000000000" }));
+      source.push(mkBlock(CREATOR, commitLink(ta, inflated), 3n, "d1".padEnd(64, "0"), { previous: depHash }));
+      const commits = commitMapResolver([{ tokenId: ta, op: inflated }]);
+      const idx = new MultiIndexer(source, undefined, commits, poolKey);
+      const { applied, invalid } = await idx.sync([CREATOR]);
+      assert.equal(invalid, 0);
+      assert.equal(applied, 2, "launch + value-bound seedLiq applied");
+      assert.equal(idx.getState().get(ta)!.poolXno, 1_000_000_000n, "poolXno = deposit, not declaration");
+    }
+
+    // Honest token-only add (xno = 0) still needs no deposit.
+    {
+      const tokenOnly: Op = { kind: "seedLiq", xno: 0n, tokens: 950_000_000_000n };
+      const source = new MemorySource();
+      source.push(mkBlock(CREATOR, encodeOpLink("", launchA), 1n, hashA));
+      source.push(mkBlock(CREATOR, commitLink(ta, tokenOnly), 2n, "e1".padEnd(64, "0")));
+      const commits = commitMapResolver([{ tokenId: ta, op: tokenOnly }]);
+      const idx = new MultiIndexer(source, undefined, commits, poolKey);
+      const { applied, invalid } = await idx.sync([CREATOR]);
+      assert.equal(invalid, 0);
+      assert.equal(applied, 2, "launch + token-only seedLiq applied");
+      assert.equal(idx.getState().get(ta)!.poolTokens, 950_000_000_000n);
+    }
   }
 
   // 5. amount guard: a value transfer (amount > 1 raw) is never decoded as an op,

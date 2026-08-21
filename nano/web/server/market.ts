@@ -80,6 +80,17 @@ async function compute(): Promise<RawMarket> {
   return value;
 }
 
+/** On-chain creator for a token (launch block signer), or null if the launch
+ * isn't indexed yet / the RPC is unreachable. Used as the metadata authority. */
+export async function creatorOf(tokenId: string): Promise<string | null> {
+  try {
+    const { state } = await compute();
+    return state.get(tokenId)?.creator || null;
+  } catch {
+    return null;
+  }
+}
+
 export function bustCache(): void {
   cache = null;
 }

@@ -13,7 +13,7 @@
 import { applyBlock, multiEmpty, type MultiState } from "../core/multi";
 import type { IndexedEvent } from "../indexer/multiIndexer";
 
-/** tokenId → (sender → xno credited by valid buy ops). */
+/** tokenId → (sender → xno credited by valid buy / seedLiq / addLiq ops). */
 export type TokenCredits = Map<string, Map<string, bigint>>;
 
 export function creditedBuys(events: IndexedEvent[]): TokenCredits {
@@ -27,9 +27,14 @@ export function creditedBuys(events: IndexedEvent[]): TokenCredits {
       continue; // rejected op → not credited
     }
     s = next;
-    if (ev.op.kind === "buy") {
+    // seedLiq/addLiq deposits are value-bound like buys (the op chains from a
+    // real pool send), so they must credit too — otherwise the sweep would see
+    // the creator's seed as uncredited pool XNO and refund it, draining the
+    // seed back out of the pool.
+    const isLiq = (ev.op.kind === "seedLiq" || ev.op.kind === "addLiq") && ev.op.xno > 0n;
+    if (ev.op.kind === "buy" || isLiq) {
       const bySender = credits.get(ev.tokenId) ?? new Map<string, bigint>();
-      bySender.set(ev.sender, (bySender.get(ev.sender) ?? 0n) + ev.op.xno);
+      bySender.set(ev.sender, (bySender.get(ev.sender) ?? 0n) + (ev.op as { xno: bigint }).xno);
       credits.set(ev.tokenId, bySender);
     }
   }

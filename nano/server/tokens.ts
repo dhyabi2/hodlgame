@@ -1,16 +1,24 @@
 // Off-chain token metadata registry. The compact launch op carries only the
 // supply; name/symbol/decimals/image + socials are published off-chain (durable
 // store) and fed back through the indexer's MetaResolver. Keyed by tokenId.
+//
+// Writes are authenticated: each row also stores the metadata authority
+// (creator account, chain-derived), the last accepted signature seq, and the
+// immutable flag — see metaAuth.ts. loadRegistry() strips those auth fields
+// (sanitizeMeta picks only display fields), so the indexer sees plain meta.
 
 import type { LaunchMeta } from "../indexer/multiIndexer";
 import { loadJson, saveJson } from "./store";
 import { isTokenId, sanitizeMeta } from "./validate";
+import type { MetaAuthRow } from "./metaAuth";
 
 export const EMPTY_META: LaunchMeta = { name: "", symbol: "", decimals: 6, image: "" };
 
+export type StoredMetaRow = LaunchMeta & MetaAuthRow;
+
 /** tokenId → metadata. Returns an empty map if no registry exists yet. */
 export async function loadRegistry(): Promise<Map<string, LaunchMeta>> {
-  const raw = (await loadJson<Record<string, LaunchMeta>>("tokens")) ?? {};
+  const raw = (await loadJson<Record<string, StoredMetaRow>>("tokens")) ?? {};
   const out = new Map<string, LaunchMeta>();
   // Sanitize on read too, so any pre-existing bad rows (e.g. decimals=-1, which
   // would crash analytics) can never take down the feed.
@@ -21,9 +29,22 @@ export async function loadRegistry(): Promise<Map<string, LaunchMeta>> {
   return out;
 }
 
-export async function registerToken(tokenId: string, meta: LaunchMeta): Promise<void> {
+/** Full stored row (meta + auth fields) for one token, or null. */
+export async function loadMetaRow(tokenId: string): Promise<StoredMetaRow | null> {
+  if (!isTokenId(tokenId)) return null;
+  const raw = (await loadJson<Record<string, StoredMetaRow>>("tokens")) ?? {};
+  return raw[tokenId] ?? null;
+}
+
+/** Persist a token's sanitized meta together with its auth row. */
+export async function saveMetaRow(tokenId: string, meta: LaunchMeta, auth: MetaAuthRow): Promise<void> {
   if (!isTokenId(tokenId)) throw new Error("invalid tokenId");
-  const reg = await loadRegistry();
-  reg.set(tokenId, sanitizeMeta(meta));
-  await saveJson("tokens", Object.fromEntries(reg));
+  const raw = (await loadJson<Record<string, StoredMetaRow>>("tokens")) ?? {};
+  raw[tokenId] = { ...sanitizeMeta(meta), ...auth };
+  await saveJson("tokens", raw);
+}
+
+/** @deprecated unauthenticated write — kept for tests/tools only. */
+export async function registerToken(tokenId: string, meta: LaunchMeta): Promise<void> {
+  await saveMetaRow(tokenId, meta, {});
 }

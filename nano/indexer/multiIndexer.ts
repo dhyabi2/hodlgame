@@ -150,6 +150,17 @@ export class MultiIndexer {
           const routesToPool = Boolean(dep && poolPub && dep.link.toLowerCase() === poolPub.toLowerCase());
           if (!dep || amount <= 0n || !routesToPool) continue; // malformed buy → skip
           ev.op = { ...ev.op, xno: amount };
+        } else if ((ev.op.kind === "seedLiq" || ev.op.kind === "addLiq") && ev.op.xno > 0n) {
+          // Value-bound liquidity: declared pool XNO only credits when the op
+          // chains from a real XNO send to this token's pool, and the deposit's
+          // native amount is authoritative — a creator cannot declare reserves
+          // they never sent. Token-only adds (xno = 0) need no deposit.
+          const dep = byHash.get(block.previous);
+          const amount = dep ? BigInt(dep.amount ?? "0") : 0n;
+          const poolPub = this.poolKey?.(ev.tokenId);
+          const routesToPool = Boolean(dep && poolPub && dep.link.toLowerCase() === poolPub.toLowerCase());
+          if (!dep || amount <= 0n || !routesToPool) continue; // unbacked xno → skip
+          ev.op = { ...ev.op, xno: amount };
         }
         events.push(ev);
       }

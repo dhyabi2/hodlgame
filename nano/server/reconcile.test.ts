@@ -50,4 +50,14 @@ const credits = creditedBuys(events);
   assert.equal(refunds.size, 0, "fully-credited deposits refund nothing");
 }
 
+// 5. The creator's seed deposit is credited by the seedLiq op — the sweep must
+//    NOT refund it back out of the pool.
+{
+  const creator = credits.get(TA)!;
+  assert.equal(creator.get(CREATOR), 1_000_000_000n, "seedLiq xno credited to creator");
+  const got = new Map<string, bigint>([[CREATOR, 1_000_000_000n]]);
+  const refunds = computeRefunds(got, creator);
+  assert.ok(!refunds.has(CREATOR), "seed deposit never refunded");
+}
+
 console.log("✅ buy reconciliation tests passed");

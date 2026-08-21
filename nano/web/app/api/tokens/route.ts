@@ -1,11 +1,20 @@
 import { NextResponse } from "next/server";
-import { registerToken } from "../../../server/tokens";
+import { loadMetaRow, saveMetaRow } from "../../../server/tokens";
 import { isTokenId, sanitizeMeta } from "../../../server/validate";
+import { verifyMetaSignature, decideMetaUpdate } from "../../../server/metaAuth";
+import { creatorOf } from "../../../server/market";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Register a launched token's metadata (called by the launch UI after broadcast). */
+/**
+ * Register / update a launched token's metadata. Signed-only: the payload must
+ * carry { account, signature, seq, action } where `signature` is the creator's
+ * ed25519-blake2b signature over the domain-separated digest of the SANITIZED
+ * fields (core/metaAuth.ts). Authority = the on-chain launch signer; before the
+ * launch is indexed the first valid signer holds provisional authority, which
+ * the real creator overrides as soon as the chain catches up.
+ */
 export async function POST(req: Request) {
   let body: any;
   try {
@@ -17,9 +26,30 @@ export async function POST(req: Request) {
   if (!isTokenId(tokenId)) {
     return NextResponse.json({ error: "tokenId (32 hex) required" }, { status: 400 });
   }
+
+  // sanitizeMeta clamps decimals to 0..18 and drops non-http(s) URLs (XSS).
+  // The client signs the sanitized fields, so verification runs on them too.
+  const meta = sanitizeMeta(body);
+  const update = {
+    tokenId,
+    meta,
+    account: String(body?.account ?? ""),
+    signature: String(body?.signature ?? ""),
+    seq: Number(body?.seq ?? 0),
+    action: String(body?.action ?? "update"),
+  };
+  if (!verifyMetaSignature(update)) {
+    return NextResponse.json({ error: "invalid or missing creator signature" }, { status: 401 });
+  }
+
   try {
-    // sanitizeMeta clamps decimals to 0..18 and drops non-http(s) URLs (XSS).
-    await registerToken(tokenId, sanitizeMeta(body));
+    const prev = await loadMetaRow(tokenId);
+    const onchainCreator = await creatorOf(tokenId);
+    const decision = decideMetaUpdate(update, prev, onchainCreator);
+    if (!decision.ok) {
+      return NextResponse.json({ error: decision.error }, { status: decision.code });
+    }
+    await saveMetaRow(tokenId, meta, decision.row);
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? String(e) }, { status: 400 });
   }
