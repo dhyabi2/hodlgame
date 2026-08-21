@@ -333,7 +333,8 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#050505] text-white pb-20">
-      <header className="sticky top-0 z-20 border-b border-zinc-900 px-4 py-3 flex items-center justify-between bg-[#050505]/90 backdrop-blur">
+      <header className="sticky top-0 z-20 border-b border-zinc-900 bg-[#050505]/90 backdrop-blur">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-xl">🎉</span>
           <span className="text-lg font-black tracking-tight bg-gradient-to-r from-green-400 to-emerald-300 bg-clip-text text-transparent">
@@ -356,41 +357,50 @@ export default function Home() {
             🔒 unlock
           </button>
         )}
+        </div>
       </header>
 
-      <div className="max-w-2xl mx-auto px-4 py-5">
+      <div className="max-w-6xl mx-auto px-4 py-5">
         {selectedId && detail ? (
-          <TokenDetail
-            token={detail}
-            keys={keys}
-            busy={busy}
-            say={say}
-            submitBlock={submitBlock}
-            sendOp={sendOp}
-            promptUnlock={promptUnlock}
-            onBack={() => setSelectedId(null)}
-          />
+          <div className="max-w-3xl mx-auto">
+            <TokenDetail
+              token={detail}
+              keys={keys}
+              busy={busy}
+              say={say}
+              submitBlock={submitBlock}
+              sendOp={sendOp}
+              promptUnlock={promptUnlock}
+              onBack={() => setSelectedId(null)}
+            />
+          </div>
         ) : tab === "explore" ? (
           <Feed tokens={tokens} onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} />
         ) : tab === "scan" ? (
           <Explorer />
         ) : tab === "portfolio" ? (
-          <Portfolio tokens={tokens} onSelect={(id) => setSelectedId(id)} account={keys?.address} />
+          <div className="max-w-3xl mx-auto">
+            <Portfolio tokens={tokens} onSelect={(id) => setSelectedId(id)} account={keys?.address} />
+          </div>
         ) : tab === "create" ? (
-          <CreateToken
-            busy={busy}
-            setBusy={setBusy}
-            say={say}
-            keys={keys}
-            submitBlock={submitBlock}
-            promptUnlock={promptUnlock}
-            onCreated={(id) => {
-              setTab("explore");
-              setSelectedId(id);
-            }}
-          />
+          <div className="max-w-xl mx-auto">
+            <CreateToken
+              busy={busy}
+              setBusy={setBusy}
+              say={say}
+              keys={keys}
+              submitBlock={submitBlock}
+              promptUnlock={promptUnlock}
+              onCreated={(id) => {
+                setTab("explore");
+                setSelectedId(id);
+              }}
+            />
+          </div>
         ) : (
-          <WalletPanel keys={keys} hasWallet={hasWallet} unlock={unlock} lock={lock} remove={remove} say={say} />
+          <div className="max-w-xl mx-auto">
+            <WalletPanel keys={keys} hasWallet={hasWallet} unlock={unlock} lock={lock} remove={remove} say={say} />
+          </div>
         )}
 
         {log.length > 0 && (
@@ -846,7 +856,7 @@ function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id:
         </select>
       </div>
       {filtered.length === 0 && <p className="text-sm text-zinc-600 py-6 text-center">No coins match.</p>}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
         {filtered.map((t) => (
           <button
             key={t.tokenId}
@@ -858,21 +868,18 @@ function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id:
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <p className="font-bold text-sm truncate">{t.name}</p>
-                  <p className="text-[11px] text-zinc-500">${t.symbol}</p>
+                  <p className="text-[11px] text-zinc-500 shrink-0">${t.symbol}</p>
                 </div>
-                <p className="text-[11px] text-zinc-500">mc {fmtXno(t.marketCap)} XNO</p>
+                <p className="text-[11px] text-zinc-500 truncate">mc {fmtXno(t.marketCap)} XNO</p>
               </div>
-              <div className="flex flex-col items-end gap-1">
-                <Sparkline points={t.spark} width={80} height={28} color={trendColor(t.spark)} />
-                <p className="text-[11px] text-zinc-400">{fmtXno(t.price)} XNO</p>
-              </div>
+              <Sparkline points={t.spark} width={64} height={26} color={trendColor(t.spark)} />
             </div>
-            <div className="mt-3 flex items-center justify-between text-[11px] text-zinc-500">
-              <span className={"font-bold " + (t.change24h == null ? "text-zinc-600" : t.change24h >= 0 ? "text-green-400" : "text-red-400")}>
-                {pctStr(t.change24h)} 24h
+            <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-zinc-500">
+              <span className={"font-bold shrink-0 " + (t.change24h == null ? "text-zinc-600" : t.change24h >= 0 ? "text-green-400" : "text-red-400")}>
+                {pctStr(t.change24h)}
               </span>
-              <span>{t.holders} holders</span>
-              <span>vol {fmtXno(t.buyVolume)}</span>
+              <span className="truncate text-zinc-400">{fmtXno(t.price)} XNO</span>
+              <span className="shrink-0">{t.holders} hodl</span>
             </div>
           </button>
         ))}
