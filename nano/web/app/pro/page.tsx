@@ -68,7 +68,9 @@ export default function ProPage() {
         if (live) {
           const list: Token[] = j.tokens ?? [];
           setTokens(list);
-          if (!tokenId && list.length) setTokenId(list[0].tokenId);
+          // Functional update so a ?token= already set (via the other effect)
+          // is never clobbered by a stale-closure default to list[0].
+          if (list.length) setTokenId((prev) => prev ?? list[0].tokenId);
         }
       } catch {}
     };
