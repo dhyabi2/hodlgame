@@ -8,6 +8,7 @@ import { tokenIdFromLaunchHash } from "../core/token";
 import { stringify } from "../core/json";
 import { metaFieldsHash, metaSignDigest } from "../core/metaAuth";
 import { commentSignDigest } from "../core/commentAuth";
+import { ANCHOR_PUB } from "../core/anchor";
 import { sanitizeMeta } from "../server/validate";
 import type { Op } from "../core/ops";
 import { Sparkline } from "./components/Sparkline";
@@ -252,8 +253,40 @@ export default function Home() {
     };
   }, [selectedId, keys?.address]);
 
+  /** One-time 1-raw hello to the protocol anchor, so any indexer discovers
+   * this account from chain data alone (no operator watch-list). Best-effort:
+   * a failed hello never blocks the op — discovery has an env fallback. */
+  async function ensureHello(): Promise<void> {
+    if (!keys) return;
+    const flag = `holdfun-hello-${keys.address}`;
+    try {
+      if (localStorage.getItem(flag)) return;
+    } catch {
+      /* storage unavailable → attempt the hello each time; it's 1 raw */
+    }
+    try {
+      const info = await rpc("account_info", { account: keys.address, representative: "true" });
+      if (!info.frontier) return;
+      const work = (await rpc("work_generate", { hash: info.frontier, difficulty: "fffffff800000000" })).work;
+      const blk = buildBlock(keys.secretKey, {
+        work,
+        previous: info.frontier,
+        representative: info.representative,
+        balance: (BigInt(info.balance) - 1n).toString(),
+        link: ANCHOR_PUB,
+      });
+      await rpc("process", { json_block: "true", block: blk });
+      try {
+        localStorage.setItem(flag, "1");
+      } catch {}
+    } catch {
+      /* best-effort */
+    }
+  }
+
   async function submitBlock(link: string, balanceDelta: bigint): Promise<string> {
     if (!keys) throw new Error("connect first");
+    await ensureHello();
     const info = await rpc("account_info", { account: keys.address, representative: "true" });
     if (!info.frontier) throw new Error("account not opened — fund it first");
     const work = (await rpc("work_generate", { hash: info.frontier, difficulty: "fffffff800000000" })).work;

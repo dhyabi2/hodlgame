@@ -9,10 +9,32 @@ import { creditedBuys, computeRefunds } from "./reconcile";
 import { analyze } from "./analytics";
 import { commitResolver } from "./commits";
 import { loadNanoRpcKey } from "../lib/rpc";
+import { discoverAccounts } from "../indexer/discovery";
+import { ANCHOR_ADDRESS } from "../core/anchor";
 
 export function watched(): string[] {
   const raw = process.env.WATCHED_ACCOUNTS ?? "";
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+// Anchor-derived discovery (core/anchor.ts), cached briefly; the env list is
+// additive during migration and the fallback when discovery is unreachable.
+// Once every legacy account has been anchor-bootstrapped, WATCHED_ACCOUNTS
+// can be deleted.
+let discoveryCache: { at: number; users: string[] } | null = null;
+const DISCOVERY_TTL_MS = 30_000;
+
+export async function watchedAccounts(): Promise<string[]> {
+  const env = watched();
+  if (!discoveryCache || Date.now() - discoveryCache.at >= DISCOVERY_TTL_MS) {
+    try {
+      const d = await discoverAccounts(new NanoRpcSource(loadNanoRpcKey()), ANCHOR_ADDRESS);
+      discoveryCache = { at: Date.now(), users: d.users };
+    } catch {
+      // discovery unreachable → env-only this round
+    }
+  }
+  return [...new Set([...(discoveryCache?.users ?? []), ...env])].sort();
 }
 
 export async function indexer(): Promise<MultiIndexer> {
@@ -25,7 +47,7 @@ export async function indexer(): Promise<MultiIndexer> {
     commit,
     poolKey
   );
-  await idx.sync(watched());
+  await idx.sync(await watchedAccounts());
   return idx;
 }
 
@@ -39,7 +61,7 @@ export async function runSweep(onlyToken: string | null) {
     if (!masterSeed) return { error: "POOL_SEED not set" };
     const key = loadNanoRpcKey();
     const idx = await indexer();
-    const events = await idx.collectEvents(watched());
+    const events = await idx.collectEvents(await watchedAccounts());
     const credits = creditedBuys(events);
     const { sellPayouts } = analyze(events);
 

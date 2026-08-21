@@ -10,6 +10,7 @@ import { loadRegistry, EMPTY_META } from "./tokens";
 import { commentsFor, type Comment } from "./comments";
 import { commitResolver } from "./commits";
 import { loadNanoRpcKey } from "../lib/rpc";
+import { watchedAccounts } from "./operator";
 
 export interface TokenView {
   tokenId: string;
@@ -44,13 +45,6 @@ export interface TokenView {
   comments: Comment[];
 }
 
-function watched(): string[] {
-  return (process.env.WATCHED_ACCOUNTS ?? "")
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
 interface RawMarket {
   state: ReturnType<typeof analyze>["state"];
   byToken: Map<string, TokenAnalytics>;
@@ -67,7 +61,7 @@ async function computeFresh(): Promise<RawMarket> {
   const master = process.env.POOL_SEED ?? "";
   const poolKey = (tokenId: string) => (master ? tokenPoolKeys(master, tokenId).publicKey : null);
   const idx = new MultiIndexer(new NanoRpcSource(loadNanoRpcKey()), (id) => reg.get(id) ?? EMPTY_META, commit, poolKey);
-  const events = await idx.collectEvents(watched());
+  const events = await idx.collectEvents(await watchedAccounts());
   const { state, byToken } = analyze(events);
   return { state, byToken, meta: reg, master };
 }

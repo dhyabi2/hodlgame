@@ -13,6 +13,7 @@ import { computeRefunds } from "./reconcile";
 import { loadJson, saveJson } from "./store";
 import type { SellPayout } from "./analytics";
 import { nanoRpc, SEND_DIFFICULTY } from "../lib/rpc";
+import { ANCHOR_PUB, poolHelloRepAddress } from "../core/anchor";
 
 async function loadPaid(): Promise<Set<string>> {
   return new Set((await loadJson<string[]>("paid")) ?? []);
@@ -101,6 +102,33 @@ export async function receivePoolPending(
   return hashes;
 }
 
+/** One-time pool self-registration: a 1-raw send to the protocol anchor with
+ * the tokenId encoded in the representative, so any indexer discovers the
+ * pool→token binding from chain data (core/anchor.ts). Best-effort; the
+ * `hellos` store entry is only a cache — a lost entry re-sends 1 raw. */
+export async function ensurePoolHello(rpcKey: string, pool: PoolKeys, tokenId: string): Promise<void> {
+  const hellos = (await loadJson<Record<string, string>>("hellos")) ?? {};
+  if (hellos[pool.address]) return;
+  try {
+    const info = await nanoRpc(rpcKey, { action: "account_info", account: pool.address }).catch(() => null);
+    if (!info?.frontier || BigInt(info.balance ?? "0") < 1n) return; // not opened/funded yet
+    const work = (await nanoRpc(rpcKey, { action: "work_generate", hash: info.frontier, difficulty: SEND_DIFFICULTY })).work;
+    const { buildStateBlock } = await import("../client/nano");
+    const blk = buildStateBlock(pool.secretKey, {
+      work,
+      previous: info.frontier,
+      representative: poolHelloRepAddress(tokenId),
+      balance: (BigInt(info.balance) - 1n).toString(),
+      link: ANCHOR_PUB,
+    });
+    await nanoRpc(rpcKey, { action: "process", json_block: "true", subtype: "send", block: blk });
+    hellos[pool.address] = tokenId;
+    await saveJson("hellos", hellos);
+  } catch {
+    /* retry next sweep */
+  }
+}
+
 /** Receive pending XNO (buys) into every token's own pool account. */
 export async function receivePoolsMulti(
   rpcKey: string,
@@ -111,6 +139,7 @@ export async function receivePoolsMulti(
   for (const tokenId of tokenIds) {
     const pool = tokenPoolKeys(masterSeed, tokenId);
     hashes.push(...(await receivePoolPending(rpcKey, pool, tokenId)));
+    await ensurePoolHello(rpcKey, pool, tokenId);
   }
   return hashes;
 }
