@@ -65,9 +65,9 @@ async function main() {
     const r = await nanoRpc(key, { action: "process", json_block: "true", block: blk });
     return r.hash;
   })();
-  const seedOp = { kind: "seedLiq" as const, xno: BigInt(SEED_XNO), tokens: 950_000_000_000n };
+  const seedOp = { kind: "seedLiq" as const, xno: 0n, tokens: 950_000_000_000n }; // xno bound by the chained deposit
   ci = await info(key, creator.address);
-  await dataBlock(creator, seedSend, BigInt(ci.balance) - 1n, ci.representative, commitLink(tokenId, seedOp), key);
+  await dataBlock(creator, seedSend, BigInt(ci.balance) - 1n, ci.representative, encodeOpLink(tokenId, seedOp), key);
   await receivePoolPending(key, pool);
 
   // 3. buy: deposit (XNO to pool) + chained buy op

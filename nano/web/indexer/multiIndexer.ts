@@ -9,6 +9,7 @@ import { multiEmpty, type MultiState } from "../core/multi";
 import { tokenIdFromLaunchHash, type TokenId } from "../core/token";
 import { decodeOpLink } from "../core/oplink";
 import { commitLink, isCommitLink, verifyCommit } from "../core/commit";
+import { isFragA, assembleFrag } from "../core/fraglink";
 import type { Op } from "../core/ops";
 import { replayMulti } from "./replay";
 import type { BlockSource, NanoBlock } from "./blockSource";
@@ -87,6 +88,13 @@ export function canonicalOrder(a: IndexedEvent, b: IndexedEvent): number {
   return a.hash < b.hash ? -1 : 1;
 }
 
+/** One account chain, fragment-aware decoded: each entry is a routed event
+ * plus the op-carrier block's `previous` (for deposit value-binding). */
+export interface DecodedChain {
+  events: { ev: IndexedEvent; prev: string }[];
+  byHash: Map<string, NanoBlock>;
+}
+
 /**
  * Pass-1 pool discovery: a token's pool pubkey is the `link` of the deposit
  * that its FIRST (canonical order) creator-signed seedLiq chains from.
@@ -94,20 +102,14 @@ export function canonicalOrder(a: IndexedEvent, b: IndexedEvent): number {
  * pool (the launch signer is authoritative), and every honest indexer
  * converges on the same map because inputs and ordering are chain-defined.
  */
-export function derivePoolKeysFromChain(
-  chains: Map<string, NanoBlock[]>,
-  decode: (b: NanoBlock) => IndexedEvent | null
-): Map<string, string> {
+export function derivePoolKeysFromChain(chains: Map<string, DecodedChain>): Map<string, string> {
   const creators = new Map<string, string>();
   const candidates: { tokenId: string; sender: string; height: bigint; hash: string; poolPub: string }[] = [];
-  for (const blocks of chains.values()) {
-    const byHash = new Map(blocks.map((b) => [b.hash, b]));
-    for (const block of blocks) {
-      const ev = decode(block);
-      if (!ev) continue;
+  for (const { events, byHash } of chains.values()) {
+    for (const { ev, prev } of events) {
       if (ev.op.kind === "launch") creators.set(ev.tokenId, ev.sender);
       if (ev.op.kind === "seedLiq") {
-        const dep = byHash.get(block.previous);
+        const dep = byHash.get(prev);
         if (dep && BigInt(dep.amount ?? "0") > 0n) {
           candidates.push({ tokenId: ev.tokenId, sender: ev.sender, height: ev.height, hash: ev.hash, poolPub: dep.link });
         }
@@ -188,40 +190,79 @@ export class MultiIndexer {
    * never to validate history. The injected `poolKey` resolver remains as a
    * fallback for tokens with no seed yet (bootstrap) and MUST agree with the
    * chain-derived key for serviced tokens (the sweep asserts this). */
-  async collectEvents(accounts: string[]): Promise<IndexedEvent[]> {
-    const chains = new Map<string, NanoBlock[]>();
-    for (const account of accounts) chains.set(account, await this.source.listBlocks(account));
+  /** Fragment-aware decode of one account chain (no value binding yet). Frag
+   * B blocks are consumed by their A so their bytes are never mis-decoded as
+   * standalone ops; a dangling A is skipped deterministically. */
+  private decodeChain(blocks: NanoBlock[]): DecodedChain {
+    const byHash = new Map(blocks.map((b) => [b.hash, b]));
+    const childByPrev = new Map<string, NanoBlock>();
+    for (const b of blocks) childByPrev.set(b.previous, b);
+    const consumed = new Set<string>();
+    const events: { ev: IndexedEvent; prev: string }[] = [];
+    for (const block of blocks) {
+      if (consumed.has(block.hash)) continue;
+      const isOpCarrier = block.amount == null || BigInt(block.amount) === 1n;
+      if (isOpCarrier && isFragA(block.link)) {
+        const child = childByPrev.get(block.hash);
+        if (!child) continue; // dangling A → wait for B
+        if (child.amount != null && BigInt(child.amount) !== 1n) continue;
+        let d: { tokenId: TokenId; op: Op };
+        try {
+          d = assembleFrag(block.link, child.link);
+        } catch {
+          continue; // malformed pair → deterministically ignored
+        }
+        consumed.add(child.hash);
+        const timestamp = child.timestamp ? Number(child.timestamp) : undefined;
+        // The op completes only at B: height/hash come from B so canonical
+        // ordering is identical for every indexer.
+        events.push({
+          ev: { tokenId: d.tokenId, op: d.op, sender: block.account, height: child.height, timestamp, hash: child.hash },
+          prev: block.previous,
+        });
+        continue;
+      }
+      const ev = this.decode(block);
+      if (ev) events.push({ ev, prev: block.previous });
+    }
+    return { events, byHash };
+  }
 
-    this.chainPools = derivePoolKeysFromChain(chains, (b) => this.decode(b));
+  async collectEvents(accounts: string[]): Promise<IndexedEvent[]> {
+    const decoded = new Map<string, DecodedChain>();
+    for (const account of accounts) decoded.set(account, this.decodeChain(await this.source.listBlocks(account)));
+
+    this.chainPools = derivePoolKeysFromChain(decoded);
     const poolOf = (tokenId: TokenId): string | null =>
       this.chainPools.get(tokenId) ?? this.poolKey?.(tokenId) ?? null;
 
     const events: IndexedEvent[] = [];
-    for (const blocks of chains.values()) {
-      const byHash = new Map(blocks.map((b) => [b.hash, b]));
-      for (const block of blocks) {
-        const ev = this.decode(block);
-        if (!ev) continue;
+    for (const { events: evs, byHash } of decoded.values()) {
+      for (const { ev, prev } of evs) {
         if (ev.op.kind === "buy") {
           // Value-bound buy: the authoritative xno is the native amount of the
           // deposit block the op chains from (previous), not any declared value.
-          const dep = byHash.get(block.previous);
+          const dep = byHash.get(prev);
           const amount = dep ? BigInt(dep.amount ?? "0") : 0n;
           const poolPub = poolOf(ev.tokenId);
           const routesToPool = Boolean(dep && poolPub && dep.link.toLowerCase() === poolPub.toLowerCase());
           if (!dep || amount <= 0n || !routesToPool) continue; // malformed buy → skip
           ev.op = { ...ev.op, xno: amount };
-        } else if ((ev.op.kind === "seedLiq" || ev.op.kind === "addLiq") && ev.op.xno > 0n) {
-          // Value-bound liquidity: declared pool XNO only credits when the op
-          // chains from a real XNO send to this token's pool, and the deposit's
-          // native amount is authoritative — a creator cannot declare reserves
-          // they never sent. Token-only adds (xno = 0) need no deposit.
-          const dep = byHash.get(block.previous);
+        } else if (ev.op.kind === "seedLiq" || ev.op.kind === "addLiq") {
+          // Value-bound liquidity: pool XNO only ever credits from a real
+          // chained deposit send to this token's pool — the deposit's native
+          // amount is authoritative. Compact links declare xno=0 and get
+          // deposit-bound here; a legacy commit-reveal declaration (xno>0)
+          // without a backing deposit is skipped. Token-only adds pass as-is.
+          const dep = byHash.get(prev);
           const amount = dep ? BigInt(dep.amount ?? "0") : 0n;
           const poolPub = poolOf(ev.tokenId);
           const routesToPool = Boolean(dep && poolPub && dep.link.toLowerCase() === poolPub.toLowerCase());
-          if (!dep || amount <= 0n || !routesToPool) continue; // unbacked xno → skip
-          ev.op = { ...ev.op, xno: amount };
+          if (routesToPool && amount > 0n) {
+            ev.op = { ...ev.op, xno: amount };
+          } else if (ev.op.xno > 0n) {
+            continue; // declared-but-unbacked → skip
+          }
         }
         events.push(ev);
       }

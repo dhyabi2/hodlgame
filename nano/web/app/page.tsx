@@ -5,10 +5,11 @@ import * as nanocurrency from "nanocurrency";
 import dynamic from "next/dynamic";
 import { encodeOpLink } from "../core/oplink";
 import { tokenIdFromLaunchHash } from "../core/token";
-import { stringify } from "../core/json";
+
 import { metaFieldsHash, metaSignDigest } from "../core/metaAuth";
 import { commentSignDigest } from "../core/commentAuth";
 import { ANCHOR_PUB } from "../core/anchor";
+import { encodeFragLinks } from "../core/fraglink";
 import { sanitizeMeta } from "../server/validate";
 import type { Op } from "../core/ops";
 import { Sparkline } from "./components/Sparkline";
@@ -170,16 +171,6 @@ const quoteSell = (poolXno: string, poolTokens: string, tokens: bigint): bigint 
   return (tokens * px) / (pt + tokens);
 };
 
-async function registerCommit(tokenId: string, op: Op): Promise<string> {
-  const res = await fetch("/api/commits", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: stringify({ tokenId, op }),
-  });
-  const j = await res.json();
-  if (!j.link) throw new Error(j.error ?? "commit registration failed");
-  return j.link as string;
-}
 
 const inputC =
   "w-full rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-green-500";
@@ -732,8 +723,11 @@ function TokenDetail({
       if (slip > 0) {
         const expected = quoteSell(token.poolXno, token.poolTokens, raw);
         const minXno = (expected * BigInt(Math.round((100 - slip) * 100))) / 10000n;
-        const link = await registerCommit(token.tokenId, { kind: "sell", tokens: raw, minXno });
-        await submitBlock(link, 1n);
+        // Fragment links: the full op goes on-chain across two chained blocks
+        // (no off-chain commit registry). submitBlock chains B after A.
+        const [fragA, fragB] = encodeFragLinks(token.tokenId, { kind: "sell", tokens: raw, minXno });
+        await submitBlock(fragA, 1n);
+        await submitBlock(fragB, 1n);
         say("sell ✓");
       } else {
         await sendOp(token.tokenId, { kind: "sell", tokens: raw, minXno: 0n }, "sell");
@@ -749,8 +743,9 @@ function TokenDetail({
     if (!to || raw <= 0n) return say("enter recipient address + amount");
     if (!to.startsWith("nano_")) return say("recipient must be a nano_ address");
     try {
-      const link = await registerCommit(token.tokenId, { kind: "transfer", to, amount: raw });
-      const hash = await submitBlock(link, 1n);
+      const [fragA, fragB] = encodeFragLinks(token.tokenId, { kind: "transfer", to, amount: raw });
+      await submitBlock(fragA, 1n);
+      const hash = await submitBlock(fragB, 1n);
       say(`sent ✓ ${hash.slice(0, 10)}…`);
       setSendAmount("");
       setSendTo("");

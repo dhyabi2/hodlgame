@@ -97,8 +97,8 @@ async function main() {
 
   // 2. seedLiq: creator sends XNO to the token pool + a commit-reveal op.
   await sendXno(creator, pool.address, SEED_XNO, key);
-  const seedOp = { kind: "seedLiq" as const, xno: BigInt(SEED_XNO), tokens: 950_000_000_000n };
-  await op(creator, commitLink(tokenId, seedOp), key);
+  const seedOp = { kind: "seedLiq" as const, xno: 0n, tokens: 950_000_000_000n }; // xno bound by the chained deposit
+  await op(creator, encodeOpLink(tokenId, seedOp), key);
   console.log("seedLiq committed (XNO sent + commit op)");
 
   // 3. accept the XNO into the token's own pool account.

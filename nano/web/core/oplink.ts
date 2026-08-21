@@ -56,6 +56,8 @@ function primaryAmount(op: Op): bigint {
     case "stake":
     case "unstake": return op.amount;
     case "claim": return 0n;
+    case "seedLiq":
+    case "addLiq": return op.tokens; // xno is bound by the chained pool deposit
     default: throw new Error("op does not fit compact link: " + op.kind);
   }
 }
@@ -113,6 +115,12 @@ export function decodeOpLink(
       break;
     case OP_CODE.claim:
       op = { kind: "claim" };
+      break;
+    case OP_CODE.seedLiq:
+      op = { kind: "seedLiq", xno: 0n, tokens: amt }; // xno bound by chained deposit
+      break;
+    case OP_CODE.addLiq:
+      op = { kind: "addLiq", xno: 0n, tokens: amt };
       break;
     default:
       throw new Error("unknown op code " + code);

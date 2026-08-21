@@ -3,6 +3,14 @@ import { MemorySource, type NanoBlock } from "./blockSource";
 import { MultiIndexer, metaMapResolver, commitMapResolver } from "./multiIndexer";
 import { encodeOpLink } from "../core/oplink";
 import { commitLink } from "../core/commit";
+import { encodeFragLinks } from "../core/fraglink";
+import * as nanocurrency from "nanocurrency";
+
+/** Real nano_ address from a repeated-hex seed (fragment transfers need one). */
+function nanoAddr(seedChar: string): string {
+  const sk = nanocurrency.deriveSecretKey(seedChar.repeat(64), 0);
+  return nanocurrency.deriveAddress(nanocurrency.derivePublicKey(sk), { useNanoPrefix: true });
+}
 import { tokenIdFromLaunchHash } from "../core/token";
 import type { Op } from "../core/ops";
 
@@ -232,6 +240,58 @@ async function main() {
     const v2 = new MultiIndexer(source2, undefined, commitMapResolver([{ tokenId: ta, op: evilSeed }]));
     await v2.sync([CREATOR, ALICE]);
     assert.equal(v2.getChainPools().get(ta), undefined, "non-creator cannot establish a pool");
+  }
+
+  // 4d. Fragment links + compact seedLiq: the full flow with ZERO off-chain
+  //     payloads — compact seed (deposit-bound), fragment sell with slippage,
+  //     fragment transfer. Dangling frag A ignored; frag B never mis-decoded.
+  {
+    const launchA: Op = { kind: "launch", supply: 1_000_000_000_000n, name: "A", symbol: "A", decimals: 6, image: "" };
+    const hashA = "a3".padEnd(64, "0");
+    const ta = tokenIdFromLaunchHash(hashA);
+    const POOL_PUB = "8".repeat(64);
+    const BOB = nanoAddr("7");
+
+    const source = new MemorySource();
+    source.push(mkBlock(CREATOR, encodeOpLink("", launchA), 1n, hashA));
+    // compact seedLiq chained from the pool deposit — no commit registry at all
+    source.push(mkBlock(CREATOR, POOL_PUB, 2n, "b3".padEnd(64, "0"), { amount: "1000000000" }));
+    source.push(
+      mkBlock(CREATOR, encodeOpLink(ta, { kind: "seedLiq", xno: 0n, tokens: 950_000_000_000n }), 3n, "c3".padEnd(64, "0"), {
+        previous: "b3".padEnd(64, "0"),
+      })
+    );
+    // ALICE buys (value-bound as before)
+    source.push(mkBlock(ALICE, POOL_PUB, 3n, "d3".padEnd(64, "0"), { amount: "100000000" }));
+    source.push(
+      mkBlock(ALICE, encodeOpLink(ta, { kind: "buy", xno: 0n, minTokens: 0n }), 4n, "e3".padEnd(64, "0"), {
+        previous: "d3".padEnd(64, "0"),
+        amount: "1",
+      })
+    );
+    // ALICE sells with slippage via FRAGMENT links (payload fully on-chain)
+    const sellOp: Op = { kind: "sell", tokens: 10_000_000n, minXno: 1n };
+    const [sa, sb] = encodeFragLinks(ta, sellOp);
+    source.push(mkBlock(ALICE, sa, 5n, "f3".padEnd(64, "0"), { previous: "e3".padEnd(64, "0"), amount: "1" }));
+    source.push(mkBlock(ALICE, sb, 6n, "a4".padEnd(64, "0"), { previous: "f3".padEnd(64, "0"), amount: "1" }));
+    // ALICE transfers tokens to BOB via fragments
+    const xferOp: Op = { kind: "transfer", to: BOB, amount: 1_000_000n };
+    const [xa, xb] = encodeFragLinks(ta, xferOp);
+    source.push(mkBlock(ALICE, xa, 7n, "b4".padEnd(64, "0"), { previous: "a4".padEnd(64, "0"), amount: "1" }));
+    source.push(mkBlock(ALICE, xb, 8n, "c4".padEnd(64, "0"), { previous: "b4".padEnd(64, "0"), amount: "1" }));
+    // A DANGLING frag A (no B) must be ignored, not corrupt anything.
+    const [da] = encodeFragLinks(ta, { kind: "sell", tokens: 5n, minXno: 5n });
+    source.push(mkBlock(ALICE, da, 9n, "d4".padEnd(64, "0"), { previous: "c4".padEnd(64, "0"), amount: "1" }));
+
+    const idx = new MultiIndexer(source); // NO commit resolver, NO poolKey — chain only
+    const { applied, invalid } = await idx.sync([CREATOR, ALICE]);
+    assert.equal(invalid, 0, "no invalid ops");
+    assert.equal(applied, 5, "launch + seed + buy + frag-sell + frag-transfer applied; dangling A ignored");
+
+    const s = idx.getState().get(ta)!;
+    assert.ok(s.poolTokens > 0n, "pool seeded");
+    assert.ok(s.poolXno > 1_000_000_000n, "seed deposit credited via compact link");
+    assert.ok((s.balances.get(BOB) ?? 0n) > 0n, "fragment transfer delivered tokens to BOB");
   }
 
   // 5. amount guard: a value transfer (amount > 1 raw) is never decoded as an op,
