@@ -97,6 +97,41 @@ function keysFromSeed(seed: string): Keys {
   return { secretKey, publicKey, address };
 }
 
+// Auto-resize an uploaded image to fit within `maxDim` px on its longest side
+// and re-encode as PNG via a canvas. This is the real "resize by dimension":
+// it normalizes any format (jpeg/png/gif/webp) to PNG, strips EXIF/metadata,
+// keeps aspect ratio, and shrinks the payload so a token avatar is a few KB
+// regardless of the source resolution. Falls back to the original on any error.
+async function resizeImageFile(file: File, maxDim = 512): Promise<{ blob: Blob; w: number; h: number }> {
+  const dataUrl = await new Promise<string>((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result as string);
+    r.onerror = () => rej(new Error("could not read file"));
+    r.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((res, rej) => {
+    const i = new Image();
+    i.onload = () => res(i);
+    i.onerror = () => rej(new Error("not a valid image"));
+    i.src = dataUrl;
+  });
+  if (!img.width || !img.height) throw new Error("image has no dimensions");
+  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * scale));
+  const h = Math.max(1, Math.round(img.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("canvas unsupported");
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, 0, 0, w, h);
+  const blob = await new Promise<Blob>((res, rej) =>
+    canvas.toBlob((b) => (b ? res(b) : rej(new Error("encode failed"))), "image/png")
+  );
+  return { blob, w, h };
+}
+
 function genSeed(): string {
   const b = new Uint8Array(32);
   crypto.getRandomValues(b);
@@ -1759,12 +1794,24 @@ function CreateToken({
   const [uploading, setUploading] = useState(false);
 
   async function upload(file: File) {
+    if (!file.type.startsWith("image/")) return say("please choose an image file");
     setUploading(true);
     try {
+      // Downscale + normalize in the browser first; fall back to the raw file
+      // only if canvas resizing isn't available.
+      let body: Blob = file;
+      try {
+        const r = await resizeImageFile(file, 512);
+        body = r.blob;
+        say(`image resized to ${r.w}×${r.h}`);
+      } catch {
+        /* keep original; the server still validates it */
+      }
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", body, "image.png");
       const j = await (await fetch("/api/upload", { method: "POST", body: fd })).json();
       if (j.url) setImage(j.url);
+      else say("upload failed: " + (j.error ?? "unknown"));
     } catch (e: any) {
       say("upload failed: " + e.message);
     } finally {
