@@ -106,11 +106,11 @@ export default function PriceChart({
             upColor: "#ffffff", downColor: "#000000", borderVisible: true,
             borderUpColor: "#000000", borderDownColor: "#000000",
             wickUpColor: "#000000", wickDownColor: "#000000",
-            priceFormat: { type: "price", precision: 9, minMove: 1e-12 },
+            priceFormat: { type: "custom", formatter: (p: number) => fmtP(p), minMove: 1e-18 },
           })
         : chart.addAreaSeries({
             lineColor: "#000000", topColor: "rgba(0,0,0,0.10)", bottomColor: "rgba(0,0,0,0)", lineWidth: 2,
-            priceFormat: { type: "price", precision: 9, minMove: 1e-12 },
+            priceFormat: { type: "custom", formatter: (p: number) => fmtP(p), minMove: 1e-18 },
           });
     priceRef.current = price as any;
 
