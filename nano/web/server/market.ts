@@ -146,7 +146,11 @@ async function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, accoun
     tokenId,
     name: meta.name ?? "",
     symbol: meta.symbol ?? "",
-    decimals: meta.decimals ?? 6,
+    // Decimals are consensus-bound at launch (immutable, on-chain). Prefer the
+    // replayed state so a mutable metadata update can't change how the client
+    // scales amounts (which would corrupt buy/sell/supply math). Fall back to
+    // metadata only for legacy tokens whose launch didn't carry the byte.
+    decimals: s?.decimals ?? meta.decimals ?? 6,
     image: meta.image ?? "",
     description: meta.description ?? "",
     website: meta.website ?? "",

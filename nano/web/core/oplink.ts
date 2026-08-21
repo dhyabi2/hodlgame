@@ -29,7 +29,13 @@ function fromHex(hex: string): Uint8Array {
   return out;
 }
 
+const AMT_MAX = (1n << BigInt(AMT_BYTES * 8)) - 1n; // 15 bytes → 2^120 - 1
+
 function writeAmount(buf: Uint8Array, offset: number, n: bigint) {
+  // Fail loudly rather than silently wrap: an amount that doesn't fit the field
+  // (e.g. a supply larger than 2^120-1) would otherwise be truncated mod 2^120
+  // and encode as a DIFFERENT value than intended.
+  if (n < 0n || n > AMT_MAX) throw new Error(`amount ${n} does not fit the ${AMT_BYTES}-byte link field`);
   for (let i = AMT_BYTES - 1; i >= 0; i--) {
     buf[offset + i] = Number(n & 0xffn);
     n >>= 8n;

@@ -63,4 +63,19 @@ for (const op of OPS) {
   assert.equal(tokenId, id, "full 128-bit tokenId round-trips");
 }
 
+
+// oversized amount must throw, not silently wrap (supply-overflow guard)
+{
+  const TOO_BIG = 1n << 120n; // one past the 15-byte field max
+  let threw = false;
+  try { encodeOpLink("", { kind: "launch", supply: TOO_BIG, name: "X", symbol: "X", decimals: 6, image: "" }); }
+  catch { threw = true; }
+  assert.ok(threw, "encoding a supply > 2^120-1 throws instead of wrapping");
+  // one below the max encodes + round-trips exactly
+  const MAXOK = (1n << 120n) - 1n;
+  const link = encodeOpLink("", { kind: "launch", supply: MAXOK, name: "X", symbol: "X", decimals: 6, image: "" });
+  const dec: any = decodeOpLink(link);
+  assert.equal(dec.op.supply, MAXOK, "max in-range supply round-trips exactly");
+}
+
 console.log("✅ multi-token op-link codec tests passed");

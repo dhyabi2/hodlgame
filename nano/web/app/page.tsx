@@ -1822,9 +1822,13 @@ function CreateToken({
   async function launch() {
     if (!keys) return promptUnlock();
     const decimals = 6;
-    const rawSupply = BigInt(Math.floor(Number(supply || "0") * 10 ** decimals)) || 0n;
+    // Exact BigInt math — `Number(supply) * 10**decimals` loses precision above
+    // 2^53. `supply` is a digits-only string, so BigInt(supply) is exact.
+    const whole = /^\d+$/.test(supply.trim()) ? BigInt(supply.trim()) : 0n;
+    const rawSupply = whole * 10n ** BigInt(decimals);
     if (!name.trim() || !symbol.trim()) return say("name and symbol are required");
     if (rawSupply <= 0n) return say("enter supply");
+    if (whole > 1_000_000_000_000_000n) return say("supply too large (max 1 quadrillion tokens)");
     setBusy(true);
     try {
       const hash = await submitBlock(
