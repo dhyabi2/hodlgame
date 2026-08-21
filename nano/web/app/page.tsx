@@ -189,7 +189,7 @@ export default function Home() {
   const [detail, setDetail] = useState<Token | null>(null);
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<string[]>([]);
-  const [tab, setTab] = useState<"explore" | "portfolio" | "create" | "scan" | "wallet">("explore");
+  const [tab, setTab] = useState<"explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet">("explore");
   const [unlockOpen, setUnlockOpen] = useState(false);
 
   const say = (s: string) => setLog((l) => [...l.slice(-9), s]);
@@ -217,7 +217,7 @@ export default function Home() {
       const t = h.get("t");
       const tb = h.get("tab") as typeof tab | null;
       if (t) setSelectedId(t.toLowerCase());
-      else if (tb && ["explore", "portfolio", "create", "scan", "wallet"].includes(tb)) setTab(tb);
+      else if (tb && ["explore", "ranks", "portfolio", "create", "scan", "wallet"].includes(tb)) setTab(tb);
     } catch {}
   }, []);
 
@@ -376,6 +376,8 @@ export default function Home() {
           </div>
         ) : tab === "explore" ? (
           <Feed tokens={tokens} onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} />
+        ) : tab === "ranks" ? (
+          <Ranks onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} />
         ) : tab === "scan" ? (
           <Explorer />
         ) : tab === "portfolio" ? (
@@ -802,6 +804,121 @@ function WalletPanel({
     </div>
   );
 }
+
+// Derived status surfaces (docs/GROWTH-MECHANICS.md §4): token / creator /
+// holder leaderboards, recomputed from public state — status is earned, not
+// decreed. Endogenous competition: the prize is visibility, which is free.
+interface TokenRank { tokenId: string; name: string; symbol: string; image: string; price: string; marketCap: string; change24h: number | null; holders: number; volume: string; createdAt: number }
+interface CreatorRank { account: string; tokenCount: number; holders: number; marketCap: string; volume: string; score: number; badges: string[]; topSymbols: string[] }
+interface HolderRank { account: string; tokensHeld: number; value: string; badges: string[] }
+interface LB { updatedAt: number; tokens: { byVolume: TokenRank[]; byGainers: TokenRank[]; byHolders: TokenRank[]; newest: TokenRank[] }; creators: CreatorRank[]; holders: HolderRank[] }
+
+function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddress?: string }) {
+  const [lb, setLb] = useState<LB | null>(null);
+  const [board, setBoard] = useState<"byVolume" | "byGainers" | "byHolders" | "newest">("byVolume");
+
+  useEffect(() => {
+    let live = true;
+    const load = async () => {
+      try { const j = await (await fetch("/api/leaderboards")).json(); if (live && !j.error) setLb(j); } catch {}
+    };
+    load();
+    const t = setInterval(load, 8000);
+    return () => { live = false; clearInterval(t); };
+  }, []);
+
+  if (!lb) {
+    return <div className="grid gap-3 sm:grid-cols-2"><Skel /><Skel /><Skel /><Skel /></div>;
+  }
+  const empty = lb.tokens.byVolume.length === 0;
+  if (empty) {
+    return (
+      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-10 text-center text-zinc-500">
+        <p className="text-4xl mb-3">🏆</p>
+        <p className="font-bold text-zinc-300">No ranks yet</p>
+        <p className="text-sm mt-1">Launch and trade coins to climb the boards.</p>
+      </div>
+    );
+  }
+
+  const boards: { k: typeof board; label: string }[] = [
+    { k: "byVolume", label: "🔥 Volume" },
+    { k: "byGainers", label: "📈 Gainers" },
+    { k: "byHolders", label: "👥 Holders" },
+    { k: "newest", label: "✨ New" },
+  ];
+  const rows = lb.tokens[board];
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* token leaderboard */}
+        <section className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4">
+          <div className="flex items-center gap-1 mb-3 overflow-x-auto">
+            {boards.map((b) => (
+              <button key={b.k}
+                className={"rounded-lg px-2.5 py-1 text-xs font-bold whitespace-nowrap " + (board === b.k ? "bg-zinc-800 text-white" : "text-zinc-500 hover:text-zinc-300")}
+                onClick={() => setBoard(b.k)}>{b.label}</button>
+            ))}
+          </div>
+          <div className="space-y-1">
+            {rows.map((t, i) => (
+              <button key={t.tokenId} onClick={() => onSelect(t.tokenId)}
+                className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-zinc-900/60">
+                <span className={"w-5 text-center text-xs font-black " + medal(i)}>{i + 1}</span>
+                <Avatar image={t.image} symbol={t.symbol} size={30} />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold truncate">{t.symbol} <span className="text-[11px] font-normal text-zinc-500">{t.name}</span></p>
+                  <p className="text-[11px] text-zinc-500 truncate">mc {fmtXno(t.marketCap)} · {t.holders} hodl · vol {fmtXno(t.volume)}</p>
+                </div>
+                <span className={"text-xs font-bold tabular-nums shrink-0 " + (t.change24h == null ? "text-zinc-600" : t.change24h >= 0 ? "text-green-400" : "text-red-400")}>{pctStr(t.change24h)}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* creators */}
+        <section className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4">
+          <p className="text-sm font-bold text-zinc-300 mb-3">👑 Top creators</p>
+          <div className="space-y-1">
+            {lb.creators.map((c, i) => (
+              <div key={c.account} className={"flex items-center gap-3 rounded-xl px-2 py-2 " + (c.account === myAddress ? "bg-green-500/10" : "")}>
+                <span className={"w-5 text-center text-xs font-black " + medal(i)}>{i + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-mono text-zinc-300 truncate">{short(c.account)}{c.account === myAddress && <span className="text-green-400"> · you</span>}</p>
+                  <p className="text-[11px] text-zinc-500 truncate">{c.tokenCount} coins · {c.holders} holders · {c.topSymbols.join(" ")}</p>
+                </div>
+                <div className="flex flex-col items-end gap-0.5 shrink-0">
+                  <span className="text-xs font-black text-amber-300 tabular-nums">{c.score.toLocaleString()}</span>
+                  {c.badges.length > 0 && <span className="text-[10px]">{c.badges.join(" ")}</span>}
+                </div>
+              </div>
+            ))}
+            {lb.creators.length === 0 && <p className="text-xs text-zinc-600 py-4 text-center">no creators yet</p>}
+          </div>
+        </section>
+      </div>
+
+      {/* holders */}
+      <section className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4">
+        <p className="text-sm font-bold text-zinc-300 mb-3">🐋 Top holders</p>
+        <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+          {lb.holders.map((h, i) => (
+            <div key={h.account} className={"flex items-center gap-3 rounded-xl px-2 py-1.5 " + (h.account === myAddress ? "bg-green-500/10" : "")}>
+              <span className={"w-5 text-center text-xs font-black " + medal(i)}>{i + 1}</span>
+              <p className="min-w-0 flex-1 text-sm font-mono text-zinc-300 truncate">{short(h.account)}{h.account === myAddress && <span className="text-green-400"> · you</span>}</p>
+              <span className="text-[10px] shrink-0">{h.badges.join(" ")}</span>
+              <span className="text-xs font-bold tabular-nums shrink-0">{fmtXno(h.value)} XNO</span>
+            </div>
+          ))}
+          {lb.holders.length === 0 && <p className="text-xs text-zinc-600 py-4 text-center">no holders yet</p>}
+        </div>
+      </section>
+    </div>
+  );
+}
+const medal = (i: number) => (i === 0 ? "text-amber-300" : i === 1 ? "text-zinc-300" : i === 2 ? "text-amber-600" : "text-zinc-600");
+function Skel() { return <div className="h-40 rounded-2xl border border-zinc-900 bg-[#0a0a0a] animate-pulse" />; }
 
 function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id: string) => void; myAddress?: string }) {
   const [query, setQuery] = useState("");
@@ -1690,18 +1807,19 @@ function Portfolio({ tokens, onSelect, account }: { tokens: Token[]; onSelect: (
   );
 }
 
-const TABS: { id: "explore" | "portfolio" | "create" | "scan" | "wallet"; label: string; icon: string }[] = [
+const TABS: { id: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet"; label: string; icon: string }[] = [
   { id: "explore", label: "Explore", icon: "🏠" },
+  { id: "ranks", label: "Ranks", icon: "🏆" },
   { id: "portfolio", label: "Holdings", icon: "💼" },
   { id: "create", label: "Create", icon: "✨" },
   { id: "scan", label: "Scan", icon: "🔎" },
   { id: "wallet", label: "Wallet", icon: "👛" },
 ];
 
-function TabBar({ tab, setTab }: { tab: "explore" | "portfolio" | "create" | "scan" | "wallet"; setTab: (t: "explore" | "portfolio" | "create" | "scan" | "wallet") => void }) {
+function TabBar({ tab, setTab }: { tab: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet"; setTab: (t: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet") => void }) {
   return (
     <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-zinc-900 bg-[#0a0a0a]/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
-      <div className="max-w-2xl mx-auto grid grid-cols-5">
+      <div className="max-w-2xl mx-auto grid grid-cols-6">
         {TABS.map((t) => (
           <button
             key={t.id}
