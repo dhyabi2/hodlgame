@@ -342,27 +342,32 @@ export default function Home() {
           </button>
           {/* Desktop nav only — on mobile the bottom tab bar handles navigation. */}
           <nav className="hidden sm:flex items-center gap-4 text-xs font-bold uppercase tracking-wide text-neutral-500">
-            {([["explore", "Coins"], ["ranks", "Ranks"], ["scan", "Explorer"], ["portfolio", "Holdings"], ["create", "Create"], ["wallet", "Wallet"]] as const).map(([id, label]) => (
+            {([["explore", "Coins"], ["ranks", "Ranks"], ["scan", "Explorer"], ["wallet", "Wallet"]] as const).map(([id, label]) => (
               <button key={id} className={"hover:text-black whitespace-nowrap " + (!selectedId && tab === id ? "text-black" : "")} onClick={() => { setSelectedId(null); setTab(id); }}>{label}</button>
             ))}
             <a className="hover:text-black whitespace-nowrap" href="/pro">Chart / Trade ↗</a>
           </nav>
-          {keys ? (
+          <div className="ml-auto flex items-center gap-3 shrink-0">
             <button
-              className="ml-auto shrink-0 text-xs text-neutral-700 font-mono hover:text-black"
-              title="copy address"
-              onClick={() => {
-                navigator.clipboard?.writeText(keys.address);
-                say(`copied ${short(keys.address)}`);
-              }}
+              className="hidden sm:inline-block rounded-none bg-black px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-white hover:bg-neutral-800"
+              onClick={() => { setSelectedId(null); setTab("create"); }}
             >
-              {short(keys.address)}
+              + Create
             </button>
-          ) : (
-            <button className="ml-auto shrink-0 text-xs text-black font-bold uppercase tracking-wide" onClick={promptUnlock}>
-              unlock
-            </button>
-          )}
+            {keys ? (
+              <button
+                className="text-xs text-neutral-700 font-mono hover:text-black"
+                title="wallet"
+                onClick={() => { setSelectedId(null); setTab("wallet"); }}
+              >
+                {short(keys.address)}
+              </button>
+            ) : (
+              <button className="text-xs text-black font-bold uppercase tracking-wide" onClick={promptUnlock}>
+                unlock
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -386,10 +391,6 @@ export default function Home() {
           <Ranks onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} />
         ) : tab === "scan" ? (
           <Explorer />
-        ) : tab === "portfolio" ? (
-          <div className="w-full">
-            <Portfolio tokens={tokens} onSelect={(id) => setSelectedId(id)} account={keys?.address} />
-          </div>
         ) : tab === "create" ? (
           <div className="w-full max-w-xl mx-auto">
             <CreateToken
@@ -406,8 +407,9 @@ export default function Home() {
             />
           </div>
         ) : (
-          <div className="w-full max-w-xl mx-auto">
+          <div className="w-full max-w-xl mx-auto space-y-4">
             <WalletPanel keys={keys} hasWallet={hasWallet} unlock={unlock} lock={lock} remove={remove} say={say} />
+            {keys && <Portfolio tokens={tokens} onSelect={(id) => setSelectedId(id)} account={keys.address} />}
           </div>
         )}
 
@@ -697,14 +699,9 @@ function ConnectedWallet({
         </div>
       )}
 
-      <div className="flex gap-2">
-        <button className="flex-1 rounded-none border border-neutral-300 px-4 py-3 text-sm font-bold text-neutral-800 hover:border-black" onClick={lock}>
-          Lock
-        </button>
-        <button className="rounded-none border border-neutral-300 px-4 py-3 text-sm font-bold text-black hover:border-black" onClick={remove}>
-          Delete
-        </button>
-      </div>
+      <button className="w-full rounded-none border border-neutral-300 px-4 py-3 text-sm font-bold text-neutral-800 hover:border-black" onClick={lock}>
+        Lock
+      </button>
     </div>
   );
 }
@@ -1888,7 +1885,6 @@ function Portfolio({ tokens, onSelect, account }: { tokens: Token[]; onSelect: (
 const TABS: { id: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet"; label: string; icon: string }[] = [
   { id: "explore", label: "Explore", icon: "🏠" },
   { id: "ranks", label: "Ranks", icon: "🏆" },
-  { id: "portfolio", label: "Holdings", icon: "💼" },
   { id: "create", label: "Create", icon: "✨" },
   { id: "scan", label: "Explorer", icon: "🔎" },
   { id: "wallet", label: "Wallet", icon: "👛" },
@@ -1897,7 +1893,7 @@ const TABS: { id: "explore" | "ranks" | "portfolio" | "create" | "scan" | "walle
 function TabBar({ tab, setTab }: { tab: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet"; setTab: (t: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet") => void }) {
   return (
     <nav className="sm:hidden fixed bottom-0 inset-x-0 z-30 border-t border-neutral-300 bg-white/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
-      <div className="w-full grid grid-cols-6">
+      <div className="w-full grid grid-cols-5">
         {TABS.map((t) => (
           <button
             key={t.id}
