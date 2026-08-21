@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { loadMetaRow, saveMetaRow } from "../../../server/tokens";
-import { isTokenId, sanitizeMeta } from "../../../server/validate";
+import { isTokenId, sanitizeMeta, metaHasRequired } from "../../../server/validate";
 import { verifyMetaSignature, decideMetaUpdate, gateMetaAction } from "../../../server/metaAuth";
 import { authorityStateOf } from "../../../server/market";
 
@@ -27,9 +27,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "tokenId (32 hex) required" }, { status: 400 });
   }
 
-  // sanitizeMeta clamps decimals to 0..18 and drops non-http(s) URLs (XSS).
-  // The client signs the sanitized fields, so verification runs on them too.
+  // sanitizeMeta normalizes text (strips control/bidi/zero-width), restricts the
+  // symbol to ASCII, drops http/unsafe image URLs, and caps lengths. The client
+  // signs the sanitized fields, so verification runs on the same bytes.
   const meta = sanitizeMeta(body);
+  if (!metaHasRequired(meta)) {
+    return NextResponse.json({ error: "name and symbol are required" }, { status: 400 });
+  }
   const update = {
     tokenId,
     meta,

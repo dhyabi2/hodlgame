@@ -31,9 +31,55 @@ export function clampDecimals(v: unknown): number {
   return n;
 }
 
-/** Cap a free-text field and coerce to string. */
+/** Cap a free-text field and coerce to string (code-point safe — never splits a
+ * surrogate pair). Kept for callers that want a raw cap; prefer sanitizeInline
+ * for anything user-facing. */
 export function clampText(v: unknown, max: number): string {
-  return String(v ?? "").slice(0, max);
+  const s = String(v ?? "");
+  const cp = Array.from(s);
+  return cp.length > max ? cp.slice(0, max).join("") : s;
+}
+
+// Characters that enable spoofing / rendering attacks in short display fields:
+// zero-width joiners/spaces, bidi overrides (U+202A–202E, U+2066–2069) that can
+// reverse/reorder text to impersonate another token, and the BOM.
+const INVISIBLE = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF]/g;
+// C0 + C1 control characters (null bytes, escape, etc.).
+const CONTROL = /[\u0000-\u001F\u007F-\u009F]/g;
+const CONTROL_KEEP_WS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g; // keep \t \n \r
+
+/**
+ * Normalize + defang a user-facing text field. Unicode-normalizes (NFC),
+ * strips invisible/bidi-override characters and control bytes, collapses
+ * runs of whitespace, trims, and caps by code points (not UTF-16 units, so a
+ * multi-byte glyph is never cut in half). Deterministic and browser-safe so the
+ * client can sign exactly what the server will store.
+ */
+export function sanitizeInline(v: unknown, max: number, multiline = false): string {
+  let s = String(v ?? "");
+  try { s = s.normalize("NFC"); } catch { /* invalid input; leave as-is */ }
+  s = s.replace(INVISIBLE, "").replace(multiline ? CONTROL_KEEP_WS : CONTROL, "");
+  s = multiline ? s.replace(/[ \t]+/g, " ").replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n") : s.replace(/\s+/g, " ");
+  s = s.trim();
+  const cp = Array.from(s);
+  return cp.length > max ? cp.slice(0, max).join("") : s;
+}
+
+/**
+ * Ticker symbol: restricted to ASCII [A-Za-z0-9._-] so it can't homograph-spoof
+ * an established token with look-alike Unicode. Empty result is allowed here and
+ * rejected by the route (kept pure so both client + server agree byte-for-byte).
+ */
+export function sanitizeSymbol(v: unknown): string {
+  return String(v ?? "").normalize("NFC").replace(/[^A-Za-z0-9._-]/g, "").slice(0, 16);
+}
+
+/** Image URL: like safeUrl but rejects cleartext http: (mixed-content / tracking
+ * beacon) — only https: and ipfs: may be an <img src>. */
+export function safeImageUrl(v: unknown, max = 512): string {
+  const u = safeUrl(v, max);
+  if (!u) return "";
+  return u.startsWith("http://") ? "" : u;
 }
 
 /**
@@ -60,18 +106,26 @@ export function safeUrl(v: unknown, max = 512): string {
   return u.toString();
 }
 
-/** Sanitize a full token-metadata payload from an untrusted request. */
+/** Sanitize a full token-metadata payload from an untrusted request. Shared by
+ * the client (which signs exactly this) and the server (which verifies + stores
+ * exactly this), so both agree byte-for-byte. */
 export function sanitizeMeta(body: any) {
   return {
-    name: clampText(body?.name, 64),
-    symbol: clampText(body?.symbol, 16),
+    name: sanitizeInline(body?.name, 48),
+    symbol: sanitizeSymbol(body?.symbol),
     decimals: clampDecimals(body?.decimals ?? 6),
-    image: safeUrl(body?.image),
-    description: clampText(body?.description, 1000),
+    image: safeImageUrl(body?.image),
+    description: sanitizeInline(body?.description, 600, true),
     website: safeUrl(body?.website),
     twitter: safeUrl(body?.twitter),
     telegram: safeUrl(body?.telegram),
   };
+}
+
+/** True when the sanitized metadata has the minimum required fields — a non-empty
+ * name and symbol. Route rejects anything that fails this. */
+export function metaHasRequired(meta: { name: string; symbol: string }): boolean {
+  return meta.name.trim().length > 0 && meta.symbol.length > 0;
 }
 
 // Amount bounds for off-chain commit-reveal ops. Amounts are bigint; a negative

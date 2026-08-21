@@ -1823,6 +1823,7 @@ function CreateToken({
     if (!keys) return promptUnlock();
     const decimals = 6;
     const rawSupply = BigInt(Math.floor(Number(supply || "0") * 10 ** decimals)) || 0n;
+    if (!name.trim() || !symbol.trim()) return say("name and symbol are required");
     if (rawSupply <= 0n) return say("enter supply");
     setBusy(true);
     try {

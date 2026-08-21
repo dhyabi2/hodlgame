@@ -18,6 +18,12 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
       headers: {
         "Content-Type": /^image\/(png|jpeg|gif|webp)$/.test(ct) ? ct : "image/png",
         "Cache-Control": "public, max-age=31536000, immutable",
+        // Defense-in-depth against a polyglot (e.g. GIF/HTML) that slipped the
+        // sniffer: forbid MIME-sniffing, sandbox + lock down any script/embed if
+        // the URL is opened directly, and serve inline as a plain file.
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "default-src 'none'; sandbox; frame-ancestors 'none'",
+        "Content-Disposition": "inline",
       },
     });
   } catch {
