@@ -5,9 +5,11 @@
 // The op signer is the block's own account (block.account), not the account the
 // indexer happened to be watching — so creator/buyer/seller are real.
 
+import * as nanocurrency from "nanocurrency";
 import { multiEmpty, type MultiState } from "../core/multi";
 import { tokenIdFromLaunchHash, type TokenId } from "../core/token";
 import { decodeOpLink } from "../core/oplink";
+import { isRotateRep, applyRotations, type RotationBlock } from "../core/rotate";
 import { commitLink, isCommitLink, verifyCommit } from "../core/commit";
 import { isFragA, assembleFrag } from "../core/fraglink";
 import {
@@ -114,6 +116,27 @@ export interface DecodedChain {
  * pool (the launch signer is authoritative), and every honest indexer
  * converges on the same map because inputs and ordering are chain-defined.
  */
+/** Collect pool-rotation announcements from all chains: a 1-raw block on a
+ * pool's own chain with representative = ROTATE_MARKER and link = successor
+ * pubkey. Signed by the pool account, so authorization is inherent. */
+export function collectRotationsFromChain(chains: Map<string, DecodedChain>): RotationBlock[] {
+  const out: RotationBlock[] = [];
+  for (const { byHash } of chains.values()) {
+    for (const b of byHash.values()) {
+      if (!isRotateRep(b.representative)) continue;
+      if (!/^[0-9a-fA-F]{64}$/.test(b.link)) continue;
+      let fromPub: string;
+      try {
+        fromPub = nanocurrency.derivePublicKey(b.account).toLowerCase();
+      } catch {
+        continue;
+      }
+      out.push({ fromPub, toPub: b.link.toLowerCase(), height: b.height, hash: b.hash });
+    }
+  }
+  return out;
+}
+
 export function derivePoolKeysFromChain(chains: Map<string, DecodedChain>): Map<string, string> {
   const creators = new Map<string, string>();
   const candidates: { tokenId: string; sender: string; height: bigint; hash: string; poolPub: string }[] = [];
@@ -189,12 +212,21 @@ export class MultiIndexer {
     return { tokenId, op, sender: block.account, height: block.height, timestamp, hash: block.hash };
   }
 
-  /** tokenId → pool pubkey (lowercase hex) derived from chain history by the
-   * last collectEvents. Empty until a sync/collect has run. */
+  /** tokenId → CURRENT pool pubkey (lowercase hex), after following custody
+   * rotations. Empty until a sync/collect has run. */
   private chainPools = new Map<string, string>();
 
   getChainPools(): Map<string, string> {
     return new Map(this.chainPools);
+  }
+
+  /** tokenId → the SET of accepted pool pubkeys (current ∪ legacy). Deposits
+   * value-bind against any address in the set, so a custody rotation doesn't
+   * strand historical buys. */
+  private chainPoolSet = new Map<string, Set<string>>();
+
+  getChainPoolSet(): Map<string, Set<string>> {
+    return new Map([...this.chainPoolSet].map(([k, v]) => [k, new Set(v)]));
   }
 
   /** Metadata-authority anchors found by the last collectEvents. */
@@ -307,10 +339,22 @@ export class MultiIndexer {
   async collectEvents(accounts: string[]): Promise<IndexedEvent[]> {
     const decoded = await this.collectChains(accounts);
 
-    this.chainPools = derivePoolKeysFromChain(decoded);
+    // Initial (first-seed-wins) pool per token, then follow custody rotations.
+    const initial = derivePoolKeysFromChain(decoded);
+    const rotations = collectRotationsFromChain(decoded);
+    const rotated = applyRotations(initial, rotations);
+    this.chainPools = rotated.current; // current pool (custody assert / new payouts)
+    this.chainPoolSet = rotated.accepted; // current ∪ legacy (value-binding)
     this.metaAnchors = [...decoded.values()].flatMap((d) => d.anchors);
-    const poolOf = (tokenId: TokenId): string | null =>
-      this.chainPools.get(tokenId) ?? this.poolKey?.(tokenId) ?? null;
+    // A deposit value-binds if it routes to ANY accepted (current/legacy) pool;
+    // fall back to the injected resolver for bootstrap-before-seed.
+    const routesToPool = (tokenId: TokenId, depLink: string): boolean => {
+      const set = this.chainPoolSet.get(tokenId);
+      const l = depLink.toLowerCase();
+      if (set && set.has(l)) return true;
+      const boot = this.poolKey?.(tokenId);
+      return Boolean(boot && boot.toLowerCase() === l);
+    };
 
     this.depositEdges = new Map();
     // A deposit may back AT MOST ONE value-bound op. On a linear Nano chain two
@@ -325,9 +369,8 @@ export class MultiIndexer {
           // deposit block the op chains from (previous), not any declared value.
           const dep = byHash.get(prev);
           const amount = dep ? BigInt(dep.amount ?? "0") : 0n;
-          const poolPub = poolOf(ev.tokenId);
-          const routesToPool = Boolean(dep && poolPub && dep.link.toLowerCase() === poolPub.toLowerCase());
-          if (!dep || amount <= 0n || !routesToPool || consumedDeposits.has(dep.hash)) continue; // malformed/reused → skip
+          const routed = Boolean(dep && routesToPool(ev.tokenId, dep.link));
+          if (!dep || amount <= 0n || !routed || consumedDeposits.has(dep.hash)) continue; // malformed/reused → skip
           consumedDeposits.add(dep.hash);
           ev.op = { ...ev.op, xno: amount };
           this.depositEdges.set(ev.hash, { deposit: dep.hash, amountRaw: amount.toString() });
@@ -339,9 +382,8 @@ export class MultiIndexer {
           // without a backing deposit is skipped. Token-only adds pass as-is.
           const dep = byHash.get(prev);
           const amount = dep ? BigInt(dep.amount ?? "0") : 0n;
-          const poolPub = poolOf(ev.tokenId);
-          const routesToPool = Boolean(dep && poolPub && dep.link.toLowerCase() === poolPub.toLowerCase());
-          if (routesToPool && amount > 0n && !consumedDeposits.has(dep!.hash)) {
+          const routed = Boolean(dep && routesToPool(ev.tokenId, dep.link));
+          if (routed && amount > 0n && !consumedDeposits.has(dep!.hash)) {
             consumedDeposits.add(dep!.hash);
             ev.op = { ...ev.op, xno: amount };
             this.depositEdges.set(ev.hash, { deposit: dep!.hash, amountRaw: amount.toString() });

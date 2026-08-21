@@ -12,6 +12,7 @@ function nanoAddr(seedChar: string): string {
   return nanocurrency.deriveAddress(nanocurrency.derivePublicKey(sk), { useNanoPrefix: true });
 }
 import { tokenIdFromLaunchHash } from "../core/token";
+import { rotateMarkerAddress } from "../core/rotate";
 import type { Op } from "../core/ops";
 
 const CREATOR = "nano_creator";
@@ -292,6 +293,45 @@ async function main() {
     assert.ok(s.poolTokens > 0n, "pool seeded");
     assert.ok(s.poolXno > 1_000_000_000n, "seed deposit credited via compact link");
     assert.ok((s.balances.get(BOB) ?? 0n) > 0n, "fragment transfer delivered tokens to BOB");
+  }
+
+  // 4e. Pool custody ROTATION (VELA-style legacy_pubkeys): the current pool
+  //     announces a successor (rep = ROTATE_MARKER, link = new pool pubkey) on
+  //     its own chain; deposits to BOTH the old and new addresses value-bind,
+  //     and the current pool advances.
+  {
+    const launchA: Op = { kind: "launch", supply: 1_000_000_000_000n, name: "A", symbol: "A", decimals: 6, image: "" };
+    const hashA = "aa".padEnd(64, "0");
+    const ta = tokenIdFromLaunchHash(hashA);
+    const pool0 = { sk: nanocurrency.deriveSecretKey("a1".padEnd(64, "0"), 0) } as any;
+    pool0.pub = nanocurrency.derivePublicKey(pool0.sk);
+    pool0.addr = nanocurrency.deriveAddress(pool0.pub, { useNanoPrefix: true });
+    const pool1pub = nanocurrency.derivePublicKey(nanocurrency.deriveSecretKey("b1".padEnd(64, "0"), 0));
+
+    const src = new MemorySource();
+    src.push(mkBlock(CREATOR, encodeOpLink("", launchA), 1n, hashA));
+    // seed → establishes pool0 as the token's pool
+    src.push(mkBlock(CREATOR, pool0.pub, 2n, "d0".padEnd(64, "0"), { amount: "1000000000" }));
+    src.push(mkBlock(CREATOR, encodeOpLink(ta, { kind: "seedLiq", xno: 0n, tokens: 950_000_000_000n }), 3n, "c0".padEnd(64, "0"), { previous: "d0".padEnd(64, "0") }));
+    // rotation announcement ON pool0's own chain → successor pool1
+    src.push({ account: pool0.addr, hash: "r0".padEnd(64, "0"), previous: "0".repeat(64), link: pool1pub, representative: rotateMarkerAddress(), height: 1n, amount: "1" });
+    // buy depositing to the NEW pool address (pool1)
+    src.push(mkBlock(ALICE, pool1pub, 3n, "e1".padEnd(64, "0"), { amount: "100000000" }));
+    src.push(mkBlock(ALICE, encodeOpLink(ta, { kind: "buy", xno: 0n, minTokens: 0n }), 4n, "f1".padEnd(64, "0"), { previous: "e1".padEnd(64, "0"), amount: "1" }));
+    // buy depositing to the OLD pool address (pool0) — still binds (legacy).
+    // Heights after the seed (3) so liquidity exists when it applies.
+    src.push(mkBlock(CREATOR_B, pool0.pub, 5n, "e2".padEnd(64, "0"), { amount: "50000000" }));
+    src.push(mkBlock(CREATOR_B, encodeOpLink(ta, { kind: "buy", xno: 0n, minTokens: 0n }), 6n, "f2".padEnd(64, "0"), { previous: "e2".padEnd(64, "0"), amount: "1" }));
+
+    const idx = new MultiIndexer(src);
+    const { invalid } = await idx.sync([CREATOR, ALICE, CREATOR_B, pool0.addr]);
+    assert.equal(invalid, 0, "rotation + both deposits valid");
+    assert.equal(idx.getChainPools().get(ta), pool1pub.toLowerCase(), "current pool advanced to the successor");
+    const set = idx.getChainPoolSet().get(ta)!;
+    assert.ok(set.has(pool0.pub.toLowerCase()) && set.has(pool1pub.toLowerCase()), "old + new both accepted");
+    const s = idx.getState().get(ta)!;
+    // seed 1e9 + new-address buy 1e8 + old-address buy 5e7 all credited
+    assert.ok(s.poolXno >= 1_150_000_000n, "deposits to both addresses credited");
   }
 
   // 5. amount guard: a value transfer (amount > 1 raw) is never decoded as an op,

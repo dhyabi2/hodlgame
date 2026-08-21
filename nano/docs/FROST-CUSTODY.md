@@ -103,18 +103,23 @@ creator seed deposit (`derivePoolKeysFromChain`). Seed new tokens straight to
 the FROST group's address and they are FROST-custodied from birth — `POOL_SEED`
 is never involved.
 
-**Existing tokens: needs pool-rotation support first (follow-up).** An existing
-token's pool address is immutable by design (first-seed-wins), so moving its
-custody to a fresh FROST address requires a **rotation announcement** the
-resolver honors: a 1-raw op, signed by the CURRENT pool key, naming the
-successor address + effective height, after which `derivePoolKeysFromChain`
-switches at that height (with a grace window where both validate). That op +
-resolver support is the one piece not yet built (tracked in
-TRUSTLESS-ROADMAP.md W1 "Rotation"). Until it lands, migrate by: (a) route new
-liquidity/tokens to FROST, (b) once rotation ships, per token announce → sweep
-the full balance to the new FROST address → cut over. Destroy `POOL_SEED` only
-after every pool has migrated (keep it sealed as a recovery artifact, like VELA
-retired its single-key seed).
+**Existing tokens: pool rotation (built — VELA `legacy_pubkeys` analogue).**
+Run, per token, once the FROST group's `group_pubkey` exists:
+
+```
+POOL_SEED=<64hex> npx tsx scripts/frost-migrate.ts <tokenId> <newPoolPubHex> --dry-run
+POOL_SEED=<64hex> npx tsx scripts/frost-migrate.ts <tokenId> <newPoolPubHex>
+```
+
+Signed by the CURRENT (POOL_SEED) pool key, it (1) **announces** the successor
+on-chain — a 1-raw block from the old pool with `representative = ROTATE_MARKER`
+and `link = newPoolPub` (`core/rotate.ts`); the indexer follows the chain so
+the FROST address becomes CURRENT while the old address stays LEGACY (historical
+deposits still value-bind against it) — and (2) **sweeps** the balance to the
+FROST address. Idempotent (skips an already-announced rotation / drained pool).
+The FROST group then RECEIVEs the swept funds via its own signing and hellos to
+self-register. Destroy `POOL_SEED` only after confirming the FROST balances
+(keep it sealed as a recovery artifact, like VELA retired its single-key seed).
 
 ## Rollout order
 
