@@ -68,6 +68,15 @@ export function encodeOpLink(tokenId: TokenId, op: Op): string {
   buf[0] = OP_CODE[op.kind];
   writeTokenId(buf, 1, op.kind === "launch" ? "" : tokenId);
   writeAmount(buf, 1 + TOKEN_ID_BYTES, primaryAmount(op));
+  // Bind decimals ON-CHAIN for launch (the launch link's tokenId slot is
+  // otherwise all-zero — tokenId comes from the block hash). Stored as
+  // decimals+1 in byte 1 so 0 stays "legacy/unset" (pre-this-change launches),
+  // distinct from a real 0-decimals token. This makes decimals immutable and
+  // part of consensus — exchanges can pin it. Range 0..18 (see clampDecimals).
+  if (op.kind === "launch") {
+    const d = op.decimals;
+    if (Number.isInteger(d) && d >= 0 && d <= 18) buf[1] = d + 1;
+  }
   return toHex(buf);
 }
 
@@ -91,16 +100,21 @@ export function decodeOpLink(
   const amt = readAmount(buf, 1 + TOKEN_ID_BYTES);
   let op: Op;
   switch (code) {
-    case OP_CODE.launch:
+    case OP_CODE.launch: {
+      // Decimals are consensus-bound in byte 1 (decimals+1; 0 = legacy → fall
+      // back to off-chain meta, else 6). New tokens carry immutable decimals.
+      const dByte = buf[1];
+      const decimals = dByte === 0 ? meta?.decimals ?? 6 : dByte - 1;
       op = {
         kind: "launch",
         supply: amt,
         name: meta?.name ?? "",
         symbol: meta?.symbol ?? "",
-        decimals: meta?.decimals ?? 6,
+        decimals,
         image: meta?.image ?? "",
       };
       break;
+    }
     case OP_CODE.buy:
       op = { kind: "buy", xno: 0n, minTokens: amt };
       break;

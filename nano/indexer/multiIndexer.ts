@@ -178,7 +178,11 @@ export class MultiIndexer {
       }
       if (op.kind === "launch") {
         tokenId = tokenIdFromLaunchHash(block.hash);
-        op = { ...op, ...this.meta(tokenId) };
+        // Overlay off-chain DISPLAY meta (name/symbol/image) only. `decimals`
+        // is consensus-bound from the link (decodeOpLink) and must NOT be
+        // overridden by the mutable registry — an exchange can pin it.
+        const m = this.meta(tokenId);
+        op = { ...op, name: m.name, symbol: m.symbol, image: m.image };
       }
     }
     const timestamp = block.timestamp ? Number(block.timestamp) : undefined;

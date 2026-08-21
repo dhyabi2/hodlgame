@@ -38,11 +38,22 @@ for (const op of OPS) {
   assert.equal(sell.op.kind === "sell" ? sell.op.tokens : 0n, 999n);
 }
 
-// 3. launch carries a zero tokenId slot (the id is derived from its block hash).
+// 3. launch: tokenId is derived from the block hash, and DECIMALS are bound
+//    on-chain in byte 1 (decimals+1; immutable, exchange-pinnable).
 {
-  const { tokenId, op } = decodeOpLink(encodeOpLink(TOKEN, { kind: "launch", supply: 5n, name: "", symbol: "", decimals: 6, image: "" }));
+  const link6 = encodeOpLink(TOKEN, { kind: "launch", supply: 5n, name: "", symbol: "", decimals: 6, image: "" });
+  assert.equal(link6.slice(2, 4), "07", "decimals 6 encoded as byte 0x07");
+  const { op } = decodeOpLink(link6);
   assert.equal(op.kind, "launch");
-  assert.equal(tokenId, "0".repeat(32), "launch has no embedded tokenId");
+  assert.equal((op as any).decimals, 6, "decimals round-trips from the link, not meta");
+
+  const link0 = decodeOpLink(encodeOpLink(TOKEN, { kind: "launch", supply: 5n, name: "", symbol: "", decimals: 0, image: "" }));
+  assert.equal((link0.op as any).decimals, 0, "a real 0-decimals token is distinct from legacy");
+
+  // Legacy link (byte 1 == 0, pre-decimals-binding) falls back to meta/6.
+  const legacy = "01" + "00".repeat(31);
+  assert.equal((decodeOpLink(legacy).op as any).decimals, 6, "legacy launch → 6");
+  assert.equal((decodeOpLink(legacy, { name: "", symbol: "", decimals: 9, image: "" }).op as any).decimals, 9, "legacy honors meta decimals");
 }
 
 // 4. tokenId slot must survive a full 128-bit value.
