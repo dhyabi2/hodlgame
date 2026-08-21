@@ -12,42 +12,43 @@
 // FROST_COORDINATOR_URL is unset, callers fall back to the legacy single-key
 // path (unchanged), so this is opt-in per deployment.
 
+import * as nanocurrency from "nanocurrency";
 import type { PoolKeys, Payout } from "./custody";
+import { nanoRpc, loadNanoRpcKey, SEND_DIFFICULTY } from "../lib/rpc";
 
 export function frostEnabled(): boolean {
   return Boolean(process.env.FROST_COORDINATOR_URL);
 }
 
-/** Ask the HoldFun FROST coordinator to threshold-sign a payout. Returns the
- * broadcastable block (nano `signature` set to the aggregated group signature)
- * or throws if the group could not reach a quorum / a cosigner rejected the
- * payout as not a legitimate obligation. */
+/** Threshold-sign a payout via the HoldFun FROST group and return a
+ * broadcastable block. The block HASH is computed here (crypto the operator
+ * already has), the coordinator runs the FROST round over that hash + the
+ * policy `context` each cosigner independently verifies, and we assemble the
+ * block with the group signature + PoW. Throws if the group can't reach a
+ * quorum or a cosigner rejects the payout as not owed. */
 export async function frostSignPayout(pool: PoolKeys, tokenId: string, payout: Payout): Promise<any> {
   const url = process.env.FROST_COORDINATOR_URL!;
   const key = process.env.FROST_COORDINATOR_KEY ?? "";
+  const balance = (BigInt(payout.balance) - BigInt(payout.amountRaw)).toString();
+  const linkPub = nanocurrency.derivePublicKey(payout.to);
+
+  // Deterministic Nano state-block hash the group will sign.
+  const blockHash = nanocurrency.hashBlock({
+    account: pool.address,
+    previous: payout.frontier,
+    representative: payout.representative,
+    balance,
+    link: linkPub,
+  });
+
   const res = await fetch(url.replace(/\/$/, "") + "/sign", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...(key ? { "X-Holdfun-Key": key } : {}) },
-    // The coordinator rebuilds the block hash from these fields, runs the FROST
-    // round, and returns the block with the group signature. `context` is the
-    // policy payload each cosigner independently verifies (see verifyPayout).
     body: JSON.stringify({
       tokenId,
-      pool: pool.address,
       poolPublicKey: pool.publicKey,
-      block: {
-        account: pool.address,
-        previous: payout.frontier,
-        representative: payout.representative,
-        balance: (BigInt(payout.balance) - BigInt(payout.amountRaw)).toString(),
-        link: payout.to,
-      },
-      context: {
-        type: "holdfun-payout",
-        tokenId,
-        to: payout.to,
-        amountRaw: payout.amountRaw,
-      },
+      blockHash,
+      context: { type: "holdfun-payout", tokenId, to: payout.to, amountRaw: payout.amountRaw },
     }),
     signal: AbortSignal.timeout(180_000), // FROST round + cosigner replay
   });
@@ -55,7 +56,18 @@ export async function frostSignPayout(pool: PoolKeys, tokenId: string, payout: P
     const t = await res.text().catch(() => "");
     throw new Error(`frost coordinator ${res.status}: ${t.slice(0, 300)}`);
   }
-  const j = (await res.json()) as { block?: any; error?: string };
-  if (j.error || !j.block) throw new Error(j.error ?? "coordinator returned no block");
-  return j.block;
+  const j = (await res.json()) as { signature?: string; error?: string };
+  if (j.error || !j.signature) throw new Error(j.error ?? "coordinator returned no signature");
+
+  const work = (await nanoRpc(loadNanoRpcKey(), { action: "work_generate", hash: payout.frontier, difficulty: SEND_DIFFICULTY })).work;
+  return {
+    type: "state",
+    account: pool.address,
+    previous: payout.frontier,
+    representative: payout.representative,
+    balance,
+    link: linkPub,
+    signature: j.signature.toUpperCase(),
+    work,
+  };
 }
