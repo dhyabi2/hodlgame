@@ -949,7 +949,12 @@ function TokenDetail({
 
   return (
     <div className="space-y-4">
-      <button onClick={onBack} className="text-xs text-zinc-500 hover:text-zinc-300">← all coins</button>
+      <div className="flex items-center justify-between">
+        <button onClick={onBack} className="text-xs text-zinc-500 hover:text-zinc-300">← all coins</button>
+        <a href={`/pro?token=${token.tokenId}`} className="rounded-lg border border-zinc-800 px-2.5 py-1 text-[11px] font-bold text-green-400 hover:border-green-500">
+          Pro terminal ↗
+        </a>
+      </div>
 
       <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-5">
         <div className="flex items-center gap-3">
