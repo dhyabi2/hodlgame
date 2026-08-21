@@ -35,13 +35,16 @@ async function pinToIpfs(file: File): Promise<string> {
   return `ipfs://${data.IpfsHash}`;
 }
 
-async function saveLocal(file: File): Promise<string> {
+async function saveLocal(file: File, origin: string): Promise<string> {
   const ext = EXTS[file.type] ?? "png";
   const name = `${crypto.randomBytes(16).toString("hex")}.${ext}`;
   const dir = path.join(process.cwd(), "public", "uploads");
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, name), Buffer.from(await file.arrayBuffer()));
-  return `/uploads/${name}`;
+  // Absolute URL: metadata sanitization (safeUrl) keeps only absolute http(s)/
+  // ipfs URLs, so a relative "/uploads/..." would be dropped. The self-host
+  // fallback returns an origin-qualified URL that survives and renders.
+  return `${origin}/uploads/${name}`;
 }
 
 /** Accept an image upload (form-data `file`) or a passthrough `{url}`. */
@@ -73,7 +76,7 @@ export async function POST(req: Request) {
     // Pinata/IPFS → local filesystem.
     let url: string;
     if (process.env.PINATA_JWT) url = await pinToIpfs(file);
-    else url = await saveLocal(file);
+    else url = await saveLocal(file, new URL(req.url).origin);
 
     return NextResponse.json({ url, ipfs: Boolean(process.env.PINATA_JWT) });
   } catch (e: any) {

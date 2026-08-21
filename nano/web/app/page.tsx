@@ -15,6 +15,8 @@ import type { Op } from "../core/ops";
 import { Sparkline } from "./components/Sparkline";
 import Explorer from "./components/Explorer";
 import { loadWallet, saveWallet, removeWallet, encryptSeed, decryptSeed } from "./lib/wallet";
+import { useNanoWebsocket } from "./lib/nano-ws";
+import { QRCodeSVG } from "qrcode.react";
 
 const PriceChart = dynamic(() => import("./components/PriceChart"), { ssr: false });
 
@@ -582,6 +584,13 @@ function ConnectedWallet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keys.address]);
 
+  // Live deposit detection: the moment a send to us confirms on the Nano
+  // websocket, auto-receive it — no waiting for the 8s poll. (verifyXNO pattern.)
+  useNanoWebsocket(keys.address, keys.publicKey, (amountRaw) => {
+    say(`incoming ${fmtXno(amountRaw)} XNO — receiving…`);
+    receiveAll(true);
+  });
+
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(keys.address);
@@ -619,12 +628,18 @@ function ConnectedWallet({
       </div>
 
       <div className="rounded-none border border-neutral-300 bg-neutral-50 p-3">
-        <p className="text-[11px] text-neutral-500 mb-1">your address · send XNO here to fund</p>
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-mono text-neutral-700 break-all flex-1">{keys.address}</span>
-          <button className="shrink-0 rounded-none bg-neutral-100 px-2.5 py-1.5 text-[11px] font-bold text-neutral-700 hover:bg-neutral-200" onClick={copy}>
-            {copied ? "copied" : "copy"}
-          </button>
+        <p className="text-[11px] text-neutral-500 mb-2">your address · scan or send XNO here to fund</p>
+        <div className="flex items-start gap-3">
+          <div className="shrink-0 border border-neutral-300 bg-white p-1.5">
+            <QRCodeSVG value={`nano:${keys.address}`} size={112} bgColor="#ffffff" fgColor="#000000" level="M" />
+          </div>
+          <div className="min-w-0 flex-1 space-y-2">
+            <span className="block text-xs font-mono text-neutral-700 break-all">{keys.address}</span>
+            <button className="rounded-none bg-neutral-100 px-2.5 py-1.5 text-[11px] font-bold text-neutral-700 hover:bg-neutral-200" onClick={copy}>
+              {copied ? "copied" : "copy address"}
+            </button>
+            <p className="text-[10px] text-neutral-400">deposits are detected live and received automatically</p>
+          </div>
         </div>
       </div>
 
@@ -1087,8 +1102,11 @@ function TokenDetail({
   useEffect(() => { try { localStorage.setItem("holdfun-slippage", slippage); } catch {} }, [slippage]);
   const [sendTo, setSendTo] = useState("");
   const [sendAmount, setSendAmount] = useState("");
+  const [seedXno, setSeedXno] = useState("");
+  const [seedTokens, setSeedTokens] = useState("");
 
   const myHolding = keys ? token.topHolders.find((h) => h.account === keys.address) : undefined;
+  const isCreator = keys?.address === token.creator;
 
   async function buy() {
     if (!keys) return promptUnlock();
@@ -1155,6 +1173,41 @@ function TokenDetail({
       }
     } catch (e: any) {
       say("sell failed: " + e.message);
+    }
+  }
+
+  // Creator seeds/adds pool liquidity: deposit XNO to the pool (value-bound),
+  // then a chained seedLiq op moving `tokens` from treasury into the pool. This
+  // is what makes a launched token tradeable — mirrors the buy deposit+op flow.
+  async function seed() {
+    if (!keys) return promptUnlock();
+    if (!token.pool) return say("no pool derived for this token yet");
+    if (keys.address !== token.creator) return say("only the creator can seed liquidity");
+    const xnoRaw = BigInt(Math.floor(Number(seedXno || "0") * 1e30)) || 0n;
+    const tokRaw = BigInt(Math.floor(Number(seedTokens || "0") * 10 ** token.decimals)) || 0n;
+    if (xnoRaw <= 0n) return say("enter XNO amount to seed");
+    if (tokRaw <= 0n) return say("enter token amount to seed");
+    if (tokRaw > BigInt(token.treasury)) return say("token amount exceeds treasury");
+    try {
+      const info = await rpc("account_info", { account: keys.address, representative: "true" });
+      if (!info.frontier) return say("account not opened — fund it first");
+      const w1 = (await rpc("work_generate", { hash: info.frontier, difficulty: "fffffff800000000" })).work;
+      const blk1 = buildBlock(keys.secretKey, {
+        work: w1, previous: info.frontier, representative: info.representative,
+        balance: (BigInt(info.balance) - xnoRaw).toString(), link: token.pool,
+      });
+      const r1 = await rpc("process", { json_block: "true", block: blk1 });
+      const opLink = encodeOpLink(token.tokenId, { kind: "seedLiq", xno: 0n, tokens: tokRaw });
+      const w2 = (await rpc("work_generate", { hash: r1.hash, difficulty: "fffffff800000000" })).work;
+      const blk2 = buildBlock(keys.secretKey, {
+        work: w2, previous: r1.hash, representative: info.representative,
+        balance: (BigInt(info.balance) - xnoRaw - 1n).toString(), link: opLink,
+      });
+      const r2 = await rpc("process", { json_block: "true", block: blk2 });
+      say(`liquidity seeded ✓ ${r2.hash.slice(0, 10)}…`);
+      setSeedXno(""); setSeedTokens("");
+    } catch (e: any) {
+      say("seed failed: " + e.message);
     }
   }
 
@@ -1263,6 +1316,23 @@ function TokenDetail({
           <CommentThread tokenId={token.tokenId} comments={token.comments} keys={keys} isDev={keys?.address === token.creator} />
         )}
       </div>
+
+      {isCreator && (
+        <div className="rounded-none border border-black bg-white p-5 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-bold text-black">Seed / add liquidity <span className="text-[11px] font-normal text-neutral-500">creator</span></p>
+            <p className="text-[11px] text-neutral-500">pool {fmtXno(token.poolXno)} XNO · treasury {fmtTok(token.treasury, token.decimals)}</p>
+          </div>
+          {BigInt(token.poolXno) <= 0n && (
+            <p className="text-[11px] text-black">This token has no pool yet — seed it to make it tradeable.</p>
+          )}
+          <div className="flex gap-2">
+            <input className={inputC} placeholder="XNO to add" inputMode="decimal" value={seedXno} onChange={(e) => setSeedXno(e.target.value)} />
+            <input className={inputC} placeholder="tokens to add" inputMode="decimal" value={seedTokens} onChange={(e) => setSeedTokens(e.target.value)} />
+          </div>
+          <button className={btn} disabled={busy} onClick={seed}>Seed pool</button>
+        </div>
+      )}
 
       <div className="rounded-none border border-neutral-300 bg-white p-5 space-y-2">
         <p className="text-sm font-bold text-neutral-700">Send tokens</p>
