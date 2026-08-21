@@ -190,8 +190,12 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   const [tab, setTab] = useState<"explore" | "portfolio" | "create" | "scan" | "wallet">("explore");
+  const [unlockOpen, setUnlockOpen] = useState(false);
 
   const say = (s: string) => setLog((l) => [...l.slice(-9), s]);
+  // One-tap unlock from anywhere: locked actions open an in-place sheet instead
+  // of bouncing the user to the Wallet tab and losing their place.
+  const promptUnlock = () => setUnlockOpen(true);
 
   const unlock = (k: Keys) => {
     setKeys(k);
@@ -206,7 +210,24 @@ export default function Home() {
 
   useEffect(() => {
     setHasWallet(Boolean(loadWallet()));
+    // Deep-link restore: #t=<tokenId> opens a coin directly (shareable);
+    // #tab=<name> restores the last section. Survives refresh + sharing.
+    try {
+      const h = new URLSearchParams(window.location.hash.slice(1));
+      const t = h.get("t");
+      const tb = h.get("tab") as typeof tab | null;
+      if (t) setSelectedId(t.toLowerCase());
+      else if (tb && ["explore", "portfolio", "create", "scan", "wallet"].includes(tb)) setTab(tb);
+    } catch {}
   }, []);
+
+  // Keep the URL hash in sync so refresh/back/share land in the same place.
+  useEffect(() => {
+    try {
+      const hash = selectedId ? `t=${selectedId}` : `tab=${tab}`;
+      window.history.replaceState(null, "", `#${hash}`);
+    } catch {}
+  }, [selectedId, tab]);
 
   // Feed — Vercel-safe polling (no SSE), includes my balance when unlocked.
   useEffect(() => {
@@ -280,7 +301,7 @@ export default function Home() {
   }
 
   async function submitBlock(link: string, balanceDelta: bigint): Promise<string> {
-    if (!keys) throw new Error("connect first");
+    if (!keys) { promptUnlock(); throw new Error("unlock your wallet"); }
     await ensureHello();
     const info = await rpc("account_info", { account: keys.address, representative: "true" });
     if (!info.frontier) throw new Error("account not opened — fund it first");
@@ -298,7 +319,7 @@ export default function Home() {
   }
 
   async function sendOp(tokenId: string, op: Op, label: string) {
-    if (!keys) return say("connect first");
+    if (!keys) return promptUnlock();
     setBusy(true);
     try {
       const hash = await submitBlock(encodeOpLink(tokenId, op), 1n);
@@ -331,7 +352,7 @@ export default function Home() {
             {short(keys.address)}
           </button>
         ) : (
-          <button className="text-xs text-amber-400 font-bold" onClick={() => setTab("wallet")}>
+          <button className="text-xs text-amber-400 font-bold" onClick={promptUnlock}>
             🔒 unlock
           </button>
         )}
@@ -346,6 +367,7 @@ export default function Home() {
             say={say}
             submitBlock={submitBlock}
             sendOp={sendOp}
+            promptUnlock={promptUnlock}
             onBack={() => setSelectedId(null)}
           />
         ) : tab === "explore" ? (
@@ -361,6 +383,7 @@ export default function Home() {
             say={say}
             keys={keys}
             submitBlock={submitBlock}
+            promptUnlock={promptUnlock}
             onCreated={(id) => {
               setTab("explore");
               setSelectedId(id);
@@ -380,7 +403,78 @@ export default function Home() {
       </div>
 
       <TabBar tab={tab} setTab={setTab} />
+
+      <UnlockModal
+        open={unlockOpen}
+        hasWallet={hasWallet}
+        onClose={() => setUnlockOpen(false)}
+        onUnlocked={(k) => { unlock(k); setUnlockOpen(false); }}
+        goSetup={() => { setUnlockOpen(false); setSelectedId(null); setTab("wallet"); }}
+      />
     </main>
+  );
+}
+
+// In-place unlock sheet: the min-clicks path to signing. Any locked action (buy,
+// sell, stake, create, header) opens this without navigating away, so the user
+// keeps their place (and the coin they were looking at).
+function UnlockModal({
+  open, hasWallet, onClose, onUnlocked, goSetup,
+}: {
+  open: boolean;
+  hasWallet: boolean;
+  onClose: () => void;
+  onUnlocked: (k: Keys) => void;
+  goSetup: () => void;
+}) {
+  const [pw, setPw] = useState("");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (!open) { setPw(""); setErr(""); } }, [open]);
+  if (!open) return null;
+
+  const unlock = async () => {
+    setBusy(true); setErr("");
+    try {
+      const w = loadWallet();
+      if (!w) return setErr("no wallet on this device");
+      const s = await decryptSeed(w, pw);
+      if (!/^[0-9a-fA-F]{64}$/.test(s)) return setErr("wrong password");
+      onUnlocked(keysFromSeed(s));
+    } catch { setErr("wrong password"); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl border border-zinc-800 bg-[#0a0a0a] p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-bold text-zinc-200">{hasWallet ? "Unlock wallet" : "Set up your wallet"}</p>
+          <button className="text-zinc-500 hover:text-zinc-300 text-lg leading-none" onClick={onClose}>×</button>
+        </div>
+        {hasWallet ? (
+          <>
+            <input
+              className={inputC}
+              type="password"
+              placeholder="password"
+              value={pw}
+              autoFocus
+              onChange={(e) => setPw(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && unlock()}
+            />
+            {err && <p className="text-xs text-red-400">{err}</p>}
+            <button className={btn} disabled={busy} onClick={unlock}>{busy ? "unlocking…" : "Unlock"}</button>
+            <p className="text-[11px] text-zinc-600">decrypted in your browser — your seed never leaves it</p>
+          </>
+        ) : (
+          <>
+            <p className="text-xs text-zinc-400">You need a wallet to trade. It’s created and encrypted right in your browser — takes a few seconds.</p>
+            <button className={btn} onClick={goSetup}>Create / import wallet →</button>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -846,6 +940,7 @@ function TokenDetail({
   say,
   submitBlock,
   sendOp,
+  promptUnlock,
   onBack,
 }: {
   token: Token;
@@ -854,18 +949,25 @@ function TokenDetail({
   say: (s: string) => void;
   submitBlock: (link: string, delta: bigint) => Promise<string>;
   sendOp: (tokenId: string, op: Op, label: string) => Promise<void>;
+  promptUnlock: () => void;
   onBack: () => void;
 }) {
   const [amount, setAmount] = useState("");
   const [tab, setTab] = useState<"trade" | "thread">("trade");
-  const [slippage, setSlippage] = useState("0");
+  // Default to a sane 1% slippage and remember the user's last choice, so they
+  // don't re-set protection on every coin.
+  const [slippage, setSlippage] = useState(() => {
+    try { return localStorage.getItem("holdfun-slippage") ?? "1"; } catch { return "1"; }
+  });
+  useEffect(() => { try { localStorage.setItem("holdfun-slippage", slippage); } catch {} }, [slippage]);
   const [sendTo, setSendTo] = useState("");
   const [sendAmount, setSendAmount] = useState("");
 
   const myHolding = keys ? token.topHolders.find((h) => h.account === keys.address) : undefined;
 
   async function buy() {
-    if (!keys || !token.pool) return say("connect + a token with a pool");
+    if (!keys) return promptUnlock();
+    if (!token.pool) return say("this token has no pool yet");
     const raw = BigInt(Math.floor(Number(amount || "0") * 1e30)) || 0n;
     if (raw <= 0n) return say("enter XNO amount");
     try {
@@ -908,6 +1010,7 @@ function TokenDetail({
   }
 
   async function sell() {
+    if (!keys) return promptUnlock();
     const raw = BigInt(Math.floor(Number(amount || "0") * 10 ** token.decimals)) || 0n;
     if (raw <= 0n) return say("enter token amount");
     setAmount("");
@@ -931,6 +1034,7 @@ function TokenDetail({
   }
 
   async function transfer() {
+    if (!keys) return promptUnlock();
     const to = sendTo.trim();
     const raw = BigInt(Math.floor(Number(sendAmount || "0") * 10 ** token.decimals)) || 0n;
     if (!to || raw <= 0n) return say("enter recipient address + amount");
@@ -1194,6 +1298,19 @@ function TradePanel({
           </button>
         )}
       </div>
+      {side === "buy" && (
+        <div className="grid grid-cols-4 gap-2">
+          {["0.1", "0.5", "1", "5"].map((v) => (
+            <button
+              key={v}
+              className="rounded-lg border border-zinc-800 py-1.5 text-xs font-bold text-zinc-400 hover:border-green-500 hover:text-green-400"
+              onClick={() => setAmount(v)}
+            >
+              {v} XNO
+            </button>
+          ))}
+        </div>
+      )}
       {quote && (
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 space-y-1 text-[11px]">
           <div className="flex justify-between">
@@ -1419,6 +1536,7 @@ function CreateToken({
   say,
   keys,
   submitBlock,
+  promptUnlock,
   onCreated,
 }: {
   busy: boolean;
@@ -1426,6 +1544,7 @@ function CreateToken({
   say: (s: string) => void;
   keys: Keys | null;
   submitBlock: (link: string, delta: bigint) => Promise<string>;
+  promptUnlock: () => void;
   onCreated: (id: string) => void;
 }) {
   const [name, setName] = useState("");
@@ -1453,7 +1572,7 @@ function CreateToken({
   }
 
   async function launch() {
-    if (!keys) return say("connect first");
+    if (!keys) return promptUnlock();
     const decimals = 6;
     const rawSupply = BigInt(Math.floor(Number(supply || "0") * 10 ** decimals)) || 0n;
     if (rawSupply <= 0n) return say("enter supply");
