@@ -334,28 +334,32 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-white text-black pb-20">
       <header className="sticky top-0 z-20 border-b border-neutral-300 bg-white/90 backdrop-blur">
-        <div className="w-full px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-lg font-black tracking-tight text-black">
+        <div className="w-full px-4 py-3 flex items-center gap-3 sm:gap-5">
+          <button className="text-lg font-black tracking-tight text-black shrink-0" onClick={() => { setSelectedId(null); setTab("explore"); }}>
             HoldFun
-          </span>
-        </div>
-        {keys ? (
-          <button
-            className="text-xs text-neutral-700 font-mono hover:text-black"
-            title="copy address"
-            onClick={() => {
-              navigator.clipboard?.writeText(keys.address);
-              say(`copied ${short(keys.address)}`);
-            }}
-          >
-            {short(keys.address)}
           </button>
-        ) : (
-          <button className="text-xs text-black font-bold" onClick={promptUnlock}>
-            unlock
-          </button>
-        )}
+          <nav className="flex items-center gap-3 sm:gap-4 text-xs font-bold uppercase tracking-wide text-neutral-500 overflow-x-auto">
+            <button className={"hover:text-black whitespace-nowrap " + (!selectedId && tab === "explore" ? "text-black" : "")} onClick={() => { setSelectedId(null); setTab("explore"); }}>Coins</button>
+            <button className={"hover:text-black whitespace-nowrap " + (tab === "ranks" ? "text-black" : "")} onClick={() => { setSelectedId(null); setTab("ranks"); }}>Ranks</button>
+            <button className={"hover:text-black whitespace-nowrap " + (tab === "scan" ? "text-black" : "")} onClick={() => { setSelectedId(null); setTab("scan"); }}>Explorer</button>
+            <a className="hover:text-black whitespace-nowrap" href="/pro">Chart / Trade ↗</a>
+          </nav>
+          {keys ? (
+            <button
+              className="ml-auto shrink-0 text-xs text-neutral-700 font-mono hover:text-black"
+              title="copy address"
+              onClick={() => {
+                navigator.clipboard?.writeText(keys.address);
+                say(`copied ${short(keys.address)}`);
+              }}
+            >
+              {short(keys.address)}
+            </button>
+          ) : (
+            <button className="ml-auto shrink-0 text-xs text-black font-bold uppercase tracking-wide" onClick={promptUnlock}>
+              unlock
+            </button>
+          )}
         </div>
       </header>
 
@@ -1807,7 +1811,7 @@ const TABS: { id: "explore" | "ranks" | "portfolio" | "create" | "scan" | "walle
   { id: "ranks", label: "Ranks", icon: "🏆" },
   { id: "portfolio", label: "Holdings", icon: "💼" },
   { id: "create", label: "Create", icon: "✨" },
-  { id: "scan", label: "Scan", icon: "🔎" },
+  { id: "scan", label: "Explorer", icon: "🔎" },
   { id: "wallet", label: "Wallet", icon: "👛" },
 ];
 
