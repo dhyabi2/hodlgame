@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { commentsFor, addComment } from "../../../server/comments";
 import { isTokenId, isNanoAddress } from "../../../server/validate";
+import { rateLimit, clientIp } from "../../../server/httpguard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,10 @@ export async function GET(req: Request) {
 /** Signed-only: the author signs blake2b("holdfun-comment-v1"‖tokenId‖time‖text)
  * with their wallet key; authorship is cryptographic, not claimed. */
 export async function POST(req: Request) {
+  const ip = clientIp(req);
+  if (!rateLimit(`cmt:${ip}`, 30, 60_000) || !rateLimit("cmt:global", 300, 60_000)) {
+    return NextResponse.json({ error: "rate limited — try again shortly" }, { status: 429 });
+  }
   let body: any;
   try {
     body = await req.json();

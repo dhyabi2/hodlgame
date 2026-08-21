@@ -1868,7 +1868,19 @@ function CreateToken({
         <input className={inputC} placeholder="name" value={name} onChange={(e) => setName(e.target.value)} />
         <input className={inputC} placeholder="symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)} />
       </div>
-      <input className={inputC} placeholder="supply (whole tokens)" inputMode="decimal" value={supply} onChange={(e) => setSupply(e.target.value)} />
+      <div>
+        <label className="text-[11px] text-neutral-500">Total supply — how many tokens will ever exist</label>
+        <input className={inputC + " mt-1"} placeholder="e.g. 1000000000" inputMode="numeric" value={supply}
+          onChange={(e) => setSupply(e.target.value.replace(/[^\d]/g, ""))} />
+        <div className="mt-1.5 flex gap-2">
+          {[["1M", "1000000"], ["100M", "100000000"], ["1B", "1000000000"]].map(([label, val]) => (
+            <button key={label} type="button"
+              className="rounded-none border border-neutral-300 px-2.5 py-1 text-[11px] font-bold text-neutral-700 hover:border-black"
+              onClick={() => setSupply(val)}>{label}</button>
+          ))}
+          {supply && <span className="ml-auto self-center text-[11px] text-neutral-400 tabular-nums">{Number(supply).toLocaleString()} tokens · you keep 5%</span>}
+        </div>
+      </div>
       <textarea className={inputC} placeholder="description" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
       <div className="grid grid-cols-1 gap-2">
         <input className={inputC} placeholder="website (optional)" value={website} onChange={(e) => setWebsite(e.target.value)} />

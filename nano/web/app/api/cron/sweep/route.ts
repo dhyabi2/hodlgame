@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { runSweep } from "../../../../server/operator";
+import { gcOrphanImages } from "../../../../server/imagegc";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +20,10 @@ export async function GET(req: Request) {
   }
   try {
     const r = await runSweep(null);
-    return NextResponse.json(r);
+    // Best-effort orphan-image GC — never let it fail the payout sweep.
+    let gc: unknown = null;
+    try { gc = await gcOrphanImages(); } catch (e: any) { gc = { error: e?.message ?? String(e) }; }
+    return NextResponse.json({ ...r, gc });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? String(e) }, { status: 500 });
   }

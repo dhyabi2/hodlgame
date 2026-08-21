@@ -3,6 +3,7 @@ import { loadMetaRow, saveMetaRow } from "../../../server/tokens";
 import { isTokenId, sanitizeMeta, metaHasRequired } from "../../../server/validate";
 import { verifyMetaSignature, decideMetaUpdate, gateMetaAction } from "../../../server/metaAuth";
 import { authorityStateOf } from "../../../server/market";
+import { rateLimit, clientIp } from "../../../server/httpguard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +18,10 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(req: Request) {
   let body: any;
+  const ip = clientIp(req);
+  if (!rateLimit(`meta:${ip}`, 20, 60_000) || !rateLimit("meta:global", 240, 60_000)) {
+    return NextResponse.json({ error: "rate limited — try again shortly" }, { status: 429 });
+  }
   try {
     body = await req.json();
   } catch {

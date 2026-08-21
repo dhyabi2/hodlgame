@@ -96,14 +96,14 @@ export async function saveJson(name: string, value: unknown): Promise<void> {
 // value in the POST body, not the URL path — a base64 image is far too large to
 // fit in a URL, so `upstashSet` (value-in-URL) cannot carry it. Locally it falls
 // back to a file. Keys are sanitized to a safe filename for the fs path.
-async function upstashCmd(cmd: unknown[], u: { url: string; token: string }): Promise<string | null> {
+async function upstashCmd(cmd: unknown[], u: { url: string; token: string }): Promise<any> {
   const res = await fetch(u.url, {
     method: "POST",
     headers: { Authorization: `Bearer ${u.token}`, "Content-Type": "application/json" },
     body: JSON.stringify(cmd),
   });
   if (!res.ok) throw new Error(`upstash ${cmd[0]} failed (${res.status})`);
-  const j = (await res.json()) as { result?: string | null };
+  const j = (await res.json()) as { result?: any };
   return j.result ?? null;
 }
 const blobFile = (name: string) => path.join(dir(), name.replace(/[^\w.-]/g, "_") + ".blob");
@@ -125,4 +125,72 @@ export async function loadBlob(name: string): Promise<string | null> {
     try { return await blobGet(`blob/${blobKey(name)}`); } catch { return null; }
   }
   try { return await fs.promises.readFile(blobFile(name), "utf-8"); } catch { return null; }
+}
+
+// ── image garbage collection support (orphan cleanup) ────────────────────────
+// List every stored image id (32-hex) with its age in ms (-1 if unknown), and
+// delete one by id. Backend-specific because each stores the key differently.
+const HEX32 = /^[0-9a-f]{32}$/;
+
+export async function listImageIds(): Promise<{ id: string; ageMs: number }[]> {
+  const now = Date.now();
+  const u = upstash();
+  if (u) {
+    const out: { id: string; ageMs: number }[] = [];
+    let cursor = "0";
+    do {
+      const r = await upstashCmd(["SCAN", cursor, "MATCH", "holdfun:img:*", "COUNT", "300"], u);
+      cursor = String(r?.[0] ?? "0");
+      for (const key of (r?.[1] ?? []) as string[]) {
+        const id = key.replace(/^holdfun:img:/, "");
+        if (!HEX32.test(id)) continue;
+        let ageMs = -1;
+        try { const t = JSON.parse((await upstashCmd(["GET", key], u)) ?? "{}")?.t; if (typeof t === "number") ageMs = now - t; } catch {}
+        out.push({ id, ageMs });
+      }
+    } while (cursor !== "0");
+    return out;
+  }
+  if (blobEnabled()) {
+    const { list } = await import("@vercel/blob");
+    const out: { id: string; ageMs: number }[] = [];
+    let cursor: string | undefined;
+    do {
+      const r: any = await list({ prefix: "blob/img_", cursor, limit: 1000 });
+      for (const b of r.blobs) {
+        const id = String(b.pathname).replace(/^blob\/img_/, "");
+        if (HEX32.test(id)) out.push({ id, ageMs: b.uploadedAt ? now - new Date(b.uploadedAt).getTime() : -1 });
+      }
+      cursor = r.cursor;
+    } while (cursor);
+    return out;
+  }
+  try {
+    const files = await fs.promises.readdir(dir());
+    const out: { id: string; ageMs: number }[] = [];
+    for (const f of files) {
+      const m = f.match(/^img_([0-9a-f]{32})\.blob$/);
+      if (!m) continue;
+      let ageMs = -1;
+      try { ageMs = now - (await fs.promises.stat(path.join(dir(), f))).mtimeMs; } catch {}
+      out.push({ id: m[1], ageMs });
+    }
+    return out;
+  } catch { return []; }
+}
+
+export async function delImage(id: string): Promise<void> {
+  if (!HEX32.test(id)) return;
+  const name = `img:${id}`;
+  const u = upstash();
+  if (u) { await upstashCmd(["DEL", `holdfun:${name}`], u); return; }
+  if (blobEnabled()) {
+    const { list, del } = await import("@vercel/blob");
+    const path0 = `blob/${blobKey(name)}`;
+    const r: any = await list({ prefix: path0, limit: 1 });
+    const b = r.blobs.find((x: any) => x.pathname === path0);
+    if (b) await del(b.url);
+    return;
+  }
+  try { await fs.promises.unlink(blobFile(name)); } catch {}
 }

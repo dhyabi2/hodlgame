@@ -124,7 +124,8 @@ export async function POST(req: Request) {
     // metadata safeImageUrl keeps it.
     const id = crypto.randomBytes(16).toString("hex");
     const b64 = buf.toString("base64");
-    await saveBlob(`img:${id}`, JSON.stringify({ ct: info.type, data: b64 }));
+    // `t` (upload time) lets the orphan-image GC apply a grace period.
+    await saveBlob(`img:${id}`, JSON.stringify({ ct: info.type, data: b64, t: Date.now() }));
     const url = `${new URL(req.url).origin}/api/image/${id}`;
     return NextResponse.json({ url });
   } catch (e: any) {
