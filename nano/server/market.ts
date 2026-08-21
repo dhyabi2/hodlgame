@@ -61,10 +61,18 @@ export interface RawMarket {
   sellPayouts: ReturnType<typeof analyze>["sellPayouts"];
 }
 
-let cache: { at: number; value: RawMarket } | null = null;
-const TTL_MS = 2000;
-
-async function computeFresh(): Promise<RawMarket> {
+// Deliberately UNCACHED. This used to be a 2-second in-memory cache shared
+// by burst requests (feed + detail + SSE) on one warm instance — but on
+// Vercel each serverless instance has its own isolated memory, so two
+// requests landing on different instances could already disagree for up to
+// 2 seconds, and every write path (see the deleted bustCache()) needed a
+// manual "did I remember to invalidate the cache" call to stay correct. That
+// class of bug is exactly what made a freshly-launched coin intermittently
+// vanish from the feed (see operator.ts's watchedAccounts() for the full
+// story) — same root cause, smaller blast radius. Every call here replays
+// live from chain data; there is nothing for a cache to save that isn't
+// already a live, verified RPC round-trip away.
+async function compute(): Promise<RawMarket> {
   const reg = await loadRegistry();
   const commit = await commitResolver();
   const master = process.env.POOL_SEED ?? "";
@@ -78,14 +86,6 @@ async function computeFresh(): Promise<RawMarket> {
   for (const [tokenId, s] of state) if (s.creator) creators.set(tokenId, s.creator);
   const metaAuthority = deriveMetaAuthority(idx.getMetaAnchors(), creators);
   return { state, byToken, meta: reg, master, metaAuthority, events, idx, sellPayouts };
-}
-
-/** Shared in-memory cache so burst requests (feed + detail + SSE) share one index. */
-async function compute(): Promise<RawMarket> {
-  if (cache && Date.now() - cache.at < TTL_MS) return cache.value;
-  const value = await computeFresh();
-  cache = { at: Date.now(), value };
-  return value;
 }
 
 /** On-chain creator for a token (launch block signer), or null if the launch
@@ -108,10 +108,6 @@ export async function authorityStateOf(tokenId: string): Promise<MetaAuthoritySt
   } catch {
     return null;
   }
-}
-
-export function bustCache(): void {
-  cache = null;
 }
 
 /** Raw market internals (events, indexer, payouts) for the explorer layer. */

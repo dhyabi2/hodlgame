@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { registerCommit } from "../../../server/commits";
-import { bustCache } from "../../../server/market";
 import { parse } from "../../../core/json";
 import { isTokenId, validateCommitOp } from "../../../server/validate";
 
@@ -26,7 +25,6 @@ export async function POST(req: Request) {
   }
   try {
     const link = await registerCommit(tokenId, op);
-    bustCache();
     return NextResponse.json({ ok: true, link });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? String(e) }, { status: 400 });

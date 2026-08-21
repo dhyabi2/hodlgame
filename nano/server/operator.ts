@@ -17,24 +17,33 @@ export function watched(): string[] {
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
-// Anchor-derived discovery (core/anchor.ts), cached briefly; the env list is
-// additive during migration and the fallback when discovery is unreachable.
-// Once every legacy account has been anchor-bootstrapped, WATCHED_ACCOUNTS
-// can be deleted.
-let discoveryCache: { at: number; users: string[] } | null = null;
-const DISCOVERY_TTL_MS = 30_000;
-
+// Anchor-derived discovery (core/anchor.ts): a live, uncached 2-hop walk of
+// the public ANCHOR account's chain history (core/anchor.ts) — the env list
+// is additive during migration and the fallback when discovery is
+// unreachable. Once every legacy account has been anchor-bootstrapped,
+// WATCHED_ACCOUNTS can be deleted.
+//
+// Deliberately NOT cached (in memory or in the durable store). This ran on
+// Vercel with a module-level TTL cache before — since each serverless
+// instance has its own isolated memory, a freshly-launched coin whose
+// creator only ONE instance's cache had discovered would vanish and
+// reappear depending on which instance handled a given request, entirely
+// independent of chain state. discoverAccounts() walks the anchor's full
+// verified block history every call — the same deterministic input
+// (core/anchor.ts, core/blockVerify.ts) always produces the same output, so
+// there is nothing correct for a cache to save here; only a way for a
+// serverless instance to disagree with reality. A transient RPC failure
+// degrades a single request to env-only (self-healing on the very next
+// call, per blockSource.ts's nano.to → nano-gpt.com fallback) rather than
+// poisoning every future request on that instance for the next 30s.
 export async function watchedAccounts(): Promise<string[]> {
   const env = watched();
-  if (!discoveryCache || Date.now() - discoveryCache.at >= DISCOVERY_TTL_MS) {
-    try {
-      const d = await discoverAccounts(new NanoRpcSource(loadNanoRpcKey()), ANCHOR_ADDRESS);
-      discoveryCache = { at: Date.now(), users: d.users };
-    } catch {
-      // discovery unreachable → env-only this round
-    }
+  try {
+    const d = await discoverAccounts(new NanoRpcSource(loadNanoRpcKey()), ANCHOR_ADDRESS);
+    return [...new Set([...d.users, ...env])].sort();
+  } catch {
+    return env;
   }
-  return [...new Set([...(discoveryCache?.users ?? []), ...env])].sort();
 }
 
 export async function indexer(): Promise<MultiIndexer> {
