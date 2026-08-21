@@ -255,7 +255,7 @@ function StatsPanel({ d, go }: { d: any; go: (v: View) => void }) {
           </div>
         ))}
       </div>
-      <p className="text-[11px] text-neutral-400">state root <span className={mono}>{short(d.stateRoot, 12)}</span><Copy text={d.stateRoot} /> · verify with <span className={mono}>npx tsx scripts/verify.ts</span></p>
+      <p className="text-[11px] text-neutral-400">state root <span className={mono}>{short(d.stateRoot, 12)}</span><Copy text={d.stateRoot} /></p>
     </div>
   );
 }
@@ -498,7 +498,7 @@ function TrustPanel({ d, go }: { d: any; go: (v: View) => void }) {
         <Row k="state root"><span className={mono}>{d.stateRoot}</span><Copy text={d.stateRoot} /></Row>
         <Row k="tokens / ops">{d.tokens} / {d.events}</Row>
         <Row k="anchor account"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.anchor })}>{short(d.anchor, 12)}</span></Row>
-        <Row k="verify yourself"><span className={mono}>npx tsx scripts/verify.ts</span> recomputes this root with zero secrets</Row>
+        <Row k="verify yourself">recompute this root in your browser — no secrets, no trust</Row>
         <VerifyButton serverRoot={d.stateRoot} />
       </div>
       <div className={card}><h3 className="font-black text-sm mb-2">Proof of reserves — all pools</h3>

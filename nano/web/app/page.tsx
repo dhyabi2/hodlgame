@@ -197,6 +197,10 @@ function timeAgo(ts: number) {
 
 const short = (a: string) => (a ? a.slice(0, 6) + "…" + a.slice(-4) : "");
 const pctStr = (n: number | null) => (n == null ? "·" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`);
+// Fallback display when a token's off-chain metadata hasn't loaded yet, so a live
+// coin is never fully blank — identify it by its tokenId.
+const tokName = (t: { name: string; tokenId: string }) => t.name || `Coin ${t.tokenId.slice(0, 6)}`;
+const tokSym = (t: { symbol: string; tokenId: string }) => t.symbol || t.tokenId.slice(0, 4).toUpperCase();
 
 const quoteBuy = (poolXno: string, poolTokens: string, xno: bigint): bigint => {
   const px = BigInt(poolXno);
@@ -226,11 +230,12 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Token | null>(null);
   const [busy, setBusy] = useState(false);
-  const [log, setLog] = useState<string[]>([]);
+  const [toast, setToast] = useState("");
   const [tab, setTab] = useState<"explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet">("explore");
   const [unlockOpen, setUnlockOpen] = useState(false);
 
-  const say = (s: string) => setLog((l) => [...l.slice(-9), s]);
+  // Transient status message (auto-dismisses) — no persistent debug log in the UI.
+  const say = (s: string) => { setToast(s); setTimeout(() => setToast((t) => (t === s ? "" : t)), 3500); };
   // One-tap unlock from anywhere: locked actions open an in-place sheet instead
   // of bouncing the user to the Wallet tab and losing their place.
   const promptUnlock = () => setUnlockOpen(true);
@@ -449,14 +454,13 @@ export default function Home() {
           </div>
         )}
 
-        {log.length > 0 && (
-          <div className="mt-4 rounded-none border border-neutral-300 bg-white p-3 text-xs space-y-1">
-            {log.map((l, i) => (
-              <p key={i} className="text-neutral-600">{l}</p>
-            ))}
-          </div>
-        )}
       </div>
+
+      {toast && (
+        <div className="fixed bottom-20 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-none border border-black bg-white px-4 py-2 text-sm shadow-lg max-w-[90vw] truncate">
+          {toast}
+        </div>
+      )}
 
       <TabBar tab={tab} setTab={setTab} />
 
@@ -925,9 +929,9 @@ function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddr
               <button key={t.tokenId} onClick={() => onSelect(t.tokenId)}
                 className="flex w-full items-center gap-3 rounded-none px-2 py-2 text-left hover:bg-neutral-50">
                 <span className={"w-5 text-center text-xs font-black " + medal(i)}>{i + 1}</span>
-                <Avatar image={t.image} symbol={t.symbol} size={30} />
+                <Avatar image={t.image} symbol={tokSym(t)} size={30} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold truncate">{t.symbol} <span className="text-[11px] font-normal text-neutral-500">{t.name}</span></p>
+                  <p className="text-sm font-bold truncate">{tokSym(t)} <span className="text-[11px] font-normal text-neutral-500">{t.name}</span></p>
                   <p className="text-[11px] text-neutral-500 truncate">mc {fmtXno(t.marketCap)} · {t.holders} hodl · vol {fmtXno(t.volume)}</p>
                 </div>
                 <span className={"text-xs font-bold tabular-nums shrink-0 " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-black" : "text-black")}>{pctStr(t.change24h)}</span>
@@ -986,8 +990,14 @@ function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id:
   const filtered = tokens
     .filter((t) => {
       const q = query.trim().toLowerCase();
-      if (!q) return true;
-      return t.name.toLowerCase().includes(q) || t.symbol.toLowerCase().includes(q);
+      // Search matches ANY identifying field (name / symbol / tokenId) across all
+      // tokens, so a coin is findable even before its metadata loads.
+      if (q) {
+        return t.name.toLowerCase().includes(q) || t.symbol.toLowerCase().includes(q) || t.tokenId.toLowerCase().includes(q);
+      }
+      // No query → only "live" coins: has a name/symbol OR real liquidity. Hides
+      // launched-but-unseeded / metadata-less (incomplete) launches.
+      return Boolean(t.name || t.symbol) || BigInt(t.poolXno) > 0n;
     })
     .slice()
     .sort((a, b) => {
@@ -1039,11 +1049,11 @@ function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id:
             className="rounded-none border border-neutral-300 bg-white p-4 text-left hover:border-black transition group"
           >
             <div className="flex items-center gap-3">
-              <Avatar image={t.image} symbol={t.symbol} />
+              <Avatar image={t.image} symbol={tokSym(t)} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <p className="font-bold text-sm truncate">{t.name}</p>
-                  <p className="text-[11px] text-neutral-500 shrink-0">${t.symbol}</p>
+                  <p className="font-bold text-sm truncate">{tokName(t)}</p>
+                  <p className="text-[11px] text-neutral-500 shrink-0">${tokSym(t)}</p>
                 </div>
                 <p className="text-[11px] text-neutral-500 truncate">mc {fmtXno(t.marketCap)} XNO</p>
               </div>
@@ -1282,11 +1292,11 @@ function TokenDetail({
 
       <div className="rounded-none border border-neutral-300 bg-white p-5">
         <div className="flex items-center gap-3">
-          <Avatar image={token.image} symbol={token.symbol} size={48} />
+          <Avatar image={token.image} symbol={tokSym(token)} size={48} />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h2 className="text-xl font-black truncate">{token.name}</h2>
-              <span className="text-[11px] text-neutral-500">${token.symbol}</span>
+              <h2 className="text-xl font-black truncate">{tokName(token)}</h2>
+              <span className="text-[11px] text-neutral-500">${tokSym(token)}</span>
             </div>
             <p className="text-[11px] text-neutral-400 font-mono truncate">{token.tokenId}</p>
           </div>
@@ -1843,12 +1853,23 @@ function CreateToken({
       const seq = Date.now();
       const digest = metaSignDigest(tokenId, seq, "update", metaFieldsHash(meta));
       const signature = nanocurrency.signBlock({ hash: digest, secretKey: keys.secretKey });
-      await fetch("/api/tokens", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tokenId, ...meta, account: keys.address, signature, seq, action: "update" }),
-      });
-      say(`launch ✓ ${hash.slice(0, 10)}…`);
+      const postMeta = () =>
+        fetch("/api/tokens", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tokenId, ...meta, account: keys.address, signature, seq, action: "update" }),
+        });
+      // The launch is on-chain; the name/symbol/image are off-chain. Don't report
+      // success unless BOTH land — a silent metadata failure leaves a nameless
+      // coin. Retry once, then surface the error so it can be re-published.
+      let mres = await postMeta();
+      if (!mres.ok) mres = await postMeta();
+      if (!mres.ok) {
+        const err = await mres.json().catch(() => ({}));
+        say(`launched on-chain, but name/image didn't save: ${err.error ?? mres.status}`);
+      } else {
+        say(`launch ✓ ${hash.slice(0, 10)}…`);
+      }
       onCreated(tokenId);
     } catch (e: any) {
       say("launch failed: " + e.message);
