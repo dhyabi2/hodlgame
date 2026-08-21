@@ -13,6 +13,7 @@ import {
   timeAgo,
   execBuy,
   execSell,
+  toRaw,
   sendOp,
   receiveAll,
   fetchXnoBalance,
@@ -517,10 +518,10 @@ function OrderTicket({ token, keys, say }: { token: Token; keys: Keys | null; sa
     setBusy(true);
     try {
       if (side === "buy") {
-        const h = await execBuy(keys, token, Number(amount), slip);
+        const h = await execBuy(keys, token, amount, slip);
         say(`bought ✓ ${h.slice(0, 10)}…`);
       } else {
-        const h = await execSell(keys, token, Number(amount), slip);
+        const h = await execSell(keys, token, amount, slip);
         say(`sold ✓ ${h.slice(0, 10)}…`);
       }
       setAmount("");
@@ -608,12 +609,12 @@ function PositionCard({ token, keys, busy, setBusy, say }: { token: Token; keys:
     finally { setBusy(false); }
   };
   const doStake = () => {
-    const raw = BigInt(Math.floor(Number(stakeAmt || "0") * 10 ** token.decimals)) || 0n;
+    const raw = toRaw(stakeAmt, token.decimals);
     if (raw <= 0n || !keys) return;
     run(() => sendOp(keys, token.tokenId, { kind: "stake", amount: raw }), "stake").then(() => setStakeAmt(""));
   };
   const doUnstake = () => {
-    const raw = BigInt(Math.floor(Number(unstakeAmt || "0") * 10 ** token.decimals)) || 0n;
+    const raw = toRaw(unstakeAmt, token.decimals);
     if (raw <= 0n || !keys) return;
     run(() => sendOp(keys, token.tokenId, { kind: "unstake", amount: raw }), "unstake").then(() => setUnstakeAmt(""));
   };

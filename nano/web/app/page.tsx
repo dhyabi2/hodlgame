@@ -17,6 +17,7 @@ import Explorer from "./components/Explorer";
 import { loadWallet, saveWallet, removeWallet, encryptSeed, decryptSeed } from "./lib/wallet";
 import { useNanoWebsocket } from "./lib/nano-ws";
 import { QRCodeSVG } from "qrcode.react";
+import { toRaw, clampSlippage, isNanoAddr } from "./lib/trade";
 
 const PriceChart = dynamic(() => import("./components/PriceChart"), { ssr: false });
 
@@ -1152,7 +1153,7 @@ function TokenDetail({
   async function buy() {
     if (!keys) return promptUnlock();
     if (!token.pool) return say("this token has no pool yet");
-    const raw = BigInt(Math.floor(Number(amount || "0") * 1e30)) || 0n;
+    const raw = toRaw(amount, 30);
     if (raw <= 0n) return say("enter XNO amount");
     try {
       const info = await rpc("account_info", { account: keys.address, representative: "true" });
@@ -1170,7 +1171,7 @@ function TokenDetail({
       const r1 = await rpc("process", { json_block: "true", block: blk1 });
 
       // 2. buy op chained directly after the deposit (previous = deposit hash).
-      const slip = Number(slippage || "0");
+      const slip = clampSlippage(slippage);
       let minTokens = 0n;
       if (slip > 0) {
         const expected = quoteBuy(token.poolXno, token.poolTokens, raw);
@@ -1195,10 +1196,10 @@ function TokenDetail({
 
   async function sell() {
     if (!keys) return promptUnlock();
-    const raw = BigInt(Math.floor(Number(amount || "0") * 10 ** token.decimals)) || 0n;
+    const raw = toRaw(amount, token.decimals);
     if (raw <= 0n) return say("enter token amount");
     setAmount("");
-    const slip = Number(slippage || "0");
+    const slip = clampSlippage(slippage);
     try {
       if (slip > 0) {
         const expected = quoteSell(token.poolXno, token.poolTokens, raw);
@@ -1224,8 +1225,8 @@ function TokenDetail({
     if (!keys) return promptUnlock();
     if (!token.pool) return say("no pool derived for this token yet");
     if (keys.address !== token.creator) return say("only the creator can seed liquidity");
-    const xnoRaw = BigInt(Math.floor(Number(seedXno || "0") * 1e30)) || 0n;
-    const tokRaw = BigInt(Math.floor(Number(seedTokens || "0") * 10 ** token.decimals)) || 0n;
+    const xnoRaw = toRaw(seedXno, 30);
+    const tokRaw = toRaw(seedTokens, token.decimals);
     if (xnoRaw <= 0n) return say("enter XNO amount to seed");
     if (tokRaw <= 0n) return say("enter token amount to seed");
     if (tokRaw > BigInt(token.treasury)) return say("token amount exceeds treasury");
@@ -1255,9 +1256,9 @@ function TokenDetail({
   async function transfer() {
     if (!keys) return promptUnlock();
     const to = sendTo.trim();
-    const raw = BigInt(Math.floor(Number(sendAmount || "0") * 10 ** token.decimals)) || 0n;
+    const raw = toRaw(sendAmount, token.decimals);
     if (!to || raw <= 0n) return say("enter recipient address + amount");
-    if (!to.startsWith("nano_")) return say("recipient must be a nano_ address");
+    if (!isNanoAddr(to)) return say("recipient must be a valid nano_ address");
     try {
       const [fragA, fragB] = encodeFragLinks(token.tokenId, { kind: "transfer", to, amount: raw });
       await submitBlock(fragA, 1n);
@@ -1458,7 +1459,7 @@ function TradePanel({
   sendOp: (tokenId: string, op: Op, label: string) => Promise<void>;
 }) {
   const [side, setSide] = useState<"buy" | "sell">("buy");
-  const slip = Number(slippage || "0");
+  const slip = clampSlippage(slippage);
 
   // Live quote preview — mirrors the on-chain constant-product math exactly
   // (buy: 1% swap fee via quoteBuy; sell: no fee). Recomputed as the user types.
@@ -1596,12 +1597,12 @@ function StakeBox({
   const bal = BigInt(token.myBalance || "0");
 
   const doStake = () => {
-    const raw = BigInt(Math.floor(Number(stakeAmt || "0") * 10 ** token.decimals)) || 0n;
+    const raw = toRaw(stakeAmt, token.decimals);
     if (raw <= 0n) return;
     sendOp(token.tokenId, { kind: "stake", amount: raw }, "stake").then(() => setStakeAmt(""));
   };
   const doUnstake = () => {
-    const raw = BigInt(Math.floor(Number(unstakeAmt || "0") * 10 ** token.decimals)) || 0n;
+    const raw = toRaw(unstakeAmt, token.decimals);
     if (raw <= 0n) return;
     sendOp(token.tokenId, { kind: "unstake", amount: raw }, "unstake").then(() => setUnstakeAmt(""));
   };
