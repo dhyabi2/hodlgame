@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useMemo, type ReactNode } from "react";
 import * as nanocurrency from "nanocurrency";
 import dynamic from "next/dynamic";
 import { encodeOpLink } from "../core/oplink";
@@ -74,6 +74,9 @@ interface Token {
   change24h: number | null;
   createdAt: number;
   myBalance: string;
+  myStaked: string;
+  myClaimable: string;
+  totalStaked: string;
   buyVolume: string;
   sellVolume: string;
   holders: number;
@@ -364,7 +367,7 @@ export default function Home() {
             }}
           />
         ) : (
-          <WalletPanel keys={keys} hasWallet={hasWallet} unlock={unlock} lock={lock} remove={remove} />
+          <WalletPanel keys={keys} hasWallet={hasWallet} unlock={unlock} lock={lock} remove={remove} say={say} />
         )}
 
         {log.length > 0 && (
@@ -381,18 +384,212 @@ export default function Home() {
   );
 }
 
+// Rich connected-wallet card: live XNO balance, copy address, receive pending
+// (auto-receives on unlock so funded XNO becomes spendable), and a
+// password-gated seed backup — the one secret a user must save to recover.
+function ConnectedWallet({
+  keys,
+  lock,
+  remove,
+  say,
+}: {
+  keys: Keys;
+  lock: () => void;
+  remove: () => void;
+  say: (s: string) => void;
+}) {
+  const [balance, setBalance] = useState<string | null>(null);
+  const [receiving, setReceiving] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [reveal, setReveal] = useState(false);
+  const [revealPw, setRevealPw] = useState("");
+  const [revealed, setRevealed] = useState("");
+  const [revealErr, setRevealErr] = useState("");
+
+  const refresh = async () => {
+    try {
+      const info = await rpc("account_info", { account: keys.address });
+      setBalance(info.balance ?? "0");
+    } catch {
+      setBalance("0"); // unopened account reports an error; treat as zero
+    }
+  };
+
+  // Receive every pending block so incoming XNO becomes spendable. Opens the
+  // account with the first block if it has never been used. Idempotent.
+  const receiveAll = async (announce = true) => {
+    setReceiving(true);
+    try {
+      const r = await rpc("receivable", { account: keys.address, count: "20", source: "true" });
+      const blocks = r.blocks && typeof r.blocks === "object" ? r.blocks : {};
+      const hashes = Object.keys(blocks);
+      if (hashes.length === 0) {
+        if (announce) say("nothing to receive");
+        await refresh();
+        return;
+      }
+      let info: any = null;
+      try {
+        info = await rpc("account_info", { account: keys.address, representative: "true" });
+      } catch {
+        info = null; // unopened
+      }
+      let previous: string | null = info?.frontier ?? null;
+      let balance = BigInt(info?.balance ?? "0");
+      const representative = info?.representative ?? keys.address;
+      let count = 0;
+      for (const hash of hashes) {
+        const entry: any = (blocks as any)[hash];
+        const amount = BigInt(typeof entry === "string" ? entry : entry.amount);
+        if (amount <= 0n) continue;
+        balance += amount;
+        const workHash = previous ?? keys.publicKey;
+        const work = (await rpc("work_generate", { hash: workHash, difficulty: "fffffe0000000000" })).work;
+        const blk = buildBlock(keys.secretKey, {
+          work,
+          previous,
+          representative,
+          balance: balance.toString(),
+          link: hash,
+        });
+        const res = await rpc("process", { json_block: "true", block: blk });
+        previous = res.hash;
+        count++;
+      }
+      if (announce) say(`received ${count} deposit${count === 1 ? "" : "s"} ✓`);
+      setBalance(balance.toString());
+    } catch (e: any) {
+      if (announce) say("receive failed: " + (e?.message ?? e));
+    } finally {
+      setReceiving(false);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+    receiveAll(false); // auto-sweep pending on unlock
+    const t = setInterval(refresh, 8000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keys.address]);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(keys.address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {}
+  };
+
+  const doReveal = async () => {
+    setRevealErr("");
+    try {
+      const w = loadWallet();
+      if (!w) return setRevealErr("no wallet stored");
+      const s = await decryptSeed(w, revealPw);
+      if (!/^[0-9a-fA-F]{64}$/.test(s)) return setRevealErr("wrong password");
+      setRevealed(s);
+      setRevealPw("");
+    } catch {
+      setRevealErr("wrong password");
+    }
+  };
+
+  const closeReveal = () => {
+    setReveal(false);
+    setRevealed("");
+    setRevealPw("");
+    setRevealErr("");
+  };
+
+  return (
+    <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-5 space-y-4">
+      <div>
+        <p className="text-[11px] text-zinc-500 mb-1">balance</p>
+        <p className="text-3xl font-black">{balance == null ? "…" : fmtXno(balance)} <span className="text-lg text-zinc-500">XNO</span></p>
+      </div>
+
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3">
+        <p className="text-[11px] text-zinc-500 mb-1">your address · send XNO here to fund</p>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-mono text-zinc-300 break-all flex-1">{keys.address}</span>
+          <button className="shrink-0 rounded-lg bg-zinc-800 px-2.5 py-1.5 text-[11px] font-bold text-zinc-300 hover:bg-zinc-700" onClick={copy}>
+            {copied ? "copied" : "copy"}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          className="rounded-xl border border-zinc-800 py-3 text-sm font-bold text-zinc-200 hover:border-green-500 disabled:opacity-40"
+          disabled={receiving}
+          onClick={() => receiveAll(true)}
+        >
+          {receiving ? "receiving…" : "Receive pending"}
+        </button>
+        <button
+          className="rounded-xl border border-zinc-800 py-3 text-sm font-bold text-zinc-200 hover:border-amber-500"
+          onClick={() => setReveal((v) => !v)}
+        >
+          Back up seed
+        </button>
+      </div>
+
+      {reveal && (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 space-y-2">
+          <p className="text-[11px] text-amber-400 font-bold">⚠ Your seed is full control of this wallet. Never share it. Anyone with it can drain your funds.</p>
+          {!revealed ? (
+            <>
+              <input className={inputC} type="password" placeholder="wallet password" value={revealPw} onChange={(e) => setRevealPw(e.target.value)} />
+              {revealErr && <p className="text-xs text-red-400">{revealErr}</p>}
+              <div className="flex gap-2">
+                <button className={btn} onClick={doReveal}>Reveal seed</button>
+                <button className="rounded-xl border border-zinc-800 px-4 py-3 text-sm font-bold text-zinc-400" onClick={closeReveal}>Cancel</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-xs font-mono text-amber-200 break-all select-all bg-black/40 rounded-lg p-2">{revealed}</p>
+              <div className="flex gap-2">
+                <button
+                  className="rounded-xl bg-zinc-800 px-4 py-2 text-sm font-bold text-zinc-200 hover:bg-zinc-700"
+                  onClick={() => navigator.clipboard.writeText(revealed).catch(() => {})}
+                >
+                  Copy seed
+                </button>
+                <button className="rounded-xl border border-zinc-800 px-4 py-2 text-sm font-bold text-zinc-400" onClick={closeReveal}>Hide</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      <div className="flex gap-2">
+        <button className="flex-1 rounded-xl border border-zinc-800 px-4 py-3 text-sm font-bold text-zinc-200 hover:border-red-500" onClick={lock}>
+          Lock
+        </button>
+        <button className="rounded-xl border border-zinc-800 px-4 py-3 text-sm font-bold text-red-400 hover:border-red-500" onClick={remove}>
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function WalletPanel({
   keys,
   hasWallet,
   unlock,
   lock,
   remove,
+  say,
 }: {
   keys: Keys | null;
   hasWallet: boolean;
   unlock: (k: Keys) => void;
   lock: () => void;
   remove: () => void;
+  say: (s: string) => void;
 }) {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -455,14 +652,7 @@ function WalletPanel({
   }
 
   if (keys) {
-    return (
-      <div className="rounded-2xl border border-zinc-900 bg-[#0a0a0a] p-4 flex items-center gap-3">
-        <span className="text-sm font-mono text-zinc-300 truncate flex-1">{keys.address}</span>
-        <button className="rounded-xl border border-zinc-800 px-4 py-3 text-sm font-bold text-zinc-200 hover:border-red-500 shrink-0" onClick={lock}>
-          Lock
-        </button>
-      </div>
-    );
+    return <ConnectedWallet keys={keys} lock={lock} remove={remove} say={say} />;
   }
 
   if (hasWallet) {
@@ -924,10 +1114,39 @@ function TradePanel({
 }) {
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const slip = Number(slippage || "0");
+
+  // Live quote preview — mirrors the on-chain constant-product math exactly
+  // (buy: 1% swap fee via quoteBuy; sell: no fee). Recomputed as the user types.
+  const quote = useMemo(() => {
+    const px = BigInt(token.poolXno);
+    const pt = BigInt(token.poolTokens);
+    if (px <= 0n || pt <= 0n) return null;
+    const n = Number(amount || "0");
+    if (!Number.isFinite(n) || n <= 0) return null;
+    if (side === "buy") {
+      const raw = BigInt(Math.floor(n * 1e30));
+      if (raw <= 0n) return null;
+      const out = quoteBuy(token.poolXno, token.poolTokens, raw);
+      if (out <= 0n) return null;
+      const ideal = (raw * pt) / px; // output with zero price impact
+      const impact = ideal > 0n ? Math.max(0, Number((ideal - out) * 10000n / ideal) / 100) : 0;
+      const min = (out * BigInt(Math.round((100 - slip) * 100))) / 10000n;
+      return { outStr: fmtTok(out.toString(), token.decimals), unit: token.symbol, minStr: fmtTok(min.toString(), token.decimals), impact };
+    }
+    const raw = BigInt(Math.floor(n * 10 ** token.decimals));
+    if (raw <= 0n) return null;
+    const out = quoteSell(token.poolXno, token.poolTokens, raw);
+    if (out <= 0n) return null;
+    const ideal = (raw * px) / pt;
+    const impact = ideal > 0n ? Math.max(0, Number((ideal - out) * 10000n / ideal) / 100) : 0;
+    const min = (out * BigInt(Math.round((100 - slip) * 100))) / 10000n;
+    return { outStr: fmtXno(out.toString()), unit: "XNO", minStr: fmtXno(min.toString()), impact };
+  }, [amount, side, slip, token.poolXno, token.poolTokens, token.decimals, token.symbol]);
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between text-[11px] text-zinc-500">
-        <span>your balance: {fmtTok(myHolding?.balanceRaw, token.decimals)}</span>
+        <span>your balance: {fmtTok(myHolding?.balanceRaw, token.decimals)} {token.symbol}</span>
         <label className="flex items-center gap-1.5">
           <span className="text-zinc-600">slippage %</span>
           <input
@@ -938,7 +1157,7 @@ function TradePanel({
           />
         </label>
       </div>
-      {slip > 0 && <p className="text-[10px] text-zinc-600">slippage protected via commit-reveal</p>}
+      {slip > 0 && <p className="text-[10px] text-zinc-600">min-received enforced on-chain via fragment links</p>}
       <div className="grid grid-cols-2 gap-2">
         <button
           className={"rounded-xl py-2 text-sm font-bold " + (side === "buy" ? "bg-green-500 text-black" : "bg-zinc-800 text-zinc-400")}
@@ -970,21 +1189,127 @@ function TradePanel({
           </button>
         )}
       </div>
+      {quote && (
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 space-y-1 text-[11px]">
+          <div className="flex justify-between">
+            <span className="text-zinc-500">you receive ≈</span>
+            <span className="font-bold text-white">{quote.outStr} {quote.unit}</span>
+          </div>
+          {slip > 0 && (
+            <div className="flex justify-between">
+              <span className="text-zinc-500">minimum received</span>
+              <span className="text-zinc-300">{quote.minStr} {quote.unit}</span>
+            </div>
+          )}
+          <div className="flex justify-between">
+            <span className="text-zinc-500">price impact</span>
+            <span className={quote.impact >= 5 ? "text-red-400" : quote.impact >= 1 ? "text-amber-400" : "text-green-400"}>
+              {quote.impact.toFixed(2)}%
+            </span>
+          </div>
+        </div>
+      )}
       <button className={btn} disabled={busy} onClick={side === "buy" ? buy : sell}>
         {busy ? "…" : side === "buy" ? "Buy (send XNO)" : "Sell tokens"}
       </button>
-      <div className="grid grid-cols-3 gap-2">
-        <ActionBtn disabled={busy} onClick={() => sendOp(token.tokenId, { kind: "stake", amount: 50_000_000_000n }, "stake")}>
-          Stake
-        </ActionBtn>
-        <ActionBtn disabled={busy} onClick={() => sendOp(token.tokenId, { kind: "unstake", amount: 10_000_000_000n }, "unstake")}>
-          Unstake
-        </ActionBtn>
-        <ActionBtn disabled={busy} onClick={() => sendOp(token.tokenId, { kind: "claim" }, "claim")}>
-          Claim
-        </ActionBtn>
-      </div>
+
+      <StakeBox token={token} busy={busy} sendOp={sendOp} />
+
       {token.pool && <p className="text-[11px] text-zinc-600 font-mono break-all">pool: {token.pool}</p>}
+    </div>
+  );
+}
+
+// Staking: real amount inputs (no more hardcoded amounts) plus a live readout
+// of the connected account's staked balance and claimable XNO rebate rewards.
+function StakeBox({
+  token,
+  busy,
+  sendOp,
+}: {
+  token: Token;
+  busy: boolean;
+  sendOp: (tokenId: string, op: Op, label: string) => Promise<void>;
+}) {
+  const [stakeAmt, setStakeAmt] = useState("");
+  const [unstakeAmt, setUnstakeAmt] = useState("");
+  const staked = BigInt(token.myStaked || "0");
+  const claimable = BigInt(token.myClaimable || "0");
+  const bal = BigInt(token.myBalance || "0");
+
+  const doStake = () => {
+    const raw = BigInt(Math.floor(Number(stakeAmt || "0") * 10 ** token.decimals)) || 0n;
+    if (raw <= 0n) return;
+    sendOp(token.tokenId, { kind: "stake", amount: raw }, "stake").then(() => setStakeAmt(""));
+  };
+  const doUnstake = () => {
+    const raw = BigInt(Math.floor(Number(unstakeAmt || "0") * 10 ** token.decimals)) || 0n;
+    if (raw <= 0n) return;
+    sendOp(token.tokenId, { kind: "unstake", amount: raw }, "unstake").then(() => setUnstakeAmt(""));
+  };
+
+  return (
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-3 space-y-3">
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-zinc-400 font-bold">Stake · earn XNO rebates</span>
+        <span className="text-zinc-500">staked {fmtTok(token.myStaked, token.decimals)} {token.symbol}</span>
+      </div>
+
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <input
+            className={inputC}
+            placeholder="stake amount"
+            inputMode="decimal"
+            value={stakeAmt}
+            onChange={(e) => setStakeAmt(e.target.value)}
+          />
+          {bal > 0n && (
+            <button
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-zinc-400 hover:text-green-400"
+              onClick={() => setStakeAmt(fmtTok(token.myBalance, token.decimals))}
+            >
+              MAX
+            </button>
+          )}
+        </div>
+        <ActionBtn disabled={busy || bal <= 0n} onClick={doStake}>Stake</ActionBtn>
+      </div>
+
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <input
+            className={inputC}
+            placeholder="unstake amount"
+            inputMode="decimal"
+            value={unstakeAmt}
+            onChange={(e) => setUnstakeAmt(e.target.value)}
+          />
+          {staked > 0n && (
+            <button
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-zinc-400 hover:text-green-400"
+              onClick={() => setUnstakeAmt(fmtTok(token.myStaked, token.decimals))}
+            >
+              MAX
+            </button>
+          )}
+        </div>
+        <ActionBtn disabled={busy || staked <= 0n} onClick={doUnstake}>Unstake</ActionBtn>
+      </div>
+      {unstakeAmt && Number(unstakeAmt) > 0 && (
+        <p className="text-[10px] text-amber-500/80">20% exit tax on unstake (5% burned, 15% to stakers)</p>
+      )}
+
+      <div className="flex items-center justify-between border-t border-zinc-800 pt-2">
+        <span className="text-[11px] text-zinc-500">claimable ≈ <span className="text-green-400 font-bold">{fmtXno(token.myClaimable)} XNO</span></span>
+        <button
+          className="rounded-lg bg-green-500/10 border border-green-500/40 px-3 py-1.5 text-[11px] font-bold text-green-400 hover:bg-green-500/20 disabled:opacity-40"
+          disabled={busy || claimable <= 0n}
+          onClick={() => sendOp(token.tokenId, { kind: "claim" }, "claim")}
+        >
+          Claim
+        </button>
+      </div>
     </div>
   );
 }

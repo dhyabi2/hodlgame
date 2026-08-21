@@ -94,6 +94,15 @@ function settle(s: State, a: string) {
   set(s.rewardDebt, a, acc);
 }
 
+// Read-only view of a staker's claimable XNO reward: already-banked plus the
+// pending accrual since their last settle. Mirrors `settle`'s math without
+// mutating, for surfacing "claim now" amounts in the UI/API.
+export function claimableReward(s: State, a: string): bigint {
+  const st = get(s.staked, a);
+  const pending = (st * s.rewardPerShare) / PRECISION - get(s.rewardDebt, a);
+  return get(s.banked, a) + (pending > 0n ? pending : 0n);
+}
+
 // Reset a staker's debt after their stake changed (so future pending starts at 0).
 function resetDebt(s: State, a: string) {
   set(s.rewardDebt, a, (get(s.staked, a) * s.rewardPerShare) / PRECISION);
