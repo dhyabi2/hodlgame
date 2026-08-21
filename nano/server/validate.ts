@@ -124,8 +124,10 @@ export function sanitizeMeta(body: any) {
 
 /** True when the sanitized metadata has the minimum required fields — a non-empty
  * name and symbol. Route rejects anything that fails this. */
-export function metaHasRequired(meta: { name: string; symbol: string }): boolean {
-  return meta.name.trim().length > 0 && meta.symbol.length > 0;
+export function metaHasRequired(meta: { name: string; symbol: string; image?: string }): boolean {
+  // name, symbol AND image are required — sanitizeMeta has already blanked any
+  // unsafe image URL, so a non-empty image here is a valid https/ipfs link.
+  return meta.name.trim().length > 0 && meta.symbol.length > 0 && (meta.image ?? "").length > 0;
 }
 
 // Amount bounds for off-chain commit-reveal ops. Amounts are bigint; a negative

@@ -10,7 +10,7 @@ import { metaFieldsHash, metaSignDigest } from "../core/metaAuth";
 import { commentSignDigest } from "../core/commentAuth";
 import { ANCHOR_PUB } from "../core/anchor";
 import { encodeFragLinks } from "../core/fraglink";
-import { sanitizeMeta, sanitizeSymbol } from "../server/validate";
+import { sanitizeMeta } from "../server/validate";
 import type { Op } from "../core/ops";
 import { Sparkline } from "./components/Sparkline";
 import Explorer from "./components/Explorer";
@@ -1854,7 +1854,7 @@ function EditCoinInfo({ token, keys, say }: { token: Token; keys: Keys; say: (s:
 
   async function save() {
     const meta = sanitizeMeta({ name, symbol, decimals: token.decimals, image, description, website, twitter, telegram });
-    if (!meta.name || !meta.symbol) return say("name and symbol are required");
+    if (!meta.name || !meta.symbol || !meta.image) return say("name, symbol, and image are required");
     setBusy(true);
     try {
       const seq = Date.now();
@@ -1963,14 +1963,17 @@ function CreateToken({
     // 2^53. `supply` is a digits-only string, so BigInt(supply) is exact.
     const whole = /^\d+$/.test(supply.trim()) ? BigInt(supply.trim()) : 0n;
     const rawSupply = whole * 10n ** BigInt(decimals);
-    // Name + symbol are REQUIRED. Validate the SANITIZED values (the same ones
-    // the server verifies and stores) BEFORE any on-chain block, so the form can
-    // never mint a nameless coin — a symbol of only invalid chars sanitizes to
-    // "" and is rejected here, not silently launched.
+    // Never launch on top of an in-flight image upload — wait for the stored
+    // URL to land first, so the metadata we sign includes the saved image.
+    if (uploading) return say("wait for the image to finish uploading");
+    // Name, symbol AND image are REQUIRED. Validate the SANITIZED values (the
+    // same ones the server verifies and stores) BEFORE any on-chain block, so the
+    // form can never mint a nameless/imageless coin — a symbol of only invalid
+    // chars, or an unsafe image URL, sanitizes to "" and is rejected here.
     const meta = sanitizeMeta({ name, symbol, decimals, image, description, website, twitter, telegram });
-    if (!meta.name || !meta.symbol) {
+    if (!meta.name || !meta.symbol || !meta.image) {
       setShowReq(true);
-      return say("name and symbol are required");
+      return say("name, symbol, and image are required");
     }
     setShowReq(false);
     if (rawSupply <= 0n) return say("enter supply");
@@ -2012,31 +2015,47 @@ function CreateToken({
     }
   }
 
+  // Live view of the required fields as the SERVER will store them, so the UI
+  // flags exactly what the launch guard will reject.
+  const reqMeta = sanitizeMeta({ name, symbol, decimals: 6, image, description, website, twitter, telegram });
+  const missing = [
+    !reqMeta.name && "name",
+    !reqMeta.symbol && "symbol",
+    !reqMeta.image && "image",
+  ].filter(Boolean) as string[];
+
   return (
     <div className="rounded-none border border-neutral-300 bg-white p-5 space-y-3">
       <h3 className="font-black text-lg">Start a new coin</h3>
       <div className="flex items-center gap-3">
-        <Avatar image={image} symbol={symbol} size={56} />
+        <div className={"rounded-none " + (showReq && !reqMeta.image ? "ring-1 ring-red-500" : "")}>
+          <Avatar image={image} symbol={symbol} size={56} />
+        </div>
         <label className="text-xs text-black cursor-pointer">
-          {uploading ? "uploading…" : "upload image"}
-          <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
+          {uploading ? "uploading…" : "upload image *"}
+          <input type="file" accept="image/*" className="hidden" onChange={(e) => { e.target.files?.[0] && upload(e.target.files[0]); setShowReq(false); }} />
         </label>
         <span className="text-[11px] text-neutral-400">or a URL below</span>
       </div>
-      <input className={inputC} placeholder="image URL (optional)" value={image} onChange={(e) => setImage(e.target.value)} />
+      <input
+        className={inputC + (showReq && !reqMeta.image ? " ring-1 ring-red-500" : "")}
+        placeholder="image URL *" value={image}
+        onChange={(e) => { setImage(e.target.value); setShowReq(false); }} />
       <div>
         <div className="grid grid-cols-2 gap-2">
           <input
-            className={inputC + (showReq && !name.trim() ? " ring-1 ring-red-500" : "")}
+            className={inputC + (showReq && !reqMeta.name ? " ring-1 ring-red-500" : "")}
             placeholder="name *" value={name}
             onChange={(e) => { setName(e.target.value); setShowReq(false); }} />
           <input
-            className={inputC + (showReq && !sanitizeSymbol(symbol) ? " ring-1 ring-red-500" : "")}
+            className={inputC + (showReq && !reqMeta.symbol ? " ring-1 ring-red-500" : "")}
             placeholder="symbol *" value={symbol}
             onChange={(e) => { setSymbol(e.target.value); setShowReq(false); }} />
         </div>
-        {showReq && (
-          <p className="mt-1 text-[11px] font-bold text-red-600">Name and symbol are required.</p>
+        {showReq && missing.length > 0 && (
+          <p className="mt-1 text-[11px] font-bold text-red-600">
+            {missing.join(", ")} {missing.length === 1 ? "is" : "are"} required.
+          </p>
         )}
       </div>
       <div>

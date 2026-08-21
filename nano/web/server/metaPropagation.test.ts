@@ -119,12 +119,14 @@ ok(tokSym(bare) === TOKEN.slice(0, 4).toUpperCase(), "symbol-less token falls ba
 console.log("5. name + symbol are required (blank/invalid rejected before launch):");
 const req = (form: any) => {
   const m = sanitizeMeta(form);
-  return { m, valid: !!m.name && !!m.symbol && metaHasRequired(m) };
+  return { m, valid: metaHasRequired(m) };
 };
 ok(!req({ ...FORM, name: "" }).valid, "empty name rejected");
 ok(!req({ ...FORM, symbol: "" }).valid, "empty symbol rejected");
+ok(!req({ ...FORM, image: "" }).valid, "empty image rejected");
 ok(!req({ ...FORM, name: "   " }).valid, "whitespace-only name rejected");
 ok(!req({ ...FORM, symbol: "!!!@@@" }).valid, "symbol of only invalid chars sanitizes to empty → rejected");
+ok(!req({ ...FORM, image: "javascript:alert(1)" }).valid, "unsafe image URL sanitizes to empty → rejected");
 ok(req(FORM).valid, "a fully-filled form passes");
 
 console.log(`\n✅ metadata propagation e2e: ${pass} field-level assertions passed`);

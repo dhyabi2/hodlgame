@@ -37,7 +37,7 @@ export async function POST(req: Request) {
   // signs the sanitized fields, so verification runs on the same bytes.
   const meta = sanitizeMeta(body);
   if (!metaHasRequired(meta)) {
-    return NextResponse.json({ error: "name and symbol are required" }, { status: 400 });
+    return NextResponse.json({ error: "name, symbol, and image are required" }, { status: 400 });
   }
   const update = {
     tokenId,
