@@ -59,3 +59,34 @@ export async function saveJson(name: string, value: unknown): Promise<void> {
   await fs.promises.mkdir(dir(), { recursive: true });
   atomicWrite(path.join(dir(), name + ".json"), stringify(value));
 }
+
+// Blobs (e.g. base64 images) go through the Upstash *command* API with the
+// value in the POST body, not the URL path — a base64 image is far too large to
+// fit in a URL, so `upstashSet` (value-in-URL) cannot carry it. Locally it falls
+// back to a file. Keys are sanitized to a safe filename for the fs path.
+async function upstashCmd(cmd: unknown[], u: { url: string; token: string }): Promise<string | null> {
+  const res = await fetch(u.url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${u.token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(cmd),
+  });
+  if (!res.ok) throw new Error(`upstash ${cmd[0]} failed (${res.status})`);
+  const j = (await res.json()) as { result?: string | null };
+  return j.result ?? null;
+}
+const blobFile = (name: string) => path.join(dir(), name.replace(/[^\w.-]/g, "_") + ".blob");
+
+export async function saveBlob(name: string, value: string): Promise<void> {
+  const u = upstash();
+  if (u) { await upstashCmd(["SET", `holdfun:${name}`, value], u); return; }
+  await fs.promises.mkdir(dir(), { recursive: true });
+  atomicWrite(blobFile(name), value);
+}
+
+export async function loadBlob(name: string): Promise<string | null> {
+  const u = upstash();
+  if (u) {
+    try { return await upstashCmd(["GET", `holdfun:${name}`], u); } catch { return null; }
+  }
+  try { return await fs.promises.readFile(blobFile(name), "utf-8"); } catch { return null; }
+}
