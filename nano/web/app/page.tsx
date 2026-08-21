@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, type ReactNode } from "react";
+import { useEffect, useState, useMemo, useRef, type ReactNode } from "react";
 import * as nanocurrency from "nanocurrency";
 import dynamic from "next/dynamic";
 import { encodeOpLink } from "../core/oplink";
@@ -340,10 +340,11 @@ export default function Home() {
           <button className="text-lg font-black tracking-tight text-black shrink-0" onClick={() => { setSelectedId(null); setTab("explore"); }}>
             HoldFun
           </button>
-          <nav className="flex items-center gap-3 sm:gap-4 text-xs font-bold uppercase tracking-wide text-neutral-500 overflow-x-auto">
-            <button className={"hover:text-black whitespace-nowrap " + (!selectedId && tab === "explore" ? "text-black" : "")} onClick={() => { setSelectedId(null); setTab("explore"); }}>Coins</button>
-            <button className={"hover:text-black whitespace-nowrap " + (tab === "ranks" ? "text-black" : "")} onClick={() => { setSelectedId(null); setTab("ranks"); }}>Ranks</button>
-            <button className={"hover:text-black whitespace-nowrap " + (tab === "scan" ? "text-black" : "")} onClick={() => { setSelectedId(null); setTab("scan"); }}>Explorer</button>
+          {/* Desktop nav only — on mobile the bottom tab bar handles navigation. */}
+          <nav className="hidden sm:flex items-center gap-4 text-xs font-bold uppercase tracking-wide text-neutral-500">
+            {([["explore", "Coins"], ["ranks", "Ranks"], ["scan", "Explorer"], ["portfolio", "Holdings"], ["create", "Create"], ["wallet", "Wallet"]] as const).map(([id, label]) => (
+              <button key={id} className={"hover:text-black whitespace-nowrap " + (!selectedId && tab === id ? "text-black" : "")} onClick={() => { setSelectedId(null); setTab(id); }}>{label}</button>
+            ))}
             <a className="hover:text-black whitespace-nowrap" href="/pro">Chart / Trade ↗</a>
           </nav>
           {keys ? (
@@ -390,7 +391,7 @@ export default function Home() {
             <Portfolio tokens={tokens} onSelect={(id) => setSelectedId(id)} account={keys?.address} />
           </div>
         ) : tab === "create" ? (
-          <div className="w-full">
+          <div className="w-full max-w-xl mx-auto">
             <CreateToken
               busy={busy}
               setBusy={setBusy}
@@ -405,7 +406,7 @@ export default function Home() {
             />
           </div>
         ) : (
-          <div className="w-full">
+          <div className="w-full max-w-xl mx-auto">
             <WalletPanel keys={keys} hasWallet={hasWallet} unlock={unlock} lock={lock} remove={remove} say={say} />
           </div>
         )}
@@ -511,6 +512,7 @@ function ConnectedWallet({
 }) {
   const [balance, setBalance] = useState<string | null>(null);
   const [receiving, setReceiving] = useState(false);
+  const receivingRef = useRef(false);
   const [copied, setCopied] = useState(false);
   const [reveal, setReveal] = useState(false);
   const [revealPw, setRevealPw] = useState("");
@@ -527,8 +529,12 @@ function ConnectedWallet({
   };
 
   // Receive every pending block so incoming XNO becomes spendable. Opens the
-  // account with the first block if it has never been used. Idempotent.
+  // account with the first block if it has never been used. Idempotent, and
+  // guarded so the poll, the websocket, and the button can never run it
+  // concurrently (which would fork the chain on a stale frontier).
   const receiveAll = async (announce = true) => {
+    if (receivingRef.current) return;
+    receivingRef.current = true;
     setReceiving(true);
     try {
       const r = await rpc("receivable", { account: keys.address, count: "20", source: "true" });
@@ -572,6 +578,7 @@ function ConnectedWallet({
     } catch (e: any) {
       if (announce) say("receive failed: " + (e?.message ?? e));
     } finally {
+      receivingRef.current = false;
       setReceiving(false);
     }
   };
@@ -579,7 +586,9 @@ function ConnectedWallet({
   useEffect(() => {
     refresh();
     receiveAll(false); // auto-sweep pending on unlock
-    const t = setInterval(refresh, 8000);
+    // Poll also auto-receives (silently) so the balance always reflects deposits
+    // even if the websocket missed one; the guard prevents overlap.
+    const t = setInterval(() => receiveAll(false), 8000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keys.address]);
@@ -1887,7 +1896,7 @@ const TABS: { id: "explore" | "ranks" | "portfolio" | "create" | "scan" | "walle
 
 function TabBar({ tab, setTab }: { tab: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet"; setTab: (t: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet") => void }) {
   return (
-    <nav className="fixed bottom-0 inset-x-0 z-30 border-t border-neutral-300 bg-white/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
+    <nav className="sm:hidden fixed bottom-0 inset-x-0 z-30 border-t border-neutral-300 bg-white/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
       <div className="w-full grid grid-cols-6">
         {TABS.map((t) => (
           <button
