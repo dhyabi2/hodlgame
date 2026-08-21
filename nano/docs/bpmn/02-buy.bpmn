@@ -7,211 +7,116 @@
   targetNamespace="https://holdfun.io/bpmn">
 
   <!-- ======================================================================
-  Flow 02 — Value-bound buy (the key trick that replaces a DEX contract)
+  Flow 02 — Value-bound buy AND liquidity seed (same two-block pattern)
   ======================================================================
-  A buy is TWO chained Nano blocks on the SAME account:
-    1. DEPOSIT — a native XNO send to the token's pool account. The native
-       amount is the authoritative `xno`.
-    2. BUY OP  — a data block whose `previous` points at the deposit hash and
-       whose `link` carries `[opcode 0x03][tokenId][minTokens]`.
-  Because Nano's `previous` field is a hash chain, the intent is *bound* to the
-  value. The indexer reads the deposit's native amount as `op.xno`, so a buyer
-  can neither under-declare (pool insolvency) nor over-declare (free credit).
+  A buy is TWO chained blocks: a native XNO send to the token's pool (the
+  value) + a data block whose `previous` is that send (the intent). The
+  indexer takes the deposit's NATIVE amount as the authoritative xno — any
+  declared amount is dead weight; unbacked intents are skipped. Liquidity
+  seeding (seedLiq/addLiq) uses the exact same pattern: the creator's compact
+  op declares only `tokens`; the chained deposit binds the XNO. The FIRST
+  creator-signed seed deposit also ANNOUNCES the pool: its link IS the pool
+  pubkey, which is how any indexer resolves pools with zero secrets.
   ====================================================================== -->
 
-  <bpmn:process id="Process_Buy" name="Value-bound buy" isExecutable="false">
+  <bpmn:process id="Process_Buy" name="Value-bound buy / seed" isExecutable="false">
 
     <bpmn:laneSet id="LaneSet_Buy">
-      <bpmn:lane id="Lane_Buy_Buyer" name="Buyer (browser wallet)">
+      <bpmn:lane id="Lane_Buy_User" name="Buyer (or creator, when seeding)">
         <bpmn:flowNodeRef>Event_Buy_Start</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Task_Buy_PoolAddr</bpmn:flowNodeRef>
         <bpmn:flowNodeRef>Task_Buy_Deposit</bpmn:flowNodeRef>
         <bpmn:flowNodeRef>Task_Buy_Op</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Event_Buy_Done</bpmn:flowNodeRef>
       </bpmn:lane>
-      <bpmn:lane id="Lane_Buy_Nano" name="Nano L1">
-        <bpmn:flowNodeRef>Task_Buy_Confirm</bpmn:flowNodeRef>
-      </bpmn:lane>
-      <bpmn:lane id="Lane_Buy_Indexer" name="Indexer">
-        <bpmn:flowNodeRef>Event_Buy_Idx</bpmn:flowNodeRef>
+      <bpmn:lane id="Lane_Buy_Indexer" name="Indexer (deterministic)">
+        <bpmn:flowNodeRef>Task_Buy_Chain</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Buy_Routes</bpmn:flowNodeRef>
         <bpmn:flowNodeRef>Task_Buy_Bind</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Gateway_Buy_Route</bpmn:flowNodeRef>
         <bpmn:flowNodeRef>Task_Buy_Apply</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Gateway_Buy_Slip</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Task_Buy_Reject</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Task_Buy_Credit</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Event_Buy_IdxDone</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Buy_Credited</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Buy_Skipped</bpmn:flowNodeRef>
       </bpmn:lane>
     </bpmn:laneSet>
 
-    <!-- Buyer -->
-    <bpmn:startEvent id="Event_Buy_Start" name="Buyer wants tokens">
+    <bpmn:startEvent id="Event_Buy_Start" name="buy / seed intent">
       <bpmn:outgoing>Flow_Buy_1</bpmn:outgoing>
     </bpmn:startEvent>
 
-    <bpmn:serviceTask id="Task_Buy_PoolAddr" name="tokenPoolKeys(masterSeed, tokenId) → pool address">
-      <bpmn:documentation>HD: poolSeedForToken(master, tokenId) = blake2b(master‖tokenId).</bpmn:documentation>
+    <bpmn:serviceTask id="Task_Buy_Deposit" name="send XNO to pool account (native amount = the value)">
       <bpmn:incoming>Flow_Buy_1</bpmn:incoming>
       <bpmn:outgoing>Flow_Buy_2</bpmn:outgoing>
     </bpmn:serviceTask>
 
-    <bpmn:serviceTask id="Task_Buy_Deposit" name="Block 1 — native XNO send → pool">
-      <bpmn:documentation>The native amount is the value. Nothing is declared.</bpmn:documentation>
+    <bpmn:serviceTask id="Task_Buy_Op" name="1-raw op block, previous = deposit hash (buy: minTokens; seed: tokens)">
+      <bpmn:documentation>encodeOpLink — buy carries only the slippage guard; seedLiq/addLiq carry only the token leg. xno is NEVER declared.</bpmn:documentation>
       <bpmn:incoming>Flow_Buy_2</bpmn:incoming>
       <bpmn:outgoing>Flow_Buy_3</bpmn:outgoing>
     </bpmn:serviceTask>
 
-    <bpmn:serviceTask id="Task_Buy_Op" name="Block 2 — buy op, previous = deposit hash">
-      <bpmn:documentation>link = encodeOpLink(tokenId, buy). minTokens is the slippage guard.</bpmn:documentation>
+    <bpmn:serviceTask id="Task_Buy_Chain" name="collectEvents: dep = byHash(op.previous)">
       <bpmn:incoming>Flow_Buy_3</bpmn:incoming>
       <bpmn:outgoing>Flow_Buy_4</bpmn:outgoing>
     </bpmn:serviceTask>
 
-    <bpmn:endEvent id="Event_Buy_Done" name="Both blocks on-chain">
+    <bpmn:exclusiveGateway id="Gateway_Buy_Routes" name="dep.link == poolOf(tokenId) and amount &gt; 0?">
+      <bpmn:documentation>poolOf = chain-derived (derivePoolKeysFromChain) with custody resolver as bootstrap fallback.</bpmn:documentation>
       <bpmn:incoming>Flow_Buy_4</bpmn:incoming>
       <bpmn:outgoing>Flow_Buy_5</bpmn:outgoing>
-    </bpmn:endEvent>
-
-    <!-- Nano -->
-    <bpmn:serviceTask id="Task_Buy_Confirm" name="Confirm deposit + op">
-      <bpmn:incoming>Flow_Buy_5</bpmn:incoming>
       <bpmn:outgoing>Flow_Buy_6</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Buy_Bind" name="op.xno := deposit native amount (authoritative)">
+      <bpmn:incoming>Flow_Buy_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Buy_7</bpmn:outgoing>
     </bpmn:serviceTask>
 
-    <!-- Indexer -->
-    <bpmn:startEvent id="Event_Buy_Idx" name="Sees buy op block">
-      <bpmn:incoming>Flow_Buy_6</bpmn:incoming>
-      <bpmn:outgoing>Flow_Buy_7</bpmn:outgoing>
-    </bpmn:startEvent>
-
-    <bpmn:serviceTask id="Task_Buy_Bind" name="collectEvents: read deposit via block.previous → amount">
-      <bpmn:documentation>op.xno = BigInt(deposit.amount). Also verify deposit.link === pool public key (routes to pool).</bpmn:documentation>
+    <bpmn:serviceTask id="Task_Buy_Apply" name="applyBlock: constantProductOut (1% fee) / seed pool">
+      <bpmn:documentation>Slippage guard: tokens-out &lt; minTokens throws → op invalid → deposit later refunded by netted settlement (07).</bpmn:documentation>
       <bpmn:incoming>Flow_Buy_7</bpmn:incoming>
       <bpmn:outgoing>Flow_Buy_8</bpmn:outgoing>
     </bpmn:serviceTask>
 
-    <bpmn:exclusiveGateway id="Gateway_Buy_Route" name="deposit exists, amount>0, routes to pool?">
+    <bpmn:endEvent id="Event_Buy_Credited" name="credited">
       <bpmn:incoming>Flow_Buy_8</bpmn:incoming>
-      <bpmn:outgoing>Flow_Buy_9</bpmn:outgoing>
-      <bpmn:outgoing>Flow_Buy_10</bpmn:outgoing>
-    </bpmn:exclusiveGateway>
-
-    <bpmn:serviceTask id="Task_Buy_Apply" name="applyOp(state, buy, sender, height)">
-      <bpmn:documentation>constantProductOut: out = (xno·99%)·poolTokens/(poolXno + xno·99%).</bpmn:documentation>
-      <bpmn:incoming>Flow_Buy_9</bpmn:incoming>
-      <bpmn:outgoing>Flow_Buy_11</bpmn:outgoing>
-    </bpmn:serviceTask>
-
-    <bpmn:exclusiveGateway id="Gateway_Buy_Slip" name="out ≥ minTokens and out &lt; poolTokens?">
-      <bpmn:incoming>Flow_Buy_11</bpmn:incoming>
-      <bpmn:outgoing>Flow_Buy_12</bpmn:outgoing>
-      <bpmn:outgoing>Flow_Buy_13</bpmn:outgoing>
-    </bpmn:exclusiveGateway>
-
-    <bpmn:serviceTask id="Task_Buy_Reject" name="reject (slippage / no liquidity) → refund later (flow 07)">
-      <bpmn:incoming>Flow_Buy_13</bpmn:incoming>
-      <bpmn:outgoing>Flow_Buy_15</bpmn:outgoing>
-    </bpmn:serviceTask>
-
-    <bpmn:serviceTask id="Task_Buy_Credit" name="credit: poolXno += xno; poolTokens -= out; balances[buyer] += out">
-      <bpmn:incoming>Flow_Buy_12</bpmn:incoming>
-      <bpmn:outgoing>Flow_Buy_14</bpmn:outgoing>
-    </bpmn:serviceTask>
-
-    <bpmn:endEvent id="Event_Buy_IdxDone" name="buyer holds tokens">
-      <bpmn:incoming>Flow_Buy_14</bpmn:incoming>
-      <bpmn:incoming>Flow_Buy_15</bpmn:incoming>
-      <bpmn:incoming>Flow_Buy_10</bpmn:incoming>
     </bpmn:endEvent>
 
-    <bpmn:sequenceFlow id="Flow_Buy_1" sourceRef="Event_Buy_Start" targetRef="Task_Buy_PoolAddr"/>
-    <bpmn:sequenceFlow id="Flow_Buy_2" sourceRef="Task_Buy_PoolAddr" targetRef="Task_Buy_Deposit"/>
-    <bpmn:sequenceFlow id="Flow_Buy_3" sourceRef="Task_Buy_Deposit" targetRef="Task_Buy_Op"/>
-    <bpmn:sequenceFlow id="Flow_Buy_4" sourceRef="Task_Buy_Op" targetRef="Event_Buy_Done"/>
-    <bpmn:sequenceFlow id="Flow_Buy_5" sourceRef="Event_Buy_Done" targetRef="Task_Buy_Confirm"/>
-    <bpmn:sequenceFlow id="Flow_Buy_6" sourceRef="Task_Buy_Confirm" targetRef="Event_Buy_Idx"/>
-    <bpmn:sequenceFlow id="Flow_Buy_7" sourceRef="Event_Buy_Idx" targetRef="Task_Buy_Bind"/>
-    <bpmn:sequenceFlow id="Flow_Buy_8" sourceRef="Task_Buy_Bind" targetRef="Gateway_Buy_Route"/>
-    <bpmn:sequenceFlow id="Flow_Buy_9" sourceRef="Gateway_Buy_Route" targetRef="Task_Buy_Apply" name="valid"/>
-    <bpmn:sequenceFlow id="Flow_Buy_10" sourceRef="Gateway_Buy_Route" targetRef="Event_Buy_IdxDone" name="malformed → skip"/>
-    <bpmn:sequenceFlow id="Flow_Buy_11" sourceRef="Task_Buy_Apply" targetRef="Gateway_Buy_Slip"/>
-    <bpmn:sequenceFlow id="Flow_Buy_12" sourceRef="Gateway_Buy_Slip" targetRef="Task_Buy_Credit" name="ok"/>
-    <bpmn:sequenceFlow id="Flow_Buy_13" sourceRef="Gateway_Buy_Slip" targetRef="Task_Buy_Reject" name="slippage"/>
-    <bpmn:sequenceFlow id="Flow_Buy_14" sourceRef="Task_Buy_Credit" targetRef="Event_Buy_IdxDone"/>
-    <bpmn:sequenceFlow id="Flow_Buy_15" sourceRef="Task_Buy_Reject" targetRef="Event_Buy_IdxDone"/>
+    <bpmn:endEvent id="Event_Buy_Skipped" name="skipped (unbacked / misrouted)">
+      <bpmn:incoming>Flow_Buy_6</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Buy_1" sourceRef="Event_Buy_Start" targetRef="Task_Buy_Deposit"/>
+    <bpmn:sequenceFlow id="Flow_Buy_2" sourceRef="Task_Buy_Deposit" targetRef="Task_Buy_Op"/>
+    <bpmn:sequenceFlow id="Flow_Buy_3" sourceRef="Task_Buy_Op" targetRef="Task_Buy_Chain"/>
+    <bpmn:sequenceFlow id="Flow_Buy_4" sourceRef="Task_Buy_Chain" targetRef="Gateway_Buy_Routes"/>
+    <bpmn:sequenceFlow id="Flow_Buy_5" sourceRef="Gateway_Buy_Routes" targetRef="Task_Buy_Bind" name="yes"/>
+    <bpmn:sequenceFlow id="Flow_Buy_6" sourceRef="Gateway_Buy_Routes" targetRef="Event_Buy_Skipped" name="no"/>
+    <bpmn:sequenceFlow id="Flow_Buy_7" sourceRef="Task_Buy_Bind" targetRef="Task_Buy_Apply"/>
+    <bpmn:sequenceFlow id="Flow_Buy_8" sourceRef="Task_Buy_Apply" targetRef="Event_Buy_Credited"/>
 
   </bpmn:process>
 
   <bpmndi:BPMNDiagram id="BPMNDiagram_Buy">
     <bpmndi:BPMNPlane id="BPMNPlane_Buy" bpmnElement="Process_Buy">
-      <bpmndi:BPMNShape id="Shape_Lane_Buy_Buyer" bpmnElement="Lane_Buy_Buyer" isHorizontal="true">
-        <dc:Bounds x="30" y="30" width="1180" height="150"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Lane_Buy_Nano" bpmnElement="Lane_Buy_Nano" isHorizontal="true">
-        <dc:Bounds x="30" y="180" width="1180" height="110"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Lane_Buy_Indexer" bpmnElement="Lane_Buy_Indexer" isHorizontal="true">
-        <dc:Bounds x="30" y="290" width="1180" height="240"/>
-      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Buy_User" bpmnElement="Lane_Buy_User" isHorizontal="true"><dc:Bounds x="30" y="30" width="1240" height="150"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Buy_Indexer" bpmnElement="Lane_Buy_Indexer" isHorizontal="true"><dc:Bounds x="30" y="180" width="1240" height="180"/></bpmndi:BPMNShape>
 
-      <bpmndi:BPMNShape id="Shape_Buy_Start" bpmnElement="Event_Buy_Start">
-        <dc:Bounds x="60" y="85" width="36" height="36"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Buy_PoolAddr" bpmnElement="Task_Buy_PoolAddr">
-        <dc:Bounds x="150" y="73" width="160" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Buy_Deposit" bpmnElement="Task_Buy_Deposit">
-        <dc:Bounds x="360" y="73" width="160" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Buy_Op" bpmnElement="Task_Buy_Op">
-        <dc:Bounds x="570" y="73" width="180" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Buy_Done" bpmnElement="Event_Buy_Done">
-        <dc:Bounds x="800" y="85" width="36" height="36"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Buy_Confirm" bpmnElement="Task_Buy_Confirm">
-        <dc:Bounds x="150" y="205" width="180" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Buy_Idx" bpmnElement="Event_Buy_Idx">
-        <dc:Bounds x="60" y="340" width="36" height="36"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Buy_Bind" bpmnElement="Task_Buy_Bind">
-        <dc:Bounds x="150" y="328" width="180" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Buy_Route" bpmnElement="Gateway_Buy_Route" isMarkerVisible="true">
-        <dc:Bounds x="380" y="338" width="50" height="50"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Buy_Apply" bpmnElement="Task_Buy_Apply">
-        <dc:Bounds x="480" y="328" width="170" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Buy_Slip" bpmnElement="Gateway_Buy_Slip" isMarkerVisible="true">
-        <dc:Bounds x="700" y="338" width="50" height="50"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Buy_Credit" bpmnElement="Task_Buy_Credit">
-        <dc:Bounds x="800" y="328" width="180" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Buy_Reject" bpmnElement="Task_Buy_Reject">
-        <dc:Bounds x="700" y="450" width="180" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Buy_IdxDone" bpmnElement="Event_Buy_IdxDone">
-        <dc:Bounds x="1050" y="345" width="36" height="36"/>
-      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Start" bpmnElement="Event_Buy_Start"><dc:Bounds x="60" y="85" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Deposit" bpmnElement="Task_Buy_Deposit"><dc:Bounds x="150" y="73" width="260" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Op" bpmnElement="Task_Buy_Op"><dc:Bounds x="470" y="73" width="300" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Chain" bpmnElement="Task_Buy_Chain"><dc:Bounds x="90" y="240" width="230" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Routes" bpmnElement="Gateway_Buy_Routes" isMarkerVisible="true"><dc:Bounds x="380" y="245" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Bind" bpmnElement="Task_Buy_Bind"><dc:Bounds x="490" y="240" width="250" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Apply" bpmnElement="Task_Buy_Apply"><dc:Bounds x="790" y="240" width="260" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Credited" bpmnElement="Event_Buy_Credited"><dc:Bounds x="1110" y="252" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Buy_Skipped" bpmnElement="Event_Buy_Skipped"><dc:Bounds x="387" y="320" width="36" height="36"/></bpmndi:BPMNShape>
 
       <bpmndi:BPMNEdge id="Edge_Buy_1" bpmnElement="Flow_Buy_1"><di:waypoint x="96" y="103"/><di:waypoint x="150" y="103"/></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Buy_2" bpmnElement="Flow_Buy_2"><di:waypoint x="310" y="103"/><di:waypoint x="360" y="103"/></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Buy_3" bpmnElement="Flow_Buy_3"><di:waypoint x="520" y="103"/><di:waypoint x="570" y="103"/></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Buy_4" bpmnElement="Flow_Buy_4"><di:waypoint x="750" y="103"/><di:waypoint x="800" y="103"/></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Buy_5" bpmnElement="Flow_Buy_5"><di:waypoint x="818" y="121"/><di:waypoint x="240" y="205"/></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Buy_6" bpmnElement="Flow_Buy_6"><di:waypoint x="240" y="265"/><di:waypoint x="78" y="340"/></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Buy_7" bpmnElement="Flow_Buy_7"><di:waypoint x="96" y="358"/><di:waypoint x="150" y="358"/></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Buy_8" bpmnElement="Flow_Buy_8"><di:waypoint x="330" y="358"/><di:waypoint x="380" y="363"/></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Buy_9" bpmnElement="Flow_Buy_9"><di:waypoint x="430" y="363"/><di:waypoint x="480" y="358"/></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Buy_10" bpmnElement="Flow_Buy_10"><di:waypoint x="405" y="388"/><di:waypoint x="1050" y="381"/></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Buy_11" bpmnElement="Flow_Buy_11"><di:waypoint x="650" y="358"/><di:waypoint x="700" y="363"/></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Buy_12" bpmnElement="Flow_Buy_12"><di:waypoint x="750" y="363"/><di:waypoint x="800" y="358"/></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Buy_13" bpmnElement="Flow_Buy_13"><di:waypoint x="725" y="388"/><di:waypoint x="725" y="450"/></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Buy_14" bpmnElement="Flow_Buy_14"><di:waypoint x="980" y="358"/><di:waypoint x="1050" y="363"/></bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Buy_15" bpmnElement="Flow_Buy_15"><di:waypoint x="880" y="480"/><di:waypoint x="1068" y="381"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_2" bpmnElement="Flow_Buy_2"><di:waypoint x="410" y="103"/><di:waypoint x="470" y="103"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_3" bpmnElement="Flow_Buy_3"><di:waypoint x="620" y="133"/><di:waypoint x="205" y="240"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_4" bpmnElement="Flow_Buy_4"><di:waypoint x="320" y="270"/><di:waypoint x="380" y="270"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_5" bpmnElement="Flow_Buy_5"><di:waypoint x="430" y="270"/><di:waypoint x="490" y="270"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_6" bpmnElement="Flow_Buy_6"><di:waypoint x="405" y="295"/><di:waypoint x="405" y="320"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_7" bpmnElement="Flow_Buy_7"><di:waypoint x="740" y="270"/><di:waypoint x="790" y="270"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Buy_8" bpmnElement="Flow_Buy_8"><di:waypoint x="1050" y="270"/><di:waypoint x="1110" y="270"/></bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>
 

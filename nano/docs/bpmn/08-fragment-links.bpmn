@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  id="Definitions_frag"
+  targetNamespace="https://holdfun.io/bpmn">
+
+  <!-- ======================================================================
+  Flow 08 — Fragment links: full op payload ON-CHAIN (replaces commit-reveal)
+  ======================================================================
+  Ops whose payload overflows one 32-byte link (transfer: to 32B + amount
+  15B; sell with minXno: two 15B amounts) used to ride a commit-reveal hash
+  whose payload lived in an off-chain blob — lose the blob, rewrite the
+  ledger. Fragments eliminate that dependency:
+      frag A (block N):   [0xE0|opcode][tokenId 16B][body 0..15)]
+      frag B (block N+1): [body 15..47)]        (B.previous = A.hash)
+  Marker nibble 0xE is disjoint from compact opcodes (0x01..0x09) and the
+  legacy commit marker (0xFF). seedLiq/addLiq left the commit path entirely
+  (compact link + deposit binding, see 02). Legacy 0xFF links still resolve
+  via the pinned, self-verifying genesis snapshot of the old registry.
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Frag" name="Fragment links" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Frag">
+      <bpmn:lane id="Lane_Frag_User" name="Sender wallet">
+        <bpmn:flowNodeRef>Event_Frag_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Frag_Encode</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Frag_A</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Frag_B</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Frag_Indexer" name="Indexer (deterministic join)">
+        <bpmn:flowNodeRef>Task_Frag_Detect</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Frag_Child</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Frag_Join</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Frag_Applied</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Frag_Wait</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <bpmn:startEvent id="Event_Frag_Start" name="transfer / sell-with-minXno">
+      <bpmn:outgoing>Flow_Frag_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Frag_Encode" name="encodeFragLinks(tokenId, op) → [linkA, linkB]">
+      <bpmn:documentation>core/fraglink.ts — transfer body: toPub(32) ‖ amount(15); sell body: tokens(15) ‖ minXno(15) ‖ zero padding (enforced on decode).</bpmn:documentation>
+      <bpmn:incoming>Flow_Frag_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Frag_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Frag_A" name="broadcast frag A (1-raw send, link = A)">
+      <bpmn:incoming>Flow_Frag_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Frag_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Frag_B" name="broadcast frag B (1-raw send, previous = A.hash, link = B)">
+      <bpmn:incoming>Flow_Frag_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Frag_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Frag_Detect" name="decodeChain: isFragA(link) on a 1-raw block">
+      <bpmn:incoming>Flow_Frag_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Frag_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Frag_Child" name="valid chained child exists?">
+      <bpmn:incoming>Flow_Frag_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Frag_6</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Frag_7</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Frag_Join" name="assembleFrag(A.link, B.link); consume B; event height/hash = B">
+      <bpmn:documentation>B is CONSUMED so its bytes are never mis-decoded as a standalone op. The op completes only at B → canonical ordering is identical for every indexer. Malformed pairs are deterministically ignored.</bpmn:documentation>
+      <bpmn:incoming>Flow_Frag_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_Frag_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Frag_Applied" name="op folds into state">
+      <bpmn:incoming>Flow_Frag_8</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:endEvent id="Event_Frag_Wait" name="dangling A → ignored until B confirms">
+      <bpmn:incoming>Flow_Frag_7</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Frag_1" sourceRef="Event_Frag_Start" targetRef="Task_Frag_Encode"/>
+    <bpmn:sequenceFlow id="Flow_Frag_2" sourceRef="Task_Frag_Encode" targetRef="Task_Frag_A"/>
+    <bpmn:sequenceFlow id="Flow_Frag_3" sourceRef="Task_Frag_A" targetRef="Task_Frag_B"/>
+    <bpmn:sequenceFlow id="Flow_Frag_4" sourceRef="Task_Frag_B" targetRef="Task_Frag_Detect"/>
+    <bpmn:sequenceFlow id="Flow_Frag_5" sourceRef="Task_Frag_Detect" targetRef="Gateway_Frag_Child"/>
+    <bpmn:sequenceFlow id="Flow_Frag_6" sourceRef="Gateway_Frag_Child" targetRef="Task_Frag_Join" name="yes"/>
+    <bpmn:sequenceFlow id="Flow_Frag_7" sourceRef="Gateway_Frag_Child" targetRef="Event_Frag_Wait" name="no"/>
+    <bpmn:sequenceFlow id="Flow_Frag_8" sourceRef="Task_Frag_Join" targetRef="Event_Frag_Applied"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Frag">
+    <bpmndi:BPMNPlane id="BPMNPlane_Frag" bpmnElement="Process_Frag">
+      <bpmndi:BPMNShape id="Shape_Lane_Frag_User" bpmnElement="Lane_Frag_User" isHorizontal="true"><dc:Bounds x="30" y="30" width="1240" height="150"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Frag_Indexer" bpmnElement="Lane_Frag_Indexer" isHorizontal="true"><dc:Bounds x="30" y="180" width="1240" height="190"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Frag_Start" bpmnElement="Event_Frag_Start"><dc:Bounds x="60" y="85" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Frag_Encode" bpmnElement="Task_Frag_Encode"><dc:Bounds x="140" y="73" width="280" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Frag_A" bpmnElement="Task_Frag_A"><dc:Bounds x="470" y="73" width="240" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Frag_B" bpmnElement="Task_Frag_B"><dc:Bounds x="760" y="73" width="300" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Frag_Detect" bpmnElement="Task_Frag_Detect"><dc:Bounds x="140" y="235" width="260" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Frag_Child" bpmnElement="Gateway_Frag_Child" isMarkerVisible="true"><dc:Bounds x="450" y="240" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Frag_Join" bpmnElement="Task_Frag_Join"><dc:Bounds x="560" y="235" width="340" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Frag_Applied" bpmnElement="Event_Frag_Applied"><dc:Bounds x="960" y="247" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Frag_Wait" bpmnElement="Event_Frag_Wait"><dc:Bounds x="457" y="320" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Frag_1" bpmnElement="Flow_Frag_1"><di:waypoint x="96" y="103"/><di:waypoint x="140" y="103"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Frag_2" bpmnElement="Flow_Frag_2"><di:waypoint x="420" y="103"/><di:waypoint x="470" y="103"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Frag_3" bpmnElement="Flow_Frag_3"><di:waypoint x="710" y="103"/><di:waypoint x="760" y="103"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Frag_4" bpmnElement="Flow_Frag_4"><di:waypoint x="910" y="133"/><di:waypoint x="270" y="235"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Frag_5" bpmnElement="Flow_Frag_5"><di:waypoint x="400" y="265"/><di:waypoint x="450" y="265"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Frag_6" bpmnElement="Flow_Frag_6"><di:waypoint x="500" y="265"/><di:waypoint x="560" y="265"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Frag_7" bpmnElement="Flow_Frag_7"><di:waypoint x="475" y="290"/><di:waypoint x="475" y="320"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Frag_8" bpmnElement="Flow_Frag_8"><di:waypoint x="900" y="265"/><di:waypoint x="960" y="265"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>

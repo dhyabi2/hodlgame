@@ -7,228 +7,109 @@
   targetNamespace="https://holdfun.io/bpmn">
 
   <!-- ======================================================================
-  Flow 01 — Token launch (5% creator cap is STRUCTURAL, not contractual)
+  Flow 01 — Launch: hello → launch block → SIGNED metadata publish
   ======================================================================
-  The creator signs one Nano state block. There is no contract to call and no
-  one to "ask" for the 5% cap — the cap is the formula `floor(supply * 5%)`
-  inside applyOp(), so it is mathematically impossible to get more.
+  The 5% creator cap is structural (floor(supply*5%), computed by the state
+  machine — no one can specify their own share). tokenId = first 16 bytes of
+  the launch block hash, so identity needs no registry. Metadata is published
+  off-chain but AUTHENTICATED: the creator signs a domain-separated digest
+  ("holdfun-meta-v1") over the sanitized fields with the same key that signed
+  the launch, so only the creator can name the token (09-metadata-authority
+  covers updates, freezes and transfers).
   ====================================================================== -->
 
-  <bpmn:process id="Process_Launch" name="Launch token" isExecutable="false">
+  <bpmn:process id="Process_Launch" name="Token launch" isExecutable="false">
 
     <bpmn:laneSet id="LaneSet_Launch">
       <bpmn:lane id="Lane_Launch_Creator" name="Creator (browser wallet)">
         <bpmn:flowNodeRef>Event_Launch_Start</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Task_Launch_Encode</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Task_Launch_Sign</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Task_Launch_Broadcast</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Launch_Hello</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Launch_Block</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Launch_TokenId</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Launch_SignMeta</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Launch_Server" name="Registry (verifies, never trusts)">
+        <bpmn:flowNodeRef>Task_Launch_VerifyMeta</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Launch_Store</bpmn:flowNodeRef>
         <bpmn:flowNodeRef>Event_Launch_Done</bpmn:flowNodeRef>
-      </bpmn:lane>
-      <bpmn:lane id="Lane_Launch_Nano" name="Nano L1 (rpc.nano.to)">
-        <bpmn:flowNodeRef>Task_Launch_Confirm</bpmn:flowNodeRef>
-      </bpmn:lane>
-      <bpmn:lane id="Lane_Launch_Indexer" name="Indexer (deterministic fold)">
-        <bpmn:flowNodeRef>Event_Launch_IdxStart</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Task_Launch_Decode</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Task_Launch_DeriveId</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Task_Launch_Apply</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Gateway_Launch_Cap</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Task_Launch_Reject</bpmn:flowNodeRef>
-        <bpmn:flowNodeRef>Event_Launch_IdxDone</bpmn:flowNodeRef>
       </bpmn:lane>
     </bpmn:laneSet>
 
-    <!-- Creator lane -->
-    <bpmn:startEvent id="Event_Launch_Start" name="Creator picks supply + metadata">
+    <bpmn:startEvent id="Event_Launch_Start" name="creator submits form">
       <bpmn:outgoing>Flow_Launch_1</bpmn:outgoing>
     </bpmn:startEvent>
 
-    <bpmn:serviceTask id="Task_Launch_Encode" name="encodeOpLink(tokenId='', launch)">
-      <bpmn:documentation>link = [opcode 0x01][tokenId 0×16][supply] — tokenId slot is zero at launch.</bpmn:documentation>
+    <bpmn:serviceTask id="Task_Launch_Hello" name="ensureHello(): 1-raw send to ANCHOR (once per account)">
+      <bpmn:documentation>Registers the creator for trustless discovery (10-discovery.bpmn). Best-effort; never blocks the op.</bpmn:documentation>
       <bpmn:incoming>Flow_Launch_1</bpmn:incoming>
       <bpmn:outgoing>Flow_Launch_2</bpmn:outgoing>
     </bpmn:serviceTask>
 
-    <bpmn:serviceTask id="Task_Launch_Sign" name="nanocurrency.createBlock(secretKey, {previous, link, balance:0})">
+    <bpmn:serviceTask id="Task_Launch_Block" name="submitBlock(encodeOpLink('', launch), 1 raw)">
+      <bpmn:documentation>link = [0x01][zero tokenId][supply]. The 1-raw amount marks a data block. State machine mints floor(supply*5%) to the creator and the rest to treasury.</bpmn:documentation>
       <bpmn:incoming>Flow_Launch_2</bpmn:incoming>
       <bpmn:outgoing>Flow_Launch_3</bpmn:outgoing>
     </bpmn:serviceTask>
 
-    <bpmn:serviceTask id="Task_Launch_Broadcast" name="rpc action=process (broadcast state block)">
+    <bpmn:serviceTask id="Task_Launch_TokenId" name="tokenId = tokenIdFromLaunchHash(blockHash)">
+      <bpmn:documentation>Identity without a registry: first 128 bits of the launch block's hash.</bpmn:documentation>
       <bpmn:incoming>Flow_Launch_3</bpmn:incoming>
       <bpmn:outgoing>Flow_Launch_4</bpmn:outgoing>
     </bpmn:serviceTask>
 
-    <bpmn:endEvent id="Event_Launch_Done" name="Block on-chain">
+    <bpmn:serviceTask id="Task_Launch_SignMeta" name="sign metaSignDigest(tokenId, seq, 'update', metaFieldsHash(sanitized))">
+      <bpmn:documentation>core/metaAuth.ts — the creator signs the SANITIZED fields with the launch key; POST { fields, account, signature, seq } to /api/tokens.</bpmn:documentation>
       <bpmn:incoming>Flow_Launch_4</bpmn:incoming>
-    </bpmn:endEvent>
+      <bpmn:outgoing>Flow_Launch_5</bpmn:outgoing>
+    </bpmn:serviceTask>
 
-    <!-- Nano lane -->
-    <bpmn:serviceTask id="Task_Launch_Confirm" name="Confirm (ORV consensus) → block hash + height">
+    <bpmn:serviceTask id="Task_Launch_VerifyMeta" name="verifyMetaSignature + gateMetaAction + decideMetaUpdate">
+      <bpmn:documentation>server/metaAuth.ts — authority = the on-chain launch signer (provisional first-writer only until the launch indexes, then the creator overrides and the row locks). Chain-derived authority state (anchors) gates freezes/transfers.</bpmn:documentation>
       <bpmn:incoming>Flow_Launch_5</bpmn:incoming>
       <bpmn:outgoing>Flow_Launch_6</bpmn:outgoing>
     </bpmn:serviceTask>
 
-    <!-- Indexer lane -->
-    <bpmn:startEvent id="Event_Launch_IdxStart" name="Sees block in watched account">
+    <bpmn:serviceTask id="Task_Launch_Store" name="saveMetaRow(tokenId, sanitized, authorityRow)">
+      <bpmn:documentation>Image stored as ipfs://CID (host-independent; anyone can re-pin).</bpmn:documentation>
+      <bpmn:incoming>Flow_Launch_6</bpmn:incoming>
       <bpmn:outgoing>Flow_Launch_7</bpmn:outgoing>
-    </bpmn:startEvent>
+    </bpmn:serviceTask>
 
-    <bpmn:serviceTask id="Task_Launch_Decode" name="decodeOpLink(block.link)">
-      <bpmn:documentation>Confirms opcode 0x01 and reads supply from the amount slot.</bpmn:documentation>
+    <bpmn:endEvent id="Event_Launch_Done" name="token live">
       <bpmn:incoming>Flow_Launch_7</bpmn:incoming>
-      <bpmn:outgoing>Flow_Launch_8</bpmn:outgoing>
-    </bpmn:serviceTask>
-
-    <bpmn:serviceTask id="Task_Launch_DeriveId" name="tokenIdFromLaunchHash(block.hash)">
-      <bpmn:documentation>tokenId = first 16 bytes of the launch block hash — no registry.</bpmn:documentation>
-      <bpmn:incoming>Flow_Launch_8</bpmn:incoming>
-      <bpmn:outgoing>Flow_Launch_9</bpmn:outgoing>
-    </bpmn:serviceTask>
-
-    <bpmn:serviceTask id="Task_Launch_Apply" name="applyOp(state, launch, sender, height)">
-      <bpmn:documentation>creatorShare = floor(supply × 500 / 10000); treasury = supply − creatorShare.</bpmn:documentation>
-      <bpmn:incoming>Flow_Launch_9</bpmn:incoming>
-      <bpmn:outgoing>Flow_Launch_10</bpmn:outgoing>
-    </bpmn:serviceTask>
-
-    <bpmn:exclusiveGateway id="Gateway_Launch_Cap" name="creatorShare > 0 and not already launched?">
-      <bpmn:incoming>Flow_Launch_10</bpmn:incoming>
-      <bpmn:outgoing>Flow_Launch_11</bpmn:outgoing>
-      <bpmn:outgoing>Flow_Launch_12</bpmn:outgoing>
-    </bpmn:exclusiveGateway>
-
-    <bpmn:serviceTask id="Task_Launch_Reject" name="flag invalid (replay.replayMulti marks invalid)">
-      <bpmn:incoming>Flow_Launch_12</bpmn:incoming>
-      <bpmn:outgoing>Flow_Launch_13</bpmn:outgoing>
-    </bpmn:serviceTask>
-
-    <bpmn:endEvent id="Event_Launch_IdxDone" name="token live in MultiState">
-      <bpmn:incoming>Flow_Launch_11</bpmn:incoming>
-      <bpmn:incoming>Flow_Launch_13</bpmn:incoming>
     </bpmn:endEvent>
 
-    <!-- Sequence flows -->
-    <bpmn:sequenceFlow id="Flow_Launch_1" sourceRef="Event_Launch_Start" targetRef="Task_Launch_Encode"/>
-    <bpmn:sequenceFlow id="Flow_Launch_2" sourceRef="Task_Launch_Encode" targetRef="Task_Launch_Sign"/>
-    <bpmn:sequenceFlow id="Flow_Launch_3" sourceRef="Task_Launch_Sign" targetRef="Task_Launch_Broadcast"/>
-    <bpmn:sequenceFlow id="Flow_Launch_4" sourceRef="Task_Launch_Broadcast" targetRef="Event_Launch_Done"/>
-    <bpmn:sequenceFlow id="Flow_Launch_5" sourceRef="Event_Launch_Done" targetRef="Task_Launch_Confirm"/>
-    <bpmn:sequenceFlow id="Flow_Launch_6" sourceRef="Task_Launch_Confirm" targetRef="Event_Launch_IdxStart"/>
-    <bpmn:sequenceFlow id="Flow_Launch_7" sourceRef="Event_Launch_IdxStart" targetRef="Task_Launch_Decode"/>
-    <bpmn:sequenceFlow id="Flow_Launch_8" sourceRef="Task_Launch_Decode" targetRef="Task_Launch_DeriveId"/>
-    <bpmn:sequenceFlow id="Flow_Launch_9" sourceRef="Task_Launch_DeriveId" targetRef="Task_Launch_Apply"/>
-    <bpmn:sequenceFlow id="Flow_Launch_10" sourceRef="Task_Launch_Apply" targetRef="Gateway_Launch_Cap"/>
-    <bpmn:sequenceFlow id="Flow_Launch_11" sourceRef="Gateway_Launch_Cap" targetRef="Event_Launch_IdxDone" name="valid"/>
-    <bpmn:sequenceFlow id="Flow_Launch_12" sourceRef="Gateway_Launch_Cap" targetRef="Task_Launch_Reject" name="invalid"/>
-    <bpmn:sequenceFlow id="Flow_Launch_13" sourceRef="Task_Launch_Reject" targetRef="Event_Launch_IdxDone"/>
+    <bpmn:sequenceFlow id="Flow_Launch_1" sourceRef="Event_Launch_Start" targetRef="Task_Launch_Hello"/>
+    <bpmn:sequenceFlow id="Flow_Launch_2" sourceRef="Task_Launch_Hello" targetRef="Task_Launch_Block"/>
+    <bpmn:sequenceFlow id="Flow_Launch_3" sourceRef="Task_Launch_Block" targetRef="Task_Launch_TokenId"/>
+    <bpmn:sequenceFlow id="Flow_Launch_4" sourceRef="Task_Launch_TokenId" targetRef="Task_Launch_SignMeta"/>
+    <bpmn:sequenceFlow id="Flow_Launch_5" sourceRef="Task_Launch_SignMeta" targetRef="Task_Launch_VerifyMeta"/>
+    <bpmn:sequenceFlow id="Flow_Launch_6" sourceRef="Task_Launch_VerifyMeta" targetRef="Task_Launch_Store"/>
+    <bpmn:sequenceFlow id="Flow_Launch_7" sourceRef="Task_Launch_Store" targetRef="Event_Launch_Done"/>
 
   </bpmn:process>
 
   <bpmndi:BPMNDiagram id="BPMNDiagram_Launch">
     <bpmndi:BPMNPlane id="BPMNPlane_Launch" bpmnElement="Process_Launch">
-      <bpmndi:BPMNShape id="Shape_Lane_Launch_Creator" bpmnElement="Lane_Launch_Creator" isHorizontal="true">
-        <dc:Bounds x="30" y="30" width="1180" height="140"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Lane_Launch_Nano" bpmnElement="Lane_Launch_Nano" isHorizontal="true">
-        <dc:Bounds x="30" y="170" width="1180" height="120"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Lane_Launch_Indexer" bpmnElement="Lane_Launch_Indexer" isHorizontal="true">
-        <dc:Bounds x="30" y="290" width="1180" height="230"/>
-      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Launch_Creator" bpmnElement="Lane_Launch_Creator" isHorizontal="true"><dc:Bounds x="30" y="30" width="1240" height="170"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Launch_Server" bpmnElement="Lane_Launch_Server" isHorizontal="true"><dc:Bounds x="30" y="200" width="1240" height="150"/></bpmndi:BPMNShape>
 
-      <bpmndi:BPMNShape id="Shape_Launch_Start" bpmnElement="Event_Launch_Start">
-        <dc:Bounds x="60" y="80" width="36" height="36"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Launch_Encode" bpmnElement="Task_Launch_Encode">
-        <dc:Bounds x="150" y="68" width="150" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Launch_Sign" bpmnElement="Task_Launch_Sign">
-        <dc:Bounds x="350" y="68" width="170" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Launch_Broadcast" bpmnElement="Task_Launch_Broadcast">
-        <dc:Bounds x="570" y="68" width="150" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Launch_Done" bpmnElement="Event_Launch_Done">
-        <dc:Bounds x="770" y="80" width="36" height="36"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Launch_Confirm" bpmnElement="Task_Launch_Confirm">
-        <dc:Bounds x="150" y="200" width="170" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Launch_IdxStart" bpmnElement="Event_Launch_IdxStart">
-        <dc:Bounds x="60" y="330" width="36" height="36"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Launch_Decode" bpmnElement="Task_Launch_Decode">
-        <dc:Bounds x="150" y="318" width="150" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Launch_DeriveId" bpmnElement="Task_Launch_DeriveId">
-        <dc:Bounds x="350" y="318" width="150" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Launch_Apply" bpmnElement="Task_Launch_Apply">
-        <dc:Bounds x="550" y="318" width="150" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Launch_Cap" bpmnElement="Gateway_Launch_Cap" isMarkerVisible="true">
-        <dc:Bounds x="750" y="330" width="50" height="50"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Launch_Reject" bpmnElement="Task_Launch_Reject">
-        <dc:Bounds x="550" y="430" width="150" height="60"/>
-      </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_Launch_IdxDone" bpmnElement="Event_Launch_IdxDone">
-        <dc:Bounds x="930" y="340" width="36" height="36"/>
-      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_Start" bpmnElement="Event_Launch_Start"><dc:Bounds x="60" y="95" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_Hello" bpmnElement="Task_Launch_Hello"><dc:Bounds x="140" y="83" width="220" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_Block" bpmnElement="Task_Launch_Block"><dc:Bounds x="400" y="83" width="230" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_TokenId" bpmnElement="Task_Launch_TokenId"><dc:Bounds x="670" y="83" width="240" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_SignMeta" bpmnElement="Task_Launch_SignMeta"><dc:Bounds x="950" y="83" width="290" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_VerifyMeta" bpmnElement="Task_Launch_VerifyMeta"><dc:Bounds x="640" y="245" width="300" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_Store" bpmnElement="Task_Launch_Store"><dc:Bounds x="360" y="245" width="230" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Launch_Done" bpmnElement="Event_Launch_Done"><dc:Bounds x="270" y="257" width="36" height="36"/></bpmndi:BPMNShape>
 
-      <bpmndi:BPMNEdge id="Edge_Launch_1" bpmnElement="Flow_Launch_1">
-        <di:waypoint x="96" y="98"/>
-        <di:waypoint x="150" y="98"/>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Launch_2" bpmnElement="Flow_Launch_2">
-        <di:waypoint x="300" y="98"/>
-        <di:waypoint x="350" y="98"/>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Launch_3" bpmnElement="Flow_Launch_3">
-        <di:waypoint x="520" y="98"/>
-        <di:waypoint x="570" y="98"/>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Launch_4" bpmnElement="Flow_Launch_4">
-        <di:waypoint x="720" y="98"/>
-        <di:waypoint x="770" y="98"/>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Launch_5" bpmnElement="Flow_Launch_5">
-        <di:waypoint x="788" y="116"/>
-        <di:waypoint x="235" y="200"/>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Launch_6" bpmnElement="Flow_Launch_6">
-        <di:waypoint x="235" y="260"/>
-        <di:waypoint x="78" y="330"/>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Launch_7" bpmnElement="Flow_Launch_7">
-        <di:waypoint x="96" y="348"/>
-        <di:waypoint x="150" y="348"/>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Launch_8" bpmnElement="Flow_Launch_8">
-        <di:waypoint x="300" y="348"/>
-        <di:waypoint x="350" y="348"/>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Launch_9" bpmnElement="Flow_Launch_9">
-        <di:waypoint x="500" y="348"/>
-        <di:waypoint x="550" y="348"/>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Launch_10" bpmnElement="Flow_Launch_10">
-        <di:waypoint x="700" y="348"/>
-        <di:waypoint x="750" y="355"/>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Launch_11" bpmnElement="Flow_Launch_11">
-        <di:waypoint x="800" y="355"/>
-        <di:waypoint x="930" y="358"/>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Launch_12" bpmnElement="Flow_Launch_12">
-        <di:waypoint x="775" y="380"/>
-        <di:waypoint x="700" y="430"/>
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Launch_13" bpmnElement="Flow_Launch_13">
-        <di:waypoint x="700" y="460"/>
-        <di:waypoint x="930" y="376"/>
-      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_1" bpmnElement="Flow_Launch_1"><di:waypoint x="96" y="113"/><di:waypoint x="140" y="113"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_2" bpmnElement="Flow_Launch_2"><di:waypoint x="360" y="113"/><di:waypoint x="400" y="113"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_3" bpmnElement="Flow_Launch_3"><di:waypoint x="630" y="113"/><di:waypoint x="670" y="113"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_4" bpmnElement="Flow_Launch_4"><di:waypoint x="910" y="113"/><di:waypoint x="950" y="113"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_5" bpmnElement="Flow_Launch_5"><di:waypoint x="1095" y="143"/><di:waypoint x="790" y="245"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_6" bpmnElement="Flow_Launch_6"><di:waypoint x="640" y="275"/><di:waypoint x="590" y="275"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Launch_7" bpmnElement="Flow_Launch_7"><di:waypoint x="360" y="275"/><di:waypoint x="306" y="275"/></bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>
 

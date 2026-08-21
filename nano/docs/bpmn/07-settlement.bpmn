@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  id="Definitions_settle"
+  targetNamespace="https://holdfun.io/bpmn">
+
+  <!-- ======================================================================
+  Flow 07 — Chain-derived netted settlement (sells + refunds, NO ledgers)
+  ======================================================================
+  Replaces the old paid/refunded/deposits store-ledgers (which also broke
+  silently on read-only serverless filesystems). Per (pool, recipient):
+      owed = max(0, entitlement − alreadySent)
+  entitlement = deterministic sell payouts + buy-refund netting; alreadySent
+  = sum of the pool account's own outgoing sends (read from chain, verified).
+  Sells and refunds NET together per recipient, so no per-send classification
+  is ever needed. Failure modes point the safe way: missing inputs UNDERpay
+  and retry; nothing can double-pay — a crashed or concurrent sweeper
+  re-derives identical obligations in identical order and the broadcast send
+  is already in the pool's history.
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Settle" name="Netted settlement" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Settle">
+      <bpmn:lane id="Lane_Settle_Sweep" name="Any sweeper (cron / watchtower)">
+        <bpmn:flowNodeRef>Event_Settle_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Settle_Receive</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Settle_Chain</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Settle_Deposits</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Settle_Entitle</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Settle_Sent</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Settle_Net</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Settle_Owed</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Settle_Pay</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Settle_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <bpmn:startEvent id="Event_Settle_Start" name="sweep tick">
+      <bpmn:outgoing>Flow_Settle_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Settle_Receive" name="receivePoolPending + ensurePoolHello (self-registers pool→tokenId)">
+      <bpmn:incoming>Flow_Settle_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Settle_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Settle_Chain" name="listBlocks(pool) — the pool's own chain IS the settlement ledger">
+      <bpmn:incoming>Flow_Settle_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Settle_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Settle_Deposits" name="readPoolDepositsFromChain: sender → Σ received (verified source blocks)">
+      <bpmn:incoming>Flow_Settle_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Settle_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Settle_Entitle" name="entitlementsFor: Σ sellPayouts + computeRefunds(received − credited)">
+      <bpmn:documentation>server/settled.ts + reconcile.ts — a sender who never sent XNO has received 0 and can never drain the pool.</bpmn:documentation>
+      <bpmn:incoming>Flow_Settle_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Settle_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Settle_Sent" name="poolOutgoingByRecipient: alreadySent from the pool's sends">
+      <bpmn:incoming>Flow_Settle_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Settle_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Settle_Net" name="netObligations: owed = max(0, entitlement − sent), sorted by recipient">
+      <bpmn:incoming>Flow_Settle_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_Settle_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Settle_Owed" name="anything owed?">
+      <bpmn:incoming>Flow_Settle_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Settle_8</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Settle_9</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Settle_Pay" name="settlePoolNetted: sign + broadcast sequentially (06-custody)">
+      <bpmn:documentation>Balance-short or failed broadcasts stay owed and retry next sweep (queued, never lost, never doubled).</bpmn:documentation>
+      <bpmn:incoming>Flow_Settle_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Settle_10</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Settle_Done" name="settled">
+      <bpmn:incoming>Flow_Settle_9</bpmn:incoming>
+      <bpmn:incoming>Flow_Settle_10</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Settle_1" sourceRef="Event_Settle_Start" targetRef="Task_Settle_Receive"/>
+    <bpmn:sequenceFlow id="Flow_Settle_2" sourceRef="Task_Settle_Receive" targetRef="Task_Settle_Chain"/>
+    <bpmn:sequenceFlow id="Flow_Settle_3" sourceRef="Task_Settle_Chain" targetRef="Task_Settle_Deposits"/>
+    <bpmn:sequenceFlow id="Flow_Settle_4" sourceRef="Task_Settle_Deposits" targetRef="Task_Settle_Entitle"/>
+    <bpmn:sequenceFlow id="Flow_Settle_5" sourceRef="Task_Settle_Entitle" targetRef="Task_Settle_Sent"/>
+    <bpmn:sequenceFlow id="Flow_Settle_6" sourceRef="Task_Settle_Sent" targetRef="Task_Settle_Net"/>
+    <bpmn:sequenceFlow id="Flow_Settle_7" sourceRef="Task_Settle_Net" targetRef="Gateway_Settle_Owed"/>
+    <bpmn:sequenceFlow id="Flow_Settle_8" sourceRef="Gateway_Settle_Owed" targetRef="Task_Settle_Pay" name="yes"/>
+    <bpmn:sequenceFlow id="Flow_Settle_9" sourceRef="Gateway_Settle_Owed" targetRef="Event_Settle_Done" name="no"/>
+    <bpmn:sequenceFlow id="Flow_Settle_10" sourceRef="Task_Settle_Pay" targetRef="Event_Settle_Done"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Settle">
+    <bpmndi:BPMNPlane id="BPMNPlane_Settle" bpmnElement="Process_Settle">
+      <bpmndi:BPMNShape id="Shape_Lane_Settle_Sweep" bpmnElement="Lane_Settle_Sweep" isHorizontal="true"><dc:Bounds x="30" y="30" width="1300" height="330"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Settle_Start" bpmnElement="Event_Settle_Start"><dc:Bounds x="60" y="95" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Settle_Receive" bpmnElement="Task_Settle_Receive"><dc:Bounds x="140" y="83" width="320" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Settle_Chain" bpmnElement="Task_Settle_Chain"><dc:Bounds x="500" y="83" width="300" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Settle_Deposits" bpmnElement="Task_Settle_Deposits"><dc:Bounds x="840" y="83" width="330" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Settle_Entitle" bpmnElement="Task_Settle_Entitle"><dc:Bounds x="140" y="205" width="340" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Settle_Sent" bpmnElement="Task_Settle_Sent"><dc:Bounds x="520" y="205" width="300" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Settle_Net" bpmnElement="Task_Settle_Net"><dc:Bounds x="860" y="205" width="320" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Settle_Owed" bpmnElement="Gateway_Settle_Owed" isMarkerVisible="true"><dc:Bounds x="500" y="295" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Settle_Pay" bpmnElement="Task_Settle_Pay"><dc:Bounds x="620" y="290" width="310" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Settle_Done" bpmnElement="Event_Settle_Done"><dc:Bounds x="990" y="302" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Settle_1" bpmnElement="Flow_Settle_1"><di:waypoint x="96" y="113"/><di:waypoint x="140" y="113"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Settle_2" bpmnElement="Flow_Settle_2"><di:waypoint x="460" y="113"/><di:waypoint x="500" y="113"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Settle_3" bpmnElement="Flow_Settle_3"><di:waypoint x="800" y="113"/><di:waypoint x="840" y="113"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Settle_4" bpmnElement="Flow_Settle_4"><di:waypoint x="1000" y="143"/><di:waypoint x="310" y="205"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Settle_5" bpmnElement="Flow_Settle_5"><di:waypoint x="480" y="235"/><di:waypoint x="520" y="235"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Settle_6" bpmnElement="Flow_Settle_6"><di:waypoint x="820" y="235"/><di:waypoint x="860" y="235"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Settle_7" bpmnElement="Flow_Settle_7"><di:waypoint x="1020" y="265"/><di:waypoint x="550" y="308"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Settle_8" bpmnElement="Flow_Settle_8"><di:waypoint x="550" y="320"/><di:waypoint x="620" y="320"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Settle_9" bpmnElement="Flow_Settle_9"><di:waypoint x="525" y="345"/><di:waypoint x="1008" y="338"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Settle_10" bpmnElement="Flow_Settle_10"><di:waypoint x="930" y="320"/><di:waypoint x="990" y="320"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>

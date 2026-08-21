@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  id="Definitions_meta"
+  targetNamespace="https://holdfun.io/bpmn">
+
+  <!-- ======================================================================
+  Flow 09 — Metadata authority: signed updates + on-chain anchors
+  ======================================================================
+  Ordinary updates: signed over blake2b("holdfun-meta-v1" ‖ tokenId ‖ seq ‖
+  action ‖ hash(sanitized fields)) by the token's authority; strictly-
+  increasing seq blocks replay; the domain prefix keeps metadata signatures
+  and Nano block signatures in disjoint digest spaces. The two IRRECOVERABLE
+  actions are governed by ON-CHAIN ANCHORS (1-raw burns from the authority's
+  own account): makeImmutable = [0xEE][tokenId][zeros]; setAuthority = a
+  chained pair carrying the new authority's pubkey. Authority state is a
+  pure fold over anchors (creator-seeded, current-authority-only, freeze is
+  one-way) — a successor with an EMPTY database still enforces the right
+  owner for every token. Comments use the same signing pattern
+  ("holdfun-comment-v1", replay-idempotent ids).
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Meta" name="Metadata authority" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Meta">
+      <bpmn:lane id="Lane_Meta_Authority" name="Token authority (creator or transferee)">
+        <bpmn:flowNodeRef>Event_Meta_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Meta_Action</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Meta_Anchor</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Meta_Sign</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Meta_Server" name="Registry (chain state governs)">
+        <bpmn:flowNodeRef>Task_Meta_Verify</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Meta_Gate</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Meta_Decide</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Meta_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <bpmn:startEvent id="Event_Meta_Start" name="metadata action">
+      <bpmn:outgoing>Flow_Meta_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:exclusiveGateway id="Gateway_Meta_Action" name="action kind">
+      <bpmn:incoming>Flow_Meta_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Meta_2</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Meta_3</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Meta_Anchor" name="broadcast anchor: immutableAnchorLink / setAuthorityAnchorLinks (1-raw burns)">
+      <bpmn:documentation>core/metaAnchor.ts — from the CURRENT authority's own account; anyone else's anchors are ignored by the fold.</bpmn:documentation>
+      <bpmn:incoming>Flow_Meta_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Meta_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Meta_Sign" name="sign metaSignDigest(tokenId, seq, action, metaFieldsHash) → POST /api/tokens">
+      <bpmn:incoming>Flow_Meta_3</bpmn:incoming>
+      <bpmn:incoming>Flow_Meta_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Meta_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Meta_Verify" name="verifyMetaSignature (ed25519-blake2b vs claimed account)">
+      <bpmn:incoming>Flow_Meta_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Meta_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Meta_Gate" name="gateMetaAction(action, authorityStateOf(tokenId))">
+      <bpmn:documentation>Chain-derived state (deriveMetaAuthority fold) governs: frozen tokens reject writes (except the one-time freeze sync); freeze/transfer require their anchor on-chain FIRST.</bpmn:documentation>
+      <bpmn:incoming>Flow_Meta_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_Meta_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Meta_Decide" name="decideMetaUpdate: authority match, seq monotonic → saveMetaRow">
+      <bpmn:documentation>Provisional first-writer only until the launch indexes; the on-chain creator overrides and the row locks.</bpmn:documentation>
+      <bpmn:incoming>Flow_Meta_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Meta_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Meta_Done" name="registry synced (chain remains the truth)">
+      <bpmn:incoming>Flow_Meta_8</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Meta_1" sourceRef="Event_Meta_Start" targetRef="Gateway_Meta_Action"/>
+    <bpmn:sequenceFlow id="Flow_Meta_2" sourceRef="Gateway_Meta_Action" targetRef="Task_Meta_Anchor" name="makeImmutable / setAuthority"/>
+    <bpmn:sequenceFlow id="Flow_Meta_3" sourceRef="Gateway_Meta_Action" targetRef="Task_Meta_Sign" name="update"/>
+    <bpmn:sequenceFlow id="Flow_Meta_4" sourceRef="Task_Meta_Anchor" targetRef="Task_Meta_Sign"/>
+    <bpmn:sequenceFlow id="Flow_Meta_5" sourceRef="Task_Meta_Sign" targetRef="Task_Meta_Verify"/>
+    <bpmn:sequenceFlow id="Flow_Meta_6" sourceRef="Task_Meta_Verify" targetRef="Task_Meta_Gate"/>
+    <bpmn:sequenceFlow id="Flow_Meta_7" sourceRef="Task_Meta_Gate" targetRef="Task_Meta_Decide"/>
+    <bpmn:sequenceFlow id="Flow_Meta_8" sourceRef="Task_Meta_Decide" targetRef="Event_Meta_Done"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Meta">
+    <bpmndi:BPMNPlane id="BPMNPlane_Meta" bpmnElement="Process_Meta">
+      <bpmndi:BPMNShape id="Shape_Lane_Meta_Authority" bpmnElement="Lane_Meta_Authority" isHorizontal="true"><dc:Bounds x="30" y="30" width="1240" height="180"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Meta_Server" bpmnElement="Lane_Meta_Server" isHorizontal="true"><dc:Bounds x="30" y="210" width="1240" height="150"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Meta_Start" bpmnElement="Event_Meta_Start"><dc:Bounds x="60" y="100" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Meta_Action" bpmnElement="Gateway_Meta_Action" isMarkerVisible="true"><dc:Bounds x="150" y="93" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Meta_Anchor" bpmnElement="Task_Meta_Anchor"><dc:Bounds x="270" y="45" width="380" height="55"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Meta_Sign" bpmnElement="Task_Meta_Sign"><dc:Bounds x="720" y="88" width="380" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Meta_Verify" bpmnElement="Task_Meta_Verify"><dc:Bounds x="820" y="255" width="300" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Meta_Gate" bpmnElement="Task_Meta_Gate"><dc:Bounds x="470" y="255" width="300" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Meta_Decide" bpmnElement="Task_Meta_Decide"><dc:Bounds x="130" y="255" width="290" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Meta_Done" bpmnElement="Event_Meta_Done"><dc:Bounds x="60" y="267" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Meta_1" bpmnElement="Flow_Meta_1"><di:waypoint x="96" y="118"/><di:waypoint x="150" y="118"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Meta_2" bpmnElement="Flow_Meta_2"><di:waypoint x="175" y="93"/><di:waypoint x="270" y="72"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Meta_3" bpmnElement="Flow_Meta_3"><di:waypoint x="200" y="118"/><di:waypoint x="720" y="118"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Meta_4" bpmnElement="Flow_Meta_4"><di:waypoint x="650" y="72"/><di:waypoint x="720" y="105"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Meta_5" bpmnElement="Flow_Meta_5"><di:waypoint x="910" y="148"/><di:waypoint x="970" y="255"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Meta_6" bpmnElement="Flow_Meta_6"><di:waypoint x="820" y="285"/><di:waypoint x="770" y="285"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Meta_7" bpmnElement="Flow_Meta_7"><di:waypoint x="470" y="285"/><di:waypoint x="420" y="285"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Meta_8" bpmnElement="Flow_Meta_8"><di:waypoint x="130" y="285"/><di:waypoint x="96" y="285"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>

@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  id="Definitions_verify"
+  targetNamespace="https://holdfun.io/bpmn">
+
+  <!-- ======================================================================
+  Flow 11 — Secretless verification + snapshot anchoring
+  ======================================================================
+  Anyone-can-verify: scripts/verify.ts recomputes the ENTIRE market from
+  chain data with zero secrets (chain-derived pools mean POOL_SEED is never
+  needed to validate history) and diffs the consensus root against any
+  serving indexer's /root. The residual off-chain data (metadata log,
+  comments, legacy commit reveals) is exported per epoch as a canonical
+  snapshot whose blake2b hash is ANCHORED on-chain (a 1-raw send whose
+  destination pubkey IS the hash), so untrusted mirrors are verifiable and a
+  successor can boot from nothing.
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Verify" name="Verification &amp; snapshots" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Ver">
+      <bpmn:lane id="Lane_Ver_Anyone" name="Any third party (verifier)">
+        <bpmn:flowNodeRef>Event_Ver_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Ver_Replay</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Ver_Root</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Ver_Match</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Ver_OK</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Ver_Bad</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Ver_Operator" name="Operator (epoch snapshots)">
+        <bpmn:flowNodeRef>Task_Ver_Snap</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Ver_Anchor</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Ver_Mirrored</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <bpmn:startEvent id="Event_Ver_Start" name="verify request">
+      <bpmn:outgoing>Flow_Ver_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Ver_Replay" name="scripts/verify.ts: MultiIndexer with NO poolKey, NO secrets → full replay">
+      <bpmn:documentation>Pools resolve from chain history (05); chain access via RPC failover with local block verification (any untrusted endpoint is safe for reads).</bpmn:documentation>
+      <bpmn:incoming>Flow_Ver_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Ver_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Ver_Root" name="stateRoot(state); fetch serving indexer's /root">
+      <bpmn:incoming>Flow_Ver_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Ver_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Ver_Match" name="roots equal?">
+      <bpmn:incoming>Flow_Ver_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Ver_4</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Ver_5</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:endEvent id="Event_Ver_OK" name="VERIFIED — server proven honest">
+      <bpmn:incoming>Flow_Ver_4</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:endEvent id="Event_Ver_Bad" name="MISMATCH — publicly falsifiable lie">
+      <bpmn:incoming>Flow_Ver_5</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:serviceTask id="Task_Ver_Snap" name="exportSnapshot(): canonical JSON of residual off-chain state + blake2b hash">
+      <bpmn:documentation>server/snapshot.ts — tokens/comments/commits/hellos; served read-only at /api/snapshot.</bpmn:documentation>
+      <bpmn:outgoing>Flow_Ver_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Ver_Anchor" name="anchor: 1-raw send from ANCHOR to hash-as-pubkey (data burn)">
+      <bpmn:documentation>scripts/snapshot.ts --anchor; verifySnapshotJson + isAnchored let anyone check a mirror against chain.</bpmn:documentation>
+      <bpmn:incoming>Flow_Ver_6</bpmn:incoming>
+      <bpmn:outgoing>Flow_Ver_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Ver_Mirrored" name="mirrorable anywhere, verifiable on-chain">
+      <bpmn:incoming>Flow_Ver_7</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Ver_1" sourceRef="Event_Ver_Start" targetRef="Task_Ver_Replay"/>
+    <bpmn:sequenceFlow id="Flow_Ver_2" sourceRef="Task_Ver_Replay" targetRef="Task_Ver_Root"/>
+    <bpmn:sequenceFlow id="Flow_Ver_3" sourceRef="Task_Ver_Root" targetRef="Gateway_Ver_Match"/>
+    <bpmn:sequenceFlow id="Flow_Ver_4" sourceRef="Gateway_Ver_Match" targetRef="Event_Ver_OK" name="yes"/>
+    <bpmn:sequenceFlow id="Flow_Ver_5" sourceRef="Gateway_Ver_Match" targetRef="Event_Ver_Bad" name="no"/>
+    <bpmn:sequenceFlow id="Flow_Ver_6" sourceRef="Task_Ver_Snap" targetRef="Task_Ver_Anchor"/>
+    <bpmn:sequenceFlow id="Flow_Ver_7" sourceRef="Task_Ver_Anchor" targetRef="Event_Ver_Mirrored"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Ver">
+    <bpmndi:BPMNPlane id="BPMNPlane_Ver" bpmnElement="Process_Verify">
+      <bpmndi:BPMNShape id="Shape_Lane_Ver_Anyone" bpmnElement="Lane_Ver_Anyone" isHorizontal="true"><dc:Bounds x="30" y="30" width="1240" height="170"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Ver_Operator" bpmnElement="Lane_Ver_Operator" isHorizontal="true"><dc:Bounds x="30" y="200" width="1240" height="150"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Ver_Start" bpmnElement="Event_Ver_Start"><dc:Bounds x="60" y="95" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Ver_Replay" bpmnElement="Task_Ver_Replay"><dc:Bounds x="140" y="83" width="380" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Ver_Root" bpmnElement="Task_Ver_Root"><dc:Bounds x="570" y="83" width="290" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Ver_Match" bpmnElement="Gateway_Ver_Match" isMarkerVisible="true"><dc:Bounds x="910" y="88" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Ver_OK" bpmnElement="Event_Ver_OK"><dc:Bounds x="1030" y="60" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Ver_Bad" bpmnElement="Event_Ver_Bad"><dc:Bounds x="1030" y="130" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Ver_Snap" bpmnElement="Task_Ver_Snap"><dc:Bounds x="140" y="255" width="400" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Ver_Anchor" bpmnElement="Task_Ver_Anchor"><dc:Bounds x="590" y="255" width="360" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Ver_Mirrored" bpmnElement="Event_Ver_Mirrored"><dc:Bounds x="1010" y="267" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Ver_1" bpmnElement="Flow_Ver_1"><di:waypoint x="96" y="113"/><di:waypoint x="140" y="113"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Ver_2" bpmnElement="Flow_Ver_2"><di:waypoint x="520" y="113"/><di:waypoint x="570" y="113"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Ver_3" bpmnElement="Flow_Ver_3"><di:waypoint x="860" y="113"/><di:waypoint x="910" y="113"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Ver_4" bpmnElement="Flow_Ver_4"><di:waypoint x="935" y="88"/><di:waypoint x="1030" y="78"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Ver_5" bpmnElement="Flow_Ver_5"><di:waypoint x="935" y="138"/><di:waypoint x="1030" y="148"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Ver_6" bpmnElement="Flow_Ver_6"><di:waypoint x="540" y="285"/><di:waypoint x="590" y="285"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Ver_7" bpmnElement="Flow_Ver_7"><di:waypoint x="950" y="285"/><di:waypoint x="1010" y="285"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>

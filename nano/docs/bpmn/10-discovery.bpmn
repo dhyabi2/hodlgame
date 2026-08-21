@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  id="Definitions_disc"
+  targetNamespace="https://holdfun.io/bpmn">
+
+  <!-- ======================================================================
+  Flow 10 — Anchor discovery: participants from chain data, no watch list
+  ======================================================================
+  One hardcoded public ANCHOR account (core/anchor.ts). Every account sends a
+  one-time 1-raw hello before its first op (the client does this
+  automatically); every pool self-registers from the sweep with its tokenId
+  encoded in the hello's REPRESENTATIVE field. Discovery is exactly two
+  fixed hops and converges identically for every indexer. Spam costs an
+  attacker a funded account + proof-of-work per entry and can only ADD watch
+  candidates, never censor — every op is still signature/deposit-validated.
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Disc" name="Anchor discovery" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Disc">
+      <bpmn:lane id="Lane_Disc_Reg" name="Self-registration (users, pools)">
+        <bpmn:flowNodeRef>Event_Disc_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Disc_UserHello</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Disc_PoolHello</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Disc_Indexer" name="Any indexer">
+        <bpmn:flowNodeRef>Task_Disc_Hop1</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Disc_Partition</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Disc_Hop2</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Disc_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <bpmn:startEvent id="Event_Disc_Start" name="first protocol use">
+      <bpmn:outgoing>Flow_Disc_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Disc_UserHello" name="user: 1-raw send → ANCHOR (once; ensureHello in the client)">
+      <bpmn:incoming>Flow_Disc_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Disc_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Disc_PoolHello" name="pool: 1-raw send → ANCHOR with representative = tokenId ‖ zeros">
+      <bpmn:documentation>ensurePoolHello (sweep) — binds pool→token publicly without revealing any key.</bpmn:documentation>
+      <bpmn:incoming>Flow_Disc_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Disc_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Disc_Hop1" name="hop 1: counterparties(ANCHOR) — confirmed receives + STILL-PENDING sends + outbound">
+      <bpmn:documentation>A hello counts even if the anchor never pockets it; inbound senders come from verified source blocks only. Anchor OUTBOUND sends bootstrap legacy accounts (scripts/anchor-bootstrap.ts).</bpmn:documentation>
+      <bpmn:incoming>Flow_Disc_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Disc_4</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Disc_Partition" name="partition: tokenIdFromHelloRep(rep) → pools; rest → users">
+      <bpmn:incoming>Flow_Disc_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Disc_5</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Disc_Hop2" name="hop 2: counterparties(each pool) → legacy buyers/sellers join users">
+      <bpmn:documentation>Terminates here: op links decode to opcodes, never to further accounts. Deterministic → every indexer converges on the same sorted set.</bpmn:documentation>
+      <bpmn:incoming>Flow_Disc_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Disc_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Disc_Done" name="participant set (users + pool→token map)">
+      <bpmn:incoming>Flow_Disc_6</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Disc_1" sourceRef="Event_Disc_Start" targetRef="Task_Disc_UserHello"/>
+    <bpmn:sequenceFlow id="Flow_Disc_2" sourceRef="Task_Disc_UserHello" targetRef="Task_Disc_PoolHello"/>
+    <bpmn:sequenceFlow id="Flow_Disc_3" sourceRef="Task_Disc_PoolHello" targetRef="Task_Disc_Hop1"/>
+    <bpmn:sequenceFlow id="Flow_Disc_4" sourceRef="Task_Disc_Hop1" targetRef="Task_Disc_Partition"/>
+    <bpmn:sequenceFlow id="Flow_Disc_5" sourceRef="Task_Disc_Partition" targetRef="Task_Disc_Hop2"/>
+    <bpmn:sequenceFlow id="Flow_Disc_6" sourceRef="Task_Disc_Hop2" targetRef="Event_Disc_Done"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Disc">
+    <bpmndi:BPMNPlane id="BPMNPlane_Disc" bpmnElement="Process_Disc">
+      <bpmndi:BPMNShape id="Shape_Lane_Disc_Reg" bpmnElement="Lane_Disc_Reg" isHorizontal="true"><dc:Bounds x="30" y="30" width="1240" height="150"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Disc_Indexer" bpmnElement="Lane_Disc_Indexer" isHorizontal="true"><dc:Bounds x="30" y="180" width="1240" height="170"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Disc_Start" bpmnElement="Event_Disc_Start"><dc:Bounds x="60" y="85" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Disc_UserHello" bpmnElement="Task_Disc_UserHello"><dc:Bounds x="150" y="73" width="330" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Disc_PoolHello" bpmnElement="Task_Disc_PoolHello"><dc:Bounds x="540" y="73" width="380" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Disc_Hop1" bpmnElement="Task_Disc_Hop1"><dc:Bounds x="90" y="235" width="380" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Disc_Partition" bpmnElement="Task_Disc_Partition"><dc:Bounds x="510" y="235" width="310" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Disc_Hop2" bpmnElement="Task_Disc_Hop2"><dc:Bounds x="860" y="235" width="330" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Disc_Done" bpmnElement="Event_Disc_Done"><dc:Bounds x="1060" y="310" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Disc_1" bpmnElement="Flow_Disc_1"><di:waypoint x="96" y="103"/><di:waypoint x="150" y="103"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Disc_2" bpmnElement="Flow_Disc_2"><di:waypoint x="480" y="103"/><di:waypoint x="540" y="103"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Disc_3" bpmnElement="Flow_Disc_3"><di:waypoint x="730" y="133"/><di:waypoint x="280" y="235"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Disc_4" bpmnElement="Flow_Disc_4"><di:waypoint x="470" y="265"/><di:waypoint x="510" y="265"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Disc_5" bpmnElement="Flow_Disc_5"><di:waypoint x="820" y="265"/><di:waypoint x="860" y="265"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Disc_6" bpmnElement="Flow_Disc_6"><di:waypoint x="1025" y="295"/><di:waypoint x="1078" y="310"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>

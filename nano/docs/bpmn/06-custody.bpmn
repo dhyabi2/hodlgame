@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+  xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+  id="Definitions_custody"
+  targetNamespace="https://holdfun.io/bpmn">
+
+  <!-- ======================================================================
+  Flow 06 — Custody: TODAY (single-key + policy guardian) and the FROST plan
+  ======================================================================
+  HONESTY NOTE (supersedes the old "2-of-3 multisig" model): Nano state
+  blocks carry exactly ONE ed25519-blake2b signature — the earlier
+  `signatures`-array path could never settle on-chain and was removed.
+  Today the pool key alone signs (bounded operationally: the sweep asserts
+  chain-derived pool == custody pool and refuses mismatched tokens; the
+  guardian, when configured, acts as a POLICY approver, not a cryptographic
+  cosigner). The custody roadmap (docs/TRUSTLESS-ROADMAP.md W1) lifts a
+  PRODUCTION blake2b-FROST 2-of-3 from the founder's BlackBird/VELA project:
+  dealerless DKG, one aggregate signature valid on-chain, and — the key
+  adoption — COSIGNER-AS-VERIFIER: each signer independently re-derives the
+  expected payout from its own deterministic replay before releasing a share.
+  Shamir 2-of-3 seed shares (lib/shamir.ts) cover succession meanwhile.
+  ====================================================================== -->
+
+  <bpmn:process id="Process_Custody" name="Payout custody (today + FROST target)" isExecutable="false">
+
+    <bpmn:laneSet id="LaneSet_Cust">
+      <bpmn:lane id="Lane_Cust_Sweeper" name="Sweeper (proposes payouts)">
+        <bpmn:flowNodeRef>Event_Cust_Start</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Cust_Assert</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Cust_Build</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Gateway_Cust_Mode</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Cust_Single</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Cust_Broadcast</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Event_Cust_Done</bpmn:flowNodeRef>
+      </bpmn:lane>
+      <bpmn:lane id="Lane_Cust_Signers" name="FROST signers (roadmap: any 2 of 3)">
+        <bpmn:flowNodeRef>Task_Cust_Verify</bpmn:flowNodeRef>
+        <bpmn:flowNodeRef>Task_Cust_Frost</bpmn:flowNodeRef>
+      </bpmn:lane>
+    </bpmn:laneSet>
+
+    <bpmn:startEvent id="Event_Cust_Start" name="obligations due">
+      <bpmn:outgoing>Flow_Cust_1</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <bpmn:serviceTask id="Task_Cust_Assert" name="assert chainDerivedPool(tokenId) == custodyPool(tokenId); skip mismatches">
+      <bpmn:documentation>server/operator.ts — a creator who seeded a self-controlled "pool" gets a deterministic ledger but no custody service (and a UI flag).</bpmn:documentation>
+      <bpmn:incoming>Flow_Cust_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cust_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Cust_Build" name="build payout block: canonical obligation order, frontier-chained">
+      <bpmn:documentation>Deterministic construction → concurrent sweepers propose IDENTICAL blocks (duplicate process is a no-op).</bpmn:documentation>
+      <bpmn:incoming>Flow_Cust_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cust_3</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:exclusiveGateway id="Gateway_Cust_Mode" name="custody mode">
+      <bpmn:incoming>Flow_Cust_3</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cust_4</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Cust_5</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <bpmn:serviceTask id="Task_Cust_Single" name="TODAY: signPayout (pool key; optional guardian policy approval first)">
+      <bpmn:documentation>server/custody.ts + guardian.ts — the guardian re-verifies target/amount and can refuse, but the pool key alone is cryptographically sufficient. Loss bounded by planned hot/cold caps.</bpmn:documentation>
+      <bpmn:incoming>Flow_Cust_4</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cust_6</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Cust_Verify" name="ROADMAP: each signer re-derives the payout from ITS OWN replay">
+      <bpmn:documentation>Cosigner-as-verifier (BlackBird/VELA pattern): settlement is deterministic (07), so a signer recomputes entitlement − alreadySent itself and refuses anything else. Threshold signing splits the key; this check stops a compromised coordinator.</bpmn:documentation>
+      <bpmn:incoming>Flow_Cust_5</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cust_7</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Cust_Frost" name="ROADMAP: blake2b-FROST 2-of-3 → ONE aggregate signature valid on-chain">
+      <bpmn:documentation>Dealerless DKG (key never assembled); RFC 9591 with BLAKE2b-512 challenge matching Nano's verifier; production-proven in BlackBird/VELA.</bpmn:documentation>
+      <bpmn:incoming>Flow_Cust_7</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cust_8</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:serviceTask id="Task_Cust_Broadcast" name="broadcastPayout (rpc process)">
+      <bpmn:incoming>Flow_Cust_6</bpmn:incoming>
+      <bpmn:incoming>Flow_Cust_8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Cust_9</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <bpmn:endEvent id="Event_Cust_Done" name="payout on-chain">
+      <bpmn:incoming>Flow_Cust_9</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <bpmn:sequenceFlow id="Flow_Cust_1" sourceRef="Event_Cust_Start" targetRef="Task_Cust_Assert"/>
+    <bpmn:sequenceFlow id="Flow_Cust_2" sourceRef="Task_Cust_Assert" targetRef="Task_Cust_Build"/>
+    <bpmn:sequenceFlow id="Flow_Cust_3" sourceRef="Task_Cust_Build" targetRef="Gateway_Cust_Mode"/>
+    <bpmn:sequenceFlow id="Flow_Cust_4" sourceRef="Gateway_Cust_Mode" targetRef="Task_Cust_Single" name="today"/>
+    <bpmn:sequenceFlow id="Flow_Cust_5" sourceRef="Gateway_Cust_Mode" targetRef="Task_Cust_Verify" name="FROST (W1)"/>
+    <bpmn:sequenceFlow id="Flow_Cust_6" sourceRef="Task_Cust_Single" targetRef="Task_Cust_Broadcast"/>
+    <bpmn:sequenceFlow id="Flow_Cust_7" sourceRef="Task_Cust_Verify" targetRef="Task_Cust_Frost"/>
+    <bpmn:sequenceFlow id="Flow_Cust_8" sourceRef="Task_Cust_Frost" targetRef="Task_Cust_Broadcast"/>
+    <bpmn:sequenceFlow id="Flow_Cust_9" sourceRef="Task_Cust_Broadcast" targetRef="Event_Cust_Done"/>
+
+  </bpmn:process>
+
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Cust">
+    <bpmndi:BPMNPlane id="BPMNPlane_Cust" bpmnElement="Process_Custody">
+      <bpmndi:BPMNShape id="Shape_Lane_Cust_Sweeper" bpmnElement="Lane_Cust_Sweeper" isHorizontal="true"><dc:Bounds x="30" y="30" width="1280" height="190"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Lane_Cust_Signers" bpmnElement="Lane_Cust_Signers" isHorizontal="true"><dc:Bounds x="30" y="220" width="1280" height="150"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNShape id="Shape_Cust_Start" bpmnElement="Event_Cust_Start"><dc:Bounds x="60" y="95" width="36" height="36"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Cust_Assert" bpmnElement="Task_Cust_Assert"><dc:Bounds x="140" y="83" width="300" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Cust_Build" bpmnElement="Task_Cust_Build"><dc:Bounds x="480" y="83" width="280" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Cust_Mode" bpmnElement="Gateway_Cust_Mode" isMarkerVisible="true"><dc:Bounds x="800" y="88" width="50" height="50"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Cust_Single" bpmnElement="Task_Cust_Single"><dc:Bounds x="890" y="45" width="330" height="55"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Cust_Verify" bpmnElement="Task_Cust_Verify"><dc:Bounds x="140" y="265" width="330" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Cust_Frost" bpmnElement="Task_Cust_Frost"><dc:Bounds x="520" y="265" width="360" height="60"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Cust_Broadcast" bpmnElement="Task_Cust_Broadcast"><dc:Bounds x="950" y="130" width="200" height="55"/></bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Cust_Done" bpmnElement="Event_Cust_Done"><dc:Bounds x="1210" y="140" width="36" height="36"/></bpmndi:BPMNShape>
+
+      <bpmndi:BPMNEdge id="Edge_Cust_1" bpmnElement="Flow_Cust_1"><di:waypoint x="96" y="113"/><di:waypoint x="140" y="113"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Cust_2" bpmnElement="Flow_Cust_2"><di:waypoint x="440" y="113"/><di:waypoint x="480" y="113"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Cust_3" bpmnElement="Flow_Cust_3"><di:waypoint x="760" y="113"/><di:waypoint x="800" y="113"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Cust_4" bpmnElement="Flow_Cust_4"><di:waypoint x="825" y="88"/><di:waypoint x="890" y="72"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Cust_5" bpmnElement="Flow_Cust_5"><di:waypoint x="825" y="138"/><di:waypoint x="305" y="265"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Cust_6" bpmnElement="Flow_Cust_6"><di:waypoint x="1055" y="100"/><di:waypoint x="1050" y="130"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Cust_7" bpmnElement="Flow_Cust_7"><di:waypoint x="470" y="295"/><di:waypoint x="520" y="295"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Cust_8" bpmnElement="Flow_Cust_8"><di:waypoint x="880" y="295"/><di:waypoint x="1000" y="185"/></bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Cust_9" bpmnElement="Flow_Cust_9"><di:waypoint x="1150" y="158"/><di:waypoint x="1210" y="158"/></bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+
+</bpmn:definitions>
