@@ -12,6 +12,13 @@ everything lands on `main`.
   quick-fills, live quote (output / min-received / price impact), keyboard hotkeys
   (B/S/Enter), AMM depth curve, live trade tape, holders with top-10 concentration,
   and an inline position card (stake/unstake/claim).
+- **Rich token price chart** — Line/Candles toggle, timeframe selector
+  (5m–1d), a volume pane, and a crosshair OHLC legend. The chart is now built
+  once and only its data updates on the market poll, so zoom/pan survives
+  refreshes instead of the chart being torn down every few seconds.
+- **Min-clicks UX** — in-place unlock sheet (locked actions no longer bounce to
+  the Wallet tab), deep links (`#t=<id>` / `#tab=`), one-tap buy amounts, and a
+  remembered 1% default slippage.
 - **Shared client trading lib** (`web/app/lib/trade.ts`) — one source of truth for
   on-chain-matching quotes and chain writes, used by the app and the terminal.
 - **Wallet: receive + seed backup** — connected wallet now shows a live XNO

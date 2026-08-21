@@ -1099,7 +1099,7 @@ function TokenDetail({
           </div>
         </div>
         {token.series.length >= 2 ? (
-          <PriceChart series={token.series} />
+          <PriceChart series={token.series} trades={token.trades} decimals={token.decimals} symbol={token.symbol} />
         ) : (
           <div className="h-40 flex items-center justify-center text-zinc-600 text-sm">trades chart the price</div>
         )}
