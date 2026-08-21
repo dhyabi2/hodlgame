@@ -160,10 +160,35 @@ of the already-replayed history (capital-at-risk over time, tokens graduated,
 realized rebates, burn contribution). Any third party recomputes the exact
 leaderboard from public blocks.
 
-**Sybil/collusion.** Score weights **capital-at-risk and realized outcomes**, not
-raw counts; a sybil must fund each identity and still pays the exit tax. Wash
-volume is penalized by fees and can be down-weighted (net new holders, not
-self-trades).
+**Sybil/collusion.** This is the part that is *easy to get wrong*, so it is
+worth stating precisely. Naive boards (rank by raw volume / raw holder count /
+mark-to-market price) are **cheap to fake on a feeless chain** — wash trading,
+dust-sybil holder crowds, and thin-pool price spikes all cost ~nothing. The
+implemented boards (`server/leaderboards.ts`) are hardened to rank only on
+things that cost real, at-risk capital:
+
+- **Value = redeemable, not mark price.** A holder's "value" is what the pool
+  would actually pay to sell their balance now (constant product), so a fake high
+  price on a dry pool redeems to ~0 and buys no whale rank.
+- **Creator size = real pooled XNO**, never market cap — fake price contributes
+  nothing; only XNO actually locked in pools counts.
+- **Liquidity gate.** Zero-pool tokens are untradeable and free to spawn, so they
+  are excluded from every economic board (volume/gainers/holders/new).
+- **Holder rank = significant holders**, counted from the top-holders set (dust
+  accounts holding 1 raw never enter it), not the raw holder count.
+- **Volume board ordered by distinct traders first**, then volume — a single
+  account looping buy/sell can't climb it; adding fake traders now costs real XNO
+  per wallet (capital-gated).
+
+**Residuals (honest).** Two vectors are reduced but not eliminated without more:
+(a) a determined attacker can still fund N wallets to be N distinct traders/
+significant holders — but this is now *capital-gated* (each wallet must buy real
+XNO), not free; the **launch bond (#5)** and **referral binding (#1)** raise that
+cost further. (b) The *displayed* raw holder count can still include dust; boards
+never rank on it, but if we want a dust-free displayed count we need an
+indexer-level "holders above a value floor", which requires the full holder set
+(not just top-N). Tracked as future work. The rule stands: **no board ranks on a
+free-to-fake metric; every ranking signal is gated behind real, at-risk XNO.**
 
 **Virality.** Leaderboards and badges are inherently shareable and create
 aspirational entry ("I want that badge / that rank").
