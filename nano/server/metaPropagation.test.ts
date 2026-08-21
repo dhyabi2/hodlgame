@@ -14,7 +14,7 @@ import { strict as assert } from "node:assert";
 import * as nanocurrency from "nanocurrency";
 import { metaFieldsHash, metaSignDigest } from "../core/metaAuth";
 import { verifyMetaSignature, decideMetaUpdate } from "./metaAuth";
-import { sanitizeMeta } from "./validate";
+import { sanitizeMeta, metaHasRequired } from "./validate";
 import { EMPTY_META } from "./tokens";
 
 const SEED = "3".repeat(64);
@@ -112,5 +112,19 @@ ok(!!view.telegram, "telegram SocialLink renders");
 const bare = { tokenId: TOKEN, ...toViewFields(EMPTY_META) };
 ok(tokName(bare) === `Coin ${TOKEN.slice(0, 6)}`, "nameless token falls back to Coin <id6>");
 ok(tokSym(bare) === TOKEN.slice(0, 4).toUpperCase(), "symbol-less token falls back to id4");
+
+// ── 5. Required-field validation: empty / invalid name or symbol is rejected ──
+// Mirrors the create form's pre-launch guard: it validates the SANITIZED values,
+// so a blank field OR a symbol made only of invalid characters never launches.
+console.log("5. name + symbol are required (blank/invalid rejected before launch):");
+const req = (form: any) => {
+  const m = sanitizeMeta(form);
+  return { m, valid: !!m.name && !!m.symbol && metaHasRequired(m) };
+};
+ok(!req({ ...FORM, name: "" }).valid, "empty name rejected");
+ok(!req({ ...FORM, symbol: "" }).valid, "empty symbol rejected");
+ok(!req({ ...FORM, name: "   " }).valid, "whitespace-only name rejected");
+ok(!req({ ...FORM, symbol: "!!!@@@" }).valid, "symbol of only invalid chars sanitizes to empty → rejected");
+ok(req(FORM).valid, "a fully-filled form passes");
 
 console.log(`\n✅ metadata propagation e2e: ${pass} field-level assertions passed`);

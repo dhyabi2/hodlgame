@@ -10,7 +10,7 @@ import { metaFieldsHash, metaSignDigest } from "../core/metaAuth";
 import { commentSignDigest } from "../core/commentAuth";
 import { ANCHOR_PUB } from "../core/anchor";
 import { encodeFragLinks } from "../core/fraglink";
-import { sanitizeMeta } from "../server/validate";
+import { sanitizeMeta, sanitizeSymbol } from "../server/validate";
 import type { Op } from "../core/ops";
 import { Sparkline } from "./components/Sparkline";
 import Explorer from "./components/Explorer";
@@ -1853,10 +1853,10 @@ function EditCoinInfo({ token, keys, say }: { token: Token; keys: Keys; say: (s:
   }
 
   async function save() {
-    if (!name.trim() || !symbol.trim()) return say("name and symbol are required");
+    const meta = sanitizeMeta({ name, symbol, decimals: token.decimals, image, description, website, twitter, telegram });
+    if (!meta.name || !meta.symbol) return say("name and symbol are required");
     setBusy(true);
     try {
-      const meta = sanitizeMeta({ name, symbol, decimals: token.decimals, image, description, website, twitter, telegram });
       const seq = Date.now();
       const digest = metaSignDigest(token.tokenId, seq, "update", metaFieldsHash(meta));
       const signature = nanocurrency.signBlock({ hash: digest, secretKey: keys.secretKey });
@@ -1928,6 +1928,7 @@ function CreateToken({
   const [telegram, setTelegram] = useState("");
   const [image, setImage] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [showReq, setShowReq] = useState(false); // flag the required name/symbol fields on a failed submit
 
   async function upload(file: File) {
     if (!file.type.startsWith("image/")) return say("please choose an image file");
@@ -1962,19 +1963,27 @@ function CreateToken({
     // 2^53. `supply` is a digits-only string, so BigInt(supply) is exact.
     const whole = /^\d+$/.test(supply.trim()) ? BigInt(supply.trim()) : 0n;
     const rawSupply = whole * 10n ** BigInt(decimals);
-    if (!name.trim() || !symbol.trim()) return say("name and symbol are required");
+    // Name + symbol are REQUIRED. Validate the SANITIZED values (the same ones
+    // the server verifies and stores) BEFORE any on-chain block, so the form can
+    // never mint a nameless coin — a symbol of only invalid chars sanitizes to
+    // "" and is rejected here, not silently launched.
+    const meta = sanitizeMeta({ name, symbol, decimals, image, description, website, twitter, telegram });
+    if (!meta.name || !meta.symbol) {
+      setShowReq(true);
+      return say("name and symbol are required");
+    }
+    setShowReq(false);
     if (rawSupply <= 0n) return say("enter supply");
     if (whole > 1_000_000_000_000_000n) return say("supply too large (max 1 quadrillion tokens)");
     setBusy(true);
     try {
       const hash = await submitBlock(
-        encodeOpLink("", { kind: "launch", supply: rawSupply, name, symbol, decimals, image: "" }),
+        encodeOpLink("", { kind: "launch", supply: rawSupply, name: meta.name, symbol: meta.symbol, decimals, image: "" }),
         1n
       );
       const tokenId = tokenIdFromLaunchHash(hash);
       // Sign the SANITIZED fields (the server verifies against its own
       // sanitized copy) with the launch key — only the creator can publish.
-      const meta = sanitizeMeta({ name, symbol, decimals, image, description, website, twitter, telegram });
       const seq = Date.now();
       const digest = metaSignDigest(tokenId, seq, "update", metaFieldsHash(meta));
       const signature = nanocurrency.signBlock({ hash: digest, secretKey: keys.secretKey });
@@ -2015,9 +2024,20 @@ function CreateToken({
         <span className="text-[11px] text-neutral-400">or a URL below</span>
       </div>
       <input className={inputC} placeholder="image URL (optional)" value={image} onChange={(e) => setImage(e.target.value)} />
-      <div className="grid grid-cols-2 gap-2">
-        <input className={inputC} placeholder="name" value={name} onChange={(e) => setName(e.target.value)} />
-        <input className={inputC} placeholder="symbol" value={symbol} onChange={(e) => setSymbol(e.target.value)} />
+      <div>
+        <div className="grid grid-cols-2 gap-2">
+          <input
+            className={inputC + (showReq && !name.trim() ? " ring-1 ring-red-500" : "")}
+            placeholder="name *" value={name}
+            onChange={(e) => { setName(e.target.value); setShowReq(false); }} />
+          <input
+            className={inputC + (showReq && !sanitizeSymbol(symbol) ? " ring-1 ring-red-500" : "")}
+            placeholder="symbol *" value={symbol}
+            onChange={(e) => { setSymbol(e.target.value); setShowReq(false); }} />
+        </div>
+        {showReq && (
+          <p className="mt-1 text-[11px] font-bold text-red-600">Name and symbol are required.</p>
+        )}
       </div>
       <div>
         <label className="text-[11px] text-neutral-500">Total supply — how many tokens will ever exist</label>
