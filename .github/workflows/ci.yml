@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Nano L2 test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: nano/package-lock.json
+      - run: npm ci
+        working-directory: nano
+      - run: npm test
+        working-directory: nano
+
+  vendored-drift:
+    name: nano/* vs nano/web/* drift gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # nano/web vendors these trees; they are synced by hand. Drift means the
+      # audited code is not the deployed code — block the merge.
+      - run: |
+          status=0
+          for d in core client indexer lib server; do
+            if ! diff -rq "nano/$d" "nano/web/$d"; then
+              echo "::error::nano/$d and nano/web/$d have drifted — re-sync the vendored copy"
+              status=1
+            fi
+          done
+          exit $status
+
+  web-build:
+    name: Next.js build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: nano/web/package-lock.json
+      - run: npm ci
+        working-directory: nano/web
+      - run: npx next build
+        working-directory: nano/web
