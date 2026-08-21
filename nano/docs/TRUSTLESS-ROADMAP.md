@@ -1,5 +1,14 @@
 # Trustless Continuity Roadmap
 
+> **Status (2026-08-21):** SHIPPED — W2 (chain-derived settlement), W3
+> (fragment links), W5 (ipfs:// images), W7 (anchor discovery), W8
+> (chain-derived pools + verify CLI), W9 (RPC failover + local block
+> verification), W10 (dissolved by W2/W4), plus signed comments, LICENSE,
+> and CI with vendored-drift gate from W6. REMAINING — W1 custody ladder
+> (needs steward selection), W4 residue (epoch snapshot anchors,
+> makeImmutable/setAuthority on-chain anchors), W6 org/second-owner steps
+> (account owner only).
+
 Goal: HoldFun keeps working if the founder — or any single person, secret, or
 company account — disappears. Each section is one finding from the continuity
 audit, the candidate fixes that were brainstormed and evaluated, the winning

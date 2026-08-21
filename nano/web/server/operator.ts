@@ -4,8 +4,8 @@
 import { MultiIndexer } from "../indexer/multiIndexer";
 import { NanoRpcSource } from "../indexer/blockSource";
 import { tokenPoolKeys } from "./custody";
-import { receivePoolsMulti, payoutSellsMulti, readPoolDeposits, refundRejectedBuys } from "./sweep";
-import { creditedBuys, computeRefunds } from "./reconcile";
+import { receivePoolsMulti, settlePoolNetted } from "./sweep";
+import { creditedBuys } from "./reconcile";
 import { analyze } from "./analytics";
 import { commitResolver } from "./commits";
 import { loadNanoRpcKey } from "../lib/rpc";
@@ -87,19 +87,19 @@ export async function runSweep(onlyToken: string | null) {
 
     const received = await receivePoolsMulti(key, masterSeed, targets);
 
-    const serviceable = new Set(targets);
-    const payouts = sellPayouts.filter((p) => serviceable.has(p.tokenId));
-    const { paid, skipped } = await payoutSellsMulti(key, masterSeed, payouts, []);
-
-    const refunds: string[] = [];
+    // Chain-derived settlement (settled.ts): sells + refunds net per recipient
+    // against the pool's own outgoing history — no private ledgers, safe under
+    // crashes and concurrent sweepers.
+    const paid: string[] = [];
+    let skipped = 0;
     for (const tokenId of targets) {
       const pool = tokenPoolKeys(masterSeed, tokenId);
-      const poolReceived = await readPoolDeposits(key, pool, tokenId);
-      const owed = computeRefunds(poolReceived, credits.get(tokenId) ?? new Map());
-      refunds.push(...(await refundRejectedBuys(key, pool, tokenId, owed)));
+      const r = await settlePoolNetted(key, pool, tokenId, sellPayouts, credits.get(tokenId) ?? new Map());
+      paid.push(...r.paid);
+      skipped += r.queued;
     }
 
-    return { received, paid, skipped, refunds };
+    return { received, paid, skipped, refunds: [] };
   } finally {
     sweeping = false;
   }

@@ -1,12 +1,12 @@
 // Sweep: the operator's trading engine.
 //
 // 1. receivePoolPending — accept incoming XNO (buys) into a pool account.
-// 2. payoutSellsMulti — broadcast per-token sell payouts (XNO out is computed
-//    exactly at each sell's execution point by `analyze`).
-// 3. refundRejectedBuys — return uncredited XNO from rejected/over-sent buys.
+// 2. settlePoolNetted — pay sells + refunds via CHAIN-DERIVED netting
+//    (per recipient: entitlement − already-sent, read from the pool's own
+//    chain). No private ledgers; crash- and concurrency-safe by construction.
 //
-// Paid sells and deposits are tracked in a durable store so a crash doesn't
-// double-pay; ledger writes are atomic.
+// payoutSellsMulti / refundRejectedBuys / readPoolDeposits further down are
+// the LEGACY store-ledger path, kept only for transition tooling.
 
 import { tokenPoolKeys, signPayout, signPayoutWithSignatures, remoteCosign, broadcastPayout, type PoolKeys, type Payout } from "./custody";
 import { computeRefunds } from "./reconcile";
@@ -14,6 +14,8 @@ import { loadJson, saveJson } from "./store";
 import type { SellPayout } from "./analytics";
 import { nanoRpc, SEND_DIFFICULTY } from "../lib/rpc";
 import { ANCHOR_PUB, poolHelloRepAddress } from "../core/anchor";
+import { NanoRpcSource, verifyFetchedBlock, type NanoBlock } from "../indexer/blockSource";
+import { poolOutgoingByRecipient, entitlementsFor, netObligations } from "./settled";
 
 async function loadPaid(): Promise<Set<string>> {
   return new Set((await loadJson<string[]>("paid")) ?? []);
@@ -65,19 +67,9 @@ export async function receivePoolPending(
   let balance = BigInt(info?.balance ?? "0");
   const rep = info?.representative ?? pool.address;
 
-  const ledger = await loadDeposits();
   for (const srcHash of blocks) {
     const srcInfo = await nanoRpc(rpcKey, { action: "block_info", hash: srcHash, json_block: true });
     const amount = BigInt(srcInfo.amount);
-    if (!ledger[srcHash]) {
-      ledger[srcHash] = {
-        sender: String(srcInfo.block_account ?? srcInfo.contents?.account ?? ""),
-        amount: String(amount),
-        tokenId,
-      };
-    } else if (!ledger[srcHash].tokenId) {
-      ledger[srcHash].tokenId = tokenId; // backfill legacy entries
-    }
     const newBalance = (balance + amount).toString();
     const work = (await nanoRpc(rpcKey, {
       action: "work_generate",
@@ -98,7 +90,6 @@ export async function receivePoolPending(
     frontier = r.hash;
     balance = balance + amount;
   }
-  await saveDeposits(ledger);
   return hashes;
 }
 
@@ -300,4 +291,94 @@ export async function refundRejectedBuys(
     info = { ...info, frontier: hash, balance: balance.toString() };
   }
   return hashes;
+}
+// ── Chain-derived settlement (roadmap W2/W4) ────────────────────────────────
+// The functions above (payoutSellsMulti / readPoolDeposits / refundRejectedBuys
+// and their private paid/refunded/deposits ledgers) are the LEGACY path, kept
+// for transition tooling only. The functions below settle from chain state
+// alone — see server/settled.ts for the netting rule.
+
+/** Sender → Σ XNO deposited into the pool, derived from the pool's own chain
+ * (confirmed receives + still-pending sends). Every source block is verified
+ * locally before its sender/amount is trusted. */
+export async function readPoolDepositsFromChain(
+  rpcKey: string,
+  pool: PoolKeys,
+  poolBlocks: NanoBlock[]
+): Promise<Map<string, bigint>> {
+  const sourceHashes = poolBlocks
+    .filter((b) => (b.subtype === "receive" || b.subtype === "open") && /^[0-9a-fA-F]{64}$/.test(b.link))
+    .map((b) => b.link);
+  const pend = await nanoRpc(rpcKey, { action: "pending", account: pool.address, count: 500 }).catch(() => ({}));
+  const all = [...new Set([...sourceHashes, ...(((pend as any).blocks ?? []) as string[])])];
+
+  const out = new Map<string, bigint>();
+  for (let i = 0; i < all.length; i += 200) {
+    const chunk = all.slice(i, i + 200);
+    const info = (await nanoRpc(rpcKey, { action: "blocks_info", hashes: chunk, json_block: true })) as any;
+    for (const h of chunk) {
+      const b = info.blocks?.[h];
+      if (!b?.block_account) continue;
+      if (!verifyFetchedBlock(h, b)) continue;
+      const amount = BigInt(b.amount ?? "0");
+      if (amount <= 0n) continue;
+      out.set(b.block_account, (out.get(b.block_account) ?? 0n) + amount);
+    }
+  }
+  return out;
+}
+
+/**
+ * Settle one pool from chain state: pay each recipient
+ * max(0, sells+refunds − alreadySent). No private ledgers; a concurrent or
+ * restarted sweeper re-derives identical obligations in identical order, so
+ * duplicate broadcasts collapse to the same blocks. `queued` counts
+ * obligations left unpaid this round (pool balance short / broadcast failed) —
+ * they simply remain owed and retry next sweep.
+ */
+export async function settlePoolNetted(
+  rpcKey: string,
+  pool: PoolKeys,
+  tokenId: string,
+  sells: SellPayout[],
+  credits: Map<string, bigint>
+): Promise<{ paid: string[]; queued: number }> {
+  const src = new NanoRpcSource(rpcKey);
+  const poolBlocks = await src.listBlocks(pool.address);
+  const poolReceived = await readPoolDepositsFromChain(rpcKey, pool, poolBlocks);
+  const refunds = computeRefunds(poolReceived, credits);
+  const entitled = entitlementsFor(tokenId, sells, refunds);
+  const obligations = netObligations(entitled, poolOutgoingByRecipient(poolBlocks));
+
+  const paid: string[] = [];
+  let queued = 0;
+  if (obligations.length === 0) return { paid, queued };
+
+  const info = await nanoRpc(rpcKey, { action: "account_info", account: pool.address, representative: "true" }).catch(() => null);
+  if (!info?.frontier) return { paid, queued: obligations.length };
+  let frontier = info.frontier as string;
+  let balance = BigInt(info.balance);
+
+  for (const ob of obligations) {
+    if (ob.amountRaw > balance) {
+      queued++;
+      continue; // pool can't cover it yet — stays owed, retried next sweep
+    }
+    try {
+      const block = await signGuardedPayout(rpcKey, pool, tokenId, {
+        to: ob.recipient,
+        amountRaw: ob.amountRaw.toString(),
+        frontier,
+        balance: balance.toString(),
+        representative: info.representative,
+      }, []);
+      const hash = await broadcastPayout(rpcKey, block);
+      paid.push(hash);
+      frontier = hash;
+      balance -= ob.amountRaw;
+    } catch {
+      queued++; // chain state unchanged → same obligation re-derives next sweep
+    }
+  }
+  return { paid, queued };
 }
