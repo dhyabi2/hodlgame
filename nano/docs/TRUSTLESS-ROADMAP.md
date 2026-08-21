@@ -4,10 +4,12 @@
 > (fragment links), W5 (ipfs:// images), W7 (anchor discovery), W8
 > (chain-derived pools + verify CLI), W9 (RPC failover + local block
 > verification), W10 (dissolved by W2/W4), plus signed comments, LICENSE,
-> and CI with vendored-drift gate from W6. REMAINING — W1 custody
-> (needs steward selection), W4 residue (makeImmutable/setAuthority on-chain
-> anchors), W6 org/second-owner steps (account owner only). Epoch snapshot
-> anchoring + Shamir seed tooling shipped as zero-risk custody prep.
+> and CI with vendored-drift gate from W6. REMAINING — W1 custody only
+> (needs steward selection; see revision below), plus W6 org/second-owner
+> steps (account owner only). W4 is COMPLETE: epoch snapshot anchoring,
+> Shamir seed tooling, and on-chain makeImmutable/setAuthority anchors
+> (core/metaAnchor.ts — authority state is now a pure fold over chain data,
+> and the tokens route gates freeze/transfer on the anchor existing).
 >
 > **W1 revision (2026-08-21 audit of ~/verifyXNOPrivacyProtocol):** the
 > founder's BlackBird/VELA project already runs a PRODUCTION blake2b-FROST
