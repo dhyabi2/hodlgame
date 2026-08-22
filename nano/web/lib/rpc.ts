@@ -240,7 +240,14 @@ export function warmWork(key: string, root: string, difficulty: string = SEND_DI
  * work_generate is served by the layered work service above. */
 export async function nanoRpc(key: string, body: Record<string, unknown>): Promise<any> {
   if (body.action === "work_generate" && typeof body.hash === "string") {
-    const difficulty = typeof body.difficulty === "string" ? body.difficulty : SEND_DIFFICULTY;
+    // Clamp the caller-supplied difficulty. work_generate is whitelisted on the
+    // public /api/rpc proxy, and local PoW cost is EXPONENTIAL in the leading
+    // difficulty bits — an unclamped value like "ffffffffffffffff" would spin
+    // every CPU indefinitely (event-loop wedge DoS). Accept only 16-hex, and
+    // never above the protocol's real send difficulty; anything else falls back
+    // to SEND_DIFFICULTY. Legitimate clients only ever ask for send/receive.
+    const raw = typeof body.difficulty === "string" && /^[0-9a-fA-F]{16}$/.test(body.difficulty) ? body.difficulty : SEND_DIFFICULTY;
+    const difficulty = BigInt("0x" + raw) > BigInt("0x" + SEND_DIFFICULTY) ? SEND_DIFFICULTY : raw;
     return generateWork(key, body.hash, difficulty);
   }
   return rawCall(key, body, TIMEOUT_MS);

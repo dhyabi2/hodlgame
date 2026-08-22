@@ -102,8 +102,6 @@ export function decideMetaUpdate(
   onchainCreator: string | null,
   now: number = Date.now()
 ): MetaDecision {
-  if (prev?.immutable) return { ok: false, code: 403, error: "metadata is immutable" };
-
   // seq is a client wall-clock (ms). Reject far-future values so an attacker
   // can't set seq = MAX_SAFE_INTEGER during the provisional window and lock
   // out every later real-time update.
@@ -120,6 +118,15 @@ export function decideMetaUpdate(
   // seq floor to 0 for that first authoritative write.
   const overridingProvisional =
     !prev?.authorityLocked && onchainCreator != null && u.account === onchainCreator && prev != null && prev.authority !== onchainCreator;
+
+  // Immutability is honored ONLY when it was set by the locked, chain-verified
+  // authority. A provisional (unlocked) row's immutable flag was set by whoever
+  // won the pre-indexing race — a squatter could otherwise freeze+deface a
+  // victim's token forever. The real on-chain creator overriding that
+  // provisional row is exempt and can reclaim + unfreeze it.
+  if (prev?.immutable && !overridingProvisional) {
+    return { ok: false, code: 403, error: "metadata is immutable" };
+  }
   const prevSeq = overridingProvisional ? 0 : prev?.seq ?? 0;
   if (u.seq <= prevSeq) return { ok: false, code: 409, error: "stale seq (replay?)" };
 

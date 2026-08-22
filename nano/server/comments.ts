@@ -59,9 +59,24 @@ export async function addComment(
   }
   const comment: Comment = { id, tokenId, account, text, time, signature };
   all.push(comment);
-  // Bound total storage: keep the most recent.
-  const MAX_COMMENTS = 20000;
-  const trimmed = all.length > MAX_COMMENTS ? all.slice(all.length - MAX_COMMENTS) : all;
+  // Bound storage PER TOKEN, not globally. A global most-recent trim let one
+  // token's flood (unlimited free keypairs can each sign their own spam) evict
+  // every other token's history. Trimming each token's thread independently
+  // means a spammer can only ever bury their OWN coin's comments.
+  const PER_TOKEN_MAX = 500; // commentsFor surfaces only the last 200 anyway
+  const GLOBAL_MAX = 200_000; // defense-in-depth ceiling; rarely binds
+  const byToken = new Map<string, Comment[]>();
+  for (const c of all) {
+    const arr = byToken.get(c.tokenId) ?? [];
+    arr.push(c);
+    byToken.set(c.tokenId, arr);
+  }
+  let trimmed: Comment[] = [];
+  for (const arr of byToken.values()) {
+    arr.sort((a, b) => a.time - b.time);
+    trimmed.push(...(arr.length > PER_TOKEN_MAX ? arr.slice(arr.length - PER_TOKEN_MAX) : arr));
+  }
+  if (trimmed.length > GLOBAL_MAX) trimmed = trimmed.slice(trimmed.length - GLOBAL_MAX);
   await saveJson("comments", trimmed);
   return { ok: true, comment };
 }
