@@ -1734,7 +1734,7 @@ function TokenDetail({
     if (!keys) return promptUnlock();
     const raw = toRaw(amount, 30);
     if (raw <= 0n) return say("enter XNO amount");
-    if (BigInt(token.poolXno) <= 0n) return say("not tradeable yet — the creator hasn't set a starting price");
+    if (BigInt(token.poolXno) <= 0n) return say(isCreator ? "set your starting price first — use the banner above (it's free, virtual reserve)" : "not tradeable yet — the creator hasn't set a starting price");
     const slip = clampSlippage(slippage);
     try {
       await ensureHello();
@@ -1941,6 +1941,25 @@ function TokenDetail({
         </a>
       </div>
 
+      {/* Creator's coin isn't tradeable until they set a starting price — a
+          prominent one-tap prompt so a freshly-launched coin never dead-ends
+          on the "no starting price" trade error. */}
+      {isCreator && BigInt(token.poolXno) <= 0n && (
+        <div className="rounded-none border border-white bg-neutral-950 p-4">
+          <p className="text-sm font-black text-white">One step left: set your starting price</p>
+          <p className="mt-1 text-[11px] text-neutral-400 leading-relaxed">
+            Your coin is launched but not tradeable yet. Set a starting price to open trading —
+            {token.direct ? " it's a virtual reserve, so no money leaves your wallet." : " seed the pool to make it tradeable."}
+          </p>
+          <button
+            className="mt-3 rounded-none bg-white px-4 py-2 text-xs font-black uppercase tracking-wide text-black hover:bg-neutral-200"
+            onClick={() => { setTab("trade"); setTimeout(() => document.getElementById("seed-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }), 50); }}
+          >
+            Set starting price →
+          </button>
+        </div>
+      )}
+
       {/* Title-sequence band: full-color art as blurred/dimmed ambient backdrop,
           sharp square poster + banking-grade numbers on effectively solid black. */}
       <div className="relative overflow-hidden rounded-none bg-neutral-950 px-5 sm:px-8 py-8">
@@ -2070,9 +2089,9 @@ function TokenDetail({
       {isCreator && keys && <EditCoinInfo token={token} keys={keys} say={say} />}
 
       {isCreator && (
-        <div className="rounded-none border border-neutral-600 bg-neutral-950 p-5 space-y-2">
+        <div id="seed-panel" className="rounded-none border border-neutral-600 bg-neutral-950 p-5 space-y-2">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-bold text-white">Seed / add liquidity <span className="text-[11px] font-normal text-neutral-500">creator</span></p>
+            <p className="text-sm font-bold text-white">{token.direct ? "Set starting price" : "Seed / add liquidity"} <span className="text-[11px] font-normal text-neutral-500">creator</span></p>
             <p className="text-[11px] text-neutral-500">pool {fmtXno(token.poolXno)} XNO · treasury {fmtTok(token.treasury, token.decimals)}</p>
           </div>
           {BigInt(token.poolXno) <= 0n && (
