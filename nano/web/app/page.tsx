@@ -2416,6 +2416,27 @@ function TradePanel({
           })}
         </div>
       )}
+      {/* Sell quick-fills: % of your holding, so it's one tap to sell part or all
+          of your bag. Disabled when you hold none of the coin. */}
+      {side === "sell" && (
+        <div className="grid grid-cols-4 gap-2">
+          {[10, 25, 50, 100].map((p) => {
+            const bal = BigInt(myHolding?.balanceRaw ?? "0");
+            const amt = (bal * BigInt(p)) / 100n;
+            return (
+              <button
+                key={p}
+                disabled={bal <= 0n}
+                title={bal <= 0n ? `you hold no ${tokSym(token)}` : `${p}% of your ${tokSym(token)}`}
+                className="rounded-none border border-neutral-800 py-1.5 text-xs font-bold text-neutral-400 hover:border-white hover:text-white disabled:opacity-40 disabled:hover:border-neutral-800 disabled:hover:text-neutral-300"
+                onClick={() => setAmount(fmtTok(amt.toString(), token.decimals))}
+              >
+                {p === 100 ? "MAX" : `${p}%`}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {quote && (
         <div className="rounded-none border border-neutral-800 bg-neutral-950 p-3 space-y-1 text-[11px]">
           <div className="flex justify-between">
