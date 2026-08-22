@@ -377,6 +377,8 @@ export default function Home() {
     if (!selectedId) { setDetail(null); setDetailMissing(false); }
     else setDetailMissing(false);
   }, [selectedId]);
+  const [detailTick, setDetailTick] = useState(0);
+  const refreshDetail = () => setDetailTick((t) => t + 1); // force an immediate re-fetch (e.g. right after seeding)
   usePoll(async () => {
     if (!selectedId) return; // nothing open → no request
     const acct = keys?.address ?? "";
@@ -385,7 +387,7 @@ export default function Home() {
     // A successful response with no token (HTTP 404 {error:"unknown token"}) is a
     // CONFIRMED miss — show a not-found card instead of loading forever.
     else if (j.error && !detail) setDetailMissing(true);
-  }, 8000, [selectedId, keys?.address]);
+  }, 8000, [selectedId, keys?.address, detailTick]);
 
   /** One-time 1-raw hello to the protocol anchor, so any indexer discovers
    * this account from chain data alone (no operator watch-list). Best-effort:
@@ -507,6 +509,7 @@ export default function Home() {
                 sendOp={sendOp}
                 promptUnlock={promptUnlock}
                 onBack={() => setSelectedId(null)}
+                refreshDetail={refreshDetail}
               />
             </div>
           ) : detailMissing ? (
@@ -1663,6 +1666,7 @@ function TokenDetail({
   sendOp,
   promptUnlock,
   onBack,
+  refreshDetail,
 }: {
   token: Token;
   keys: Keys | null;
@@ -1674,6 +1678,7 @@ function TokenDetail({
   sendOp: (tokenId: string, op: Op, label: string) => Promise<void>;
   promptUnlock: () => void;
   onBack: () => void;
+  refreshDetail: () => void;
 }) {
   const [amount, setAmount] = useState("");
   const [tab, setTab] = useState<"trade" | "thread">("trade");
@@ -1896,8 +1901,10 @@ function TokenDetail({
         balance: (BigInt(info.balance) - xnoRaw - 1n).toString(), link: opLink,
       });
       const r2 = await rpc("process", { json_block: "true", block: blk2 });
-      say(`liquidity seeded ✓ ${r2.hash.slice(0, 10)}…`);
-      setSeedXno(""); setSeedTokens("");
+      say(`liquidity seeded ✓ — opening trading…`);
+      setSeedXno(""); setSeedTokens(""); setSeedTouched(true);
+      refreshDetail();
+      for (const ms of [3000, 7000, 14000]) setTimeout(refreshDetail, ms);
     } catch (e: any) {
       say("seed failed: " + e.message);
     }
@@ -1919,8 +1926,12 @@ function TokenDetail({
       const [fragA, fragB] = encodeFragLinks(token.tokenId, { kind: "seedLiq", xno: xnoRaw, tokens: tokRaw });
       await submitBlock(fragA, 1n);
       const hash = await submitBlock(fragB, 1n);
-      say(`starting price set ✓ ${hash.slice(0, 10)}… — virtual reserve, no deposit taken`);
-      setSeedXno(""); setSeedTokens("");
+      say(`starting price set ✓ — opening trading…`);
+      setSeedXno(""); setSeedTokens(""); setSeedTouched(true);
+      // Pull the new pool state in the background so Buy works without a manual
+      // refresh; retry a few times to ride out indexer lag on the seed op.
+      refreshDetail();
+      for (const ms of [3000, 7000, 14000]) setTimeout(refreshDetail, ms);
     } catch (e: any) {
       say("seed failed: " + e.message);
     }

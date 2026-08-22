@@ -214,7 +214,17 @@ export default function PriceChart({
     const cands = buildCandles(series, secs);
     const last = cands[cands.length - 1];
     if (last) setLegend((prev) => prev ?? { o: last.open, h: last.high, l: last.low, c: last.close });
-    if (fit) chartRef.current?.timeScale().fitContent();
+    if (fit) {
+      const ts = chartRef.current?.timeScale();
+      ts?.fitContent();
+      // fitContent spreads a handful of candles across the whole width, making
+      // each candle huge. Cap the bar spacing so a young coin's chart reads at a
+      // sensible zoom (roughly 2x out) instead of a wall of fat candles.
+      try {
+        const bs = (ts as any)?.options?.().barSpacing ?? 0;
+        if (bs > 10) (ts as any)?.applyOptions({ barSpacing: 10 });
+      } catch {}
+    }
   }
 
   const cands = buildCandles(series, TF[tf].s);
