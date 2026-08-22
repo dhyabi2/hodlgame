@@ -1,6 +1,11 @@
-# HodlGame — a zero-custody memecoin game as a Nano (XNO) Layer-2
+# HodlGame — a trustless token economy on Nano
 
-[![CI](https://github.com/dhyabi2/holdergame/actions/workflows/ci.yml/badge.svg)](https://github.com/dhyabi2/holdergame/actions/workflows/ci.yml)
+**A whole token economy — launching, trading, staking, settling — with no smart
+contracts, no custody, and no one to trust.** Every coin, trade, and payout is a
+deterministic replay of public, signed Nano blocks that anyone can re-verify,
+and money only ever moves wallet to wallet.
+
+[![CI](https://github.com/dhyabi2/hodlgame/actions/workflows/ci.yml/badge.svg)](https://github.com/dhyabi2/hodlgame/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Nano](https://img.shields.io/badge/settles%20on-Nano%20(XNO)-4A90E2.svg)](https://nano.org)
 [![tests](https://img.shields.io/badge/tests-31%20deterministic%20suites-brightgreen.svg)](nano/package.json)

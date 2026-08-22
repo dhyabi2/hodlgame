@@ -9,7 +9,7 @@ disclosure.
 
 Instead, report privately via one of:
 
-- GitHub's [private vulnerability reporting](https://github.com/dhyabi2/holdergame/security/advisories/new) (**Security → Report a vulnerability**), or
+- GitHub's [private vulnerability reporting](https://github.com/dhyabi2/hodlgame/security/advisories/new) (**Security → Report a vulnerability**), or
 - a direct message to the maintainer ([@dhyabi2](https://github.com/dhyabi2)).
 
 Please include:

@@ -7,7 +7,7 @@ contract. This guide gets you productive fast.
 ## Setup
 
 ```bash
-git clone https://github.com/dhyabi2/holdergame
+git clone https://github.com/dhyabi2/hodlgame
 cd holdergame/nano
 npm install
 npm test            # must be green before you start
