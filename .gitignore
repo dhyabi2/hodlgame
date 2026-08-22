@@ -70,3 +70,7 @@ nano/web/public/uploads/
 nano/web/.next/
 nano/web/tsconfig.tsbuildinfo
 .vercel
+
+# Internal audit + brainstorm docs — keep local, not on GitHub
+ISSUES.md
+ENTERTAINMENT.md
