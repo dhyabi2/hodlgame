@@ -34,7 +34,7 @@ interface Token {
   myBalance: string; myCredit: string; myStaked: string; myClaimable: string; totalStaked: string;
   buyVolume: string; sellVolume: string; holders: number; pool: string | null;
   direct: boolean; myEarmark: string; myFloor: string; myQueueOwed: string; myPrepaid: string;
-  queueTotal: string; queueHead: { account: string; owedRaw: string } | null; coveragePct: number | null;
+  totalFloor: string; queueTotal: string; queueHead: { account: string; owedRaw: string } | null; coveragePct: number | null;
   series: PricePoint[]; trades: Trade[]; topHolders: Holder[];
 }
 

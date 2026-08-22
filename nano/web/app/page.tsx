@@ -87,6 +87,7 @@ interface Token {
   myQueueOwed: string;
   myPrepaid: string;
   queueTotal: string;
+  totalFloor: string;
   queueHead: { account: string; owedRaw: string } | null;
   coveragePct: number | null;
   myStaked: string;
@@ -218,7 +219,7 @@ const quoteBuy = (poolXno: string, poolTokens: string, xno: bigint): bigint => {
 // settles instantly (prepay + own collateral released) vs queues for the
 // next buys (post-coverage-haircut estimate).
 function previewSellDirect(
-  token: { poolXno: string; poolTokens: string; myPrepaid: string; myEarmark: string; coveragePct: number | null },
+  token: { poolXno: string; poolTokens: string; myPrepaid: string; myEarmark: string; myFloor: string; totalFloor: string; queueTotal: string },
   tokens: bigint,
   walletRaw: string
 ) {
@@ -231,8 +232,12 @@ function previewSellDirect(
   let net = rem < em ? rem : em;
   if (net > bal) net = bal;
   rem -= net;
-  const covBps = BigInt(Math.round(Math.min(100, Math.max(0, token.coveragePct ?? 0)) * 100));
-  const queued = (rem * covBps) / 10_000n;
+  // Exact mirror of core/state.ts sell: credited = min(rem, max(0, num − Q))
+  // where num = everyone-else's floors (totalFloor − myFloor) and Q = queueTotal.
+  const num = BigInt(token.totalFloor || "0") - BigInt(token.myFloor || "0");
+  const q = BigInt(token.queueTotal || "0");
+  const headroom = num > q ? num - q : 0n;
+  const queued = rem < headroom ? rem : headroom;
   return { total: out, instant: usePre + net, queued };
 }
 

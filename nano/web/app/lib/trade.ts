@@ -314,7 +314,7 @@ export async function execBuyDirect(
  * (prepayments + the seller's own collateral released) vs how much queues as a
  * claim on future buys (post-coverage-haircut estimate). Mirrors state.ts. */
 export function quoteSellDirect(
-  token: { poolXno: string; poolTokens: string; myPrepaid: string; myEarmark: string; queueTotal: string; coveragePct: number | null },
+  token: { poolXno: string; poolTokens: string; myPrepaid: string; myEarmark: string; myFloor: string; totalFloor: string; queueTotal: string },
   walletBalanceRaw: string,
   tokens: bigint
 ): { total: bigint; instant: bigint; queued: bigint; forfeited: bigint } {
@@ -327,8 +327,12 @@ export function quoteSellDirect(
   let net = rem < em ? rem : em;
   if (net > bal) net = bal;
   rem -= net;
-  const covBps = BigInt(Math.round(Math.min(100, Math.max(0, token.coveragePct ?? 0)) * 100));
-  const queued = (rem * covBps) / 10_000n;
+  // Exact mirror of core/state.ts sell: credited = min(rem, max(0, num − Q))
+  // where num = everyone-else's floors (totalFloor − myFloor), Q = queueTotal.
+  const num = BigInt(token.totalFloor || "0") - BigInt(token.myFloor || "0");
+  const q = BigInt(token.queueTotal || "0");
+  const headroom = num > q ? num - q : 0n;
+  const queued = rem < headroom ? rem : headroom;
   return { total: out, instant: usePre + net, queued, forfeited: rem - queued };
 }
 
@@ -360,6 +364,8 @@ export async function execSell(
     direct?: boolean;
     myPrepaid?: string;
     myEarmark?: string;
+    myFloor?: string;
+    totalFloor?: string;
     queueTotal?: string;
     coveragePct?: number | null;
   },
@@ -377,7 +383,7 @@ export async function execSell(
     if (token.direct) {
       const bal = await fetchXnoBalance(keys.address);
       const p = quoteSellDirect(
-        { poolXno: token.poolXno, poolTokens: token.poolTokens, myPrepaid: token.myPrepaid ?? "0", myEarmark: token.myEarmark ?? "0", queueTotal: token.queueTotal ?? "0", coveragePct: token.coveragePct ?? 0 },
+        { poolXno: token.poolXno, poolTokens: token.poolTokens, myPrepaid: token.myPrepaid ?? "0", myEarmark: token.myEarmark ?? "0", myFloor: token.myFloor ?? "0", totalFloor: token.totalFloor ?? "0", queueTotal: token.queueTotal ?? "0" },
         bal,
         raw
       );

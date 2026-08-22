@@ -45,6 +45,7 @@ export interface TokenView {
   myQueueOwed: string; // my queued flow-backed claim total (raw)
   myPrepaid: string; // XNO buys already overpaid me (nets my next sell)
   queueTotal: string; // all outstanding flow-backed claims (raw)
+  totalFloor: string; // sum of all ratcheted earmark floors (raw) — coverage numerator
   queueHead: { account: string; owedRaw: string } | null; // next seller a buy must pay
   coveragePct: number | null; // floored collateral of all holders / claims, %
   myStaked: string;
@@ -200,6 +201,10 @@ async function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, accoun
     myQueueOwed: account && s ? s.queue.filter((e) => e.account === account).reduce((t, e) => t + e.owed, 0n).toString() : "0",
     myPrepaid: account && s ? (s.prepaid.get(account) ?? 0n).toString() : "0",
     queueTotal: s ? s.queue.reduce((t, e) => t + e.owed, 0n).toString() : "0",
+    // Sum of all ratcheted floors — the client mirrors the on-chain sell
+    // haircut exactly (credited = min(rem, max(0, (totalFloor − myFloor) −
+    // queueTotal))), so the preview never disagrees with execution.
+    totalFloor: (() => { let f = 0n; if (s) for (const v of s.earmarkFloor.values()) f += v; return f.toString(); })(),
     queueHead: s?.queue.find((e) => e.owed > 0n)
       ? { account: s!.queue.find((e) => e.owed > 0n)!.account, owedRaw: s!.queue.find((e) => e.owed > 0n)!.owed.toString() }
       : null,
