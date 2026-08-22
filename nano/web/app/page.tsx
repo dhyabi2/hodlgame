@@ -19,6 +19,7 @@ import { useNanoWebsocket } from "./lib/nano-ws";
 import { QRCodeSVG } from "qrcode.react";
 import { toRaw, clampSlippage, isNanoAddr, fmtNum, fmtXno, fmtXnoPlain } from "./lib/trade";
 import { useXnoUsd, fmtUsd } from "./lib/usd";
+import Welcome, { useTermsAccepted } from "./components/Welcome";
 
 const PriceChart = dynamic(() => import("./components/PriceChart"), { ssr: false });
 
@@ -225,6 +226,8 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
   const usd = useXnoUsd(); // live XNO→USD for $-equivalents across the app
+  // First-visit gate: the app is reachable only after the Terms are accepted.
+  const [termsAccepted, acceptTerms] = useTermsAccepted();
   const [tab, setTab] = useState<"explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet">("explore");
   const [unlockOpen, setUnlockOpen] = useState(false);
 
@@ -371,6 +374,9 @@ export default function Home() {
       setBusy(false);
     }
   }
+
+  if (termsAccepted === null) return <main className="min-h-screen bg-black" />; // avoid a flash while the stored choice loads
+  if (!termsAccepted) return <Welcome onAccept={acceptTerms} />;
 
   return (
     <main className="min-h-screen bg-black text-white pb-20 overflow-x-hidden">
