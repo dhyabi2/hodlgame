@@ -309,6 +309,7 @@ export default function Home() {
   const [keys, setKeys] = useState<Keys | null>(null);
   const [hasWallet, setHasWallet] = useState(false);
   const [tokens, setTokens] = useState<Token[]>([]);
+  const [feedLoaded, setFeedLoaded] = useState(false); // first /api/state response arrived
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Token | null>(null);
   const [detailMissing, setDetailMissing] = useState(false); // deep-linked coin confirmed unknown
@@ -370,6 +371,7 @@ export default function Home() {
     const acct = keys?.address ?? "";
     const j = await (await fetch(`/api/state?account=${acct}`)).json();
     setTokens(j.tokens ?? []);
+    setFeedLoaded(true);
   }, 15000, [keys?.address]);
 
   // Detail — reset when nothing selected; otherwise poll (paused-when-hidden).
@@ -533,7 +535,7 @@ export default function Home() {
             </div>
           )
         ) : tab === "explore" ? (
-          <Feed tokens={tokens} onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} usd={usd} onCreate={() => setTab("create")} />
+          <Feed tokens={tokens} loaded={feedLoaded} onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} usd={usd} onCreate={() => setTab("create")} />
         ) : tab === "ranks" ? (
           <Ranks onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} />
         ) : tab === "scan" ? (
@@ -1223,6 +1225,25 @@ function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddr
 const medal = (i: number) => (i === 0 ? "text-white" : i === 1 ? "text-neutral-300" : i === 2 ? "text-white" : "text-neutral-500");
 function Skel() { return <div className="h-40 rounded-none bg-neutral-900 animate-pulse" />; }
 
+/** Elegant loading skeleton for the Coins feed — a hero band + poster shelf +
+ * grid mirroring the real layout, so the page doesn't jump when data lands. */
+function FeedSkeleton() {
+  return (
+    <div className="space-y-10">
+      <div className="h-10 w-full max-w-xs rounded-none bg-neutral-900 animate-pulse" />
+      <div className="aspect-[16/6] w-full rounded-none bg-neutral-900 animate-pulse" />
+      <div>
+        <div className="mb-3 h-4 w-40 rounded-none bg-neutral-900 animate-pulse" />
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
+          {Array.from({ length: 12 }).map((_, i) => (
+            <div key={i} className="aspect-square rounded-none bg-neutral-900 animate-pulse" style={{ animationDelay: `${(i % 6) * 60}ms` }} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** Starting XNO-raw price of one whole token for a seed of (xnoRaw, tokenRaw). */
 function priceOfSeed(xnoRaw: bigint, tokenRaw: bigint, decimals: number): bigint {
   if (tokenRaw <= 0n) return 0n;
@@ -1276,10 +1297,14 @@ function UnavoidablePick({ coins, myAddress, onSelect }: { coins: Token[]; myAdd
   );
 }
 
-function Feed({ tokens, onSelect, myAddress, usd, onCreate }: { tokens: Token[]; onSelect: (id: string) => void; myAddress?: string; usd: number | null; onCreate?: () => void }) {
+function Feed({ tokens, loaded = true, onSelect, myAddress, usd, onCreate }: { tokens: Token[]; loaded?: boolean; onSelect: (id: string) => void; myAddress?: string; usd: number | null; onCreate?: () => void }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"mc" | "price" | "change" | "vol" | "new">("mc");
   const [showZeroCap, setShowZeroCap] = useState(false);
+
+  // Before the first /api/state response, show an elegant skeleton — never a
+  // premature "No coins yet" flash while the ledger is still being replayed.
+  if (!loaded && tokens.length === 0) return <FeedSkeleton />;
 
   // "Live" coins: named, funded, held by you, or traded. Hides only
   // fully-abandoned launches you don't hold.
