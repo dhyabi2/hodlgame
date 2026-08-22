@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from "react";
 import { verifyInBrowser, type VerifyResult } from "../lib/clientIndexer";
-import { fmtNum } from "../lib/trade";
+import { fmtNum, fmtXno } from "../lib/trade";
 
 type View =
   | { kind: "stats" }
@@ -43,12 +43,8 @@ const normalizeImage = (url: string): string => {
   const m = url.match(/^(?:https?:\/\/[^/]+)?\/api\/image\/([0-9a-f]{32})$/);
   return m ? `/api/image/${m[1]}` : url;
 };
-const fmtXno = (raw?: string) => {
-  if (!raw || raw === "0") return "0";
-  const neg = raw.startsWith("-");
-  const n = Number(BigInt(neg ? raw.slice(1) : raw)) / 1e30;
-  return (neg ? "-" : "") + fmtNum(n);
-};
+const tokSym = (t: { symbol?: string; tokenId: string }) => t.symbol || t.tokenId.slice(0, 4).toUpperCase();
+const tokName = (t: { name?: string; tokenId: string }) => t.name || `Coin ${t.tokenId.slice(0, 6)}`;
 const fmtTok = (raw: string, dec: number) => {
   const neg = raw.startsWith("-");
   const n = BigInt(neg ? raw.slice(1) : raw);
@@ -58,7 +54,7 @@ const fmtTok = (raw: string, dec: number) => {
   return `${neg ? "-" : ""}${whole}${frac ? "." + frac : ""}`;
 };
 const pctStr = (n: number | null | undefined) => (n == null ? "·" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`);
-const pctColor = (n: number | null | undefined) => (n == null ? "text-neutral-500" : n >= 0 ? "text-black" : "text-black");
+const pctColor = (n: number | null | undefined) => (n == null ? "text-neutral-500" : n >= 0 ? "text-green-700" : "text-red-600");
 
 const KIND_COLOR: Record<string, string> = {
   launch: "bg-purple-900/60 text-purple-300", buy: "bg-neutral-100/60 text-black", sell: "bg-neutral-100/60 text-black",
@@ -66,6 +62,9 @@ const KIND_COLOR: Record<string, string> = {
   stake: "bg-neutral-100/60 text-black", unstake: "bg-neutral-100/60 text-black", claim: "bg-neutral-100 text-neutral-700",
 };
 const ALL_KINDS = ["launch", "buy", "sell", "transfer", "seedLiq", "addLiq", "stake", "unstake", "claim"];
+const KIND_LABEL: Record<string, string> = { launch: "launch", buy: "buy", sell: "sell", transfer: "send", seedLiq: "seed liquidity", addLiq: "add liquidity", stake: "stake", unstake: "unstake", claim: "claim" };
+const FIELD_XNO = new Set(["poolXno"]);
+const FIELD_LABEL: Record<string, string> = { supply: "total coins", creatorShare: "creator's coins", treasury: "treasury", poolXno: "pool XNO", poolTokens: "coins in pool", totalStaked: "staked", rebateVault: "rebate vault", rewardPerShare: "reward per share" };
 
 const card = "rounded-none border border-neutral-300 bg-white p-4";
 const th = "text-left text-[10px] uppercase tracking-wider text-neutral-400 pb-1 pr-3";
@@ -93,7 +92,7 @@ function Copy({ text }: { text: string }) {
 }
 
 function KindBadge({ kind, valid }: { kind: string; valid?: boolean }) {
-  return <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${KIND_COLOR[kind] ?? "bg-neutral-100 text-neutral-700"}`}>{kind}{valid === false ? " ✕" : ""}</span>;
+  return <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${KIND_COLOR[kind] ?? "bg-neutral-100 text-neutral-700"}`}>{KIND_LABEL[kind] ?? kind}{valid === false ? " ✕" : ""}</span>;
 }
 
 /** Inline SVG price line chart from a real analytics series. */
@@ -119,7 +118,7 @@ function OpsTable({ items, go }: { items: any[]; go: (v: View) => void }) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
-        <thead><tr><th className={th}>op</th><th className={th}>token</th><th className={th}>account</th><th className={th}>effect</th><th className={th}>hash</th><th className={th}>age</th></tr></thead>
+        <thead><tr><th className={th}>action</th><th className={th}>coin</th><th className={th}>who</th><th className={th}>result</th><th className={th}>details</th><th className={th}>when</th></tr></thead>
         <tbody>
           {items.map((it) => {
             const sum = it.fields?.poolXno && (it.kind === "buy" || it.kind === "sell" || it.kind === "seedLiq")
@@ -128,10 +127,10 @@ function OpsTable({ items, go }: { items: any[]; go: (v: View) => void }) {
             return (
               <tr key={it.hash} className="border-t border-neutral-300 hover:bg-neutral-50">
                 <td className={td}><KindBadge kind={it.kind} valid={it.valid} /></td>
-                <td className={td}><span className={linkC} onClick={() => go({ kind: "token", q: it.tokenId })}>{it.symbol || short(it.tokenId, 6)}</span></td>
+                <td className={td}><span className={linkC} onClick={() => go({ kind: "token", q: it.tokenId })}>{tokSym(it)}</span></td>
                 <td className={`${td} ${mono}`}><span className={linkC} onClick={() => go({ kind: "account", q: it.sender })}>{short(it.sender, 10)}</span></td>
                 <td className={`${td} text-neutral-600`}>{it.valid === false ? <span className="text-black">{it.reason}</span> : sum}</td>
-                <td className={`${td} ${mono}`}><span className={linkC} onClick={() => go({ kind: "op", q: it.hash })}>{short(it.hash, 8)}</span></td>
+                <td className={td}><span className={linkC} onClick={() => go({ kind: "op", q: it.hash })}>view →</span></td>
                 <td className={`${td} text-neutral-500`} title={absTime(it.timestamp)}>{ago(it.timestamp)}</td>
               </tr>
             );
@@ -193,14 +192,14 @@ export default function Explorer() {
   return (
     <div className="space-y-4">
       <div className="flex gap-2">
-        <input className="w-full rounded-none border border-neutral-300 bg-white px-4 py-3 text-sm text-black placeholder-neutral-400 focus:outline-none focus:border-black font-mono"
-          placeholder="search: token / tokenId / nano_ address / block hash" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
+        <input className="w-full rounded-none border border-neutral-300 bg-white px-4 py-3 text-sm text-black placeholder-neutral-400 focus:outline-none focus:border-black"
+          placeholder="Search a coin name, address, or transaction" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
         <button className="shrink-0 rounded-none bg-black px-4 py-3 text-sm font-bold text-white hover:bg-neutral-800" onClick={submit}>Search</button>
       </div>
       <div className="flex gap-2 text-xs flex-wrap">
         {(["stats", "feed", "trust"] as const).map((k) => (
           <button key={k} onClick={() => go({ kind: k })} className={`px-3 py-1.5 rounded-full font-bold ${view.kind === k ? "bg-black text-white" : "bg-white text-neutral-600 hover:text-neutral-800"}`}>
-            {k === "stats" ? "overview" : k === "feed" ? "ops feed" : "trust"}
+            {k === "stats" ? "Overview" : k === "feed" ? "Activity" : "Verify"}
           </button>
         ))}
         {!["stats", "feed", "trust"].includes(view.kind) && <span className="px-3 py-1.5 rounded-full bg-neutral-100 text-neutral-700 font-mono">{view.kind}: {short((view as any).q ?? "", 10)}</span>}
@@ -215,9 +214,9 @@ export default function Explorer() {
             <div className={card}>
               <div className="flex gap-1.5 flex-wrap mb-3">
                 <button onClick={() => setKindFilter("")} className={`px-2 py-1 rounded-full text-[10px] font-bold ${!kindFilter ? "bg-black text-white" : "bg-white text-neutral-600"}`}>all</button>
-                {ALL_KINDS.map((k) => <button key={k} onClick={() => setKindFilter(k)} className={`px-2 py-1 rounded-full text-[10px] font-bold ${kindFilter === k ? "bg-black text-white" : "bg-white text-neutral-600"}`}>{k}</button>)}
+                {ALL_KINDS.map((k) => <button key={k} onClick={() => setKindFilter(k)} className={`px-2 py-1 rounded-full text-[10px] font-bold ${kindFilter === k ? "bg-black text-white" : "bg-white text-neutral-600"}`}>{KIND_LABEL[k] ?? k}</button>)}
               </div>
-              <p className="text-[11px] text-neutral-400 mb-2">{data.total} ops · newest first{kindFilter ? ` · ${kindFilter}` : " · live"}</p>
+              <p className="text-[11px] text-neutral-400 mb-2">{data.total} actions · newest first{kindFilter ? ` · ${kindFilter}` : " · live"}</p>
               <OpsTable items={feedItems} go={go} />
               {feedNext != null && <button onClick={loadMoreFeed} className="mt-3 w-full rounded-none bg-white py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-100">Load more</button>}
             </div>
@@ -238,9 +237,9 @@ function StatsPanel({ d, go }: { d: any; go: (v: View) => void }) {
     <div className="space-y-3">
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         <Stat label="tokens" value={d.totalTokens} />
-        <Stat label="total ops" value={d.totalOps} sub={`${d.invalidOps} rejected`} />
+        <Stat label="actions" value={d.totalOps} sub={`${d.invalidOps} rejected`} />
         <Stat label="holders" value={d.totalHolders} />
-        <Stat label="TVL (pool XNO)" value={fmtXno(d.tvlRaw)} />
+        <Stat label="total value locked" value={`${fmtXno(d.tvlRaw)} XNO`} />
         <Stat label="24h volume" value={`${fmtXno(d.volume24hRaw)} XNO`} />
         <Stat label="fees" value="0 (feeless)" sub="Nano" />
       </div>
@@ -249,8 +248,8 @@ function StatsPanel({ d, go }: { d: any; go: (v: View) => void }) {
         {d.topByMcap.length === 0 && <p className="text-xs text-neutral-400">no tokens yet</p>}
         {d.topByMcap.map((t: any) => (
           <div key={t.tokenId} className="flex items-center justify-between text-xs py-1.5 border-t border-neutral-300/60">
-            <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{t.name || short(t.tokenId, 8)} <span className="text-neutral-400">{t.symbol}</span></span>
-            <span className="flex gap-3"><span>{fmtXno(t.marketCapRaw)} mcap</span><span className={pctColor(t.change24h)}>{pctStr(t.change24h)}</span><span className="text-neutral-500">{t.holders}h</span></span>
+            <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{t.image ? <img src={normalizeImage(t.image)} alt="" className="w-5 h-5 rounded-full object-cover inline-block mr-1.5 align-middle" /> : null}{tokName(t)} <span className="text-neutral-400">{tokSym(t)}</span></span>
+            <span className="flex gap-3"><span>{fmtXno(t.marketCapRaw)} mcap</span><span className={pctColor(t.change24h)}>{pctStr(t.change24h)}</span><span className="text-neutral-500">{t.holders} holders</span></span>
           </div>
         ))}
       </div>
@@ -258,12 +257,12 @@ function StatsPanel({ d, go }: { d: any; go: (v: View) => void }) {
         <h3 className="font-black text-sm mb-2">Latest launches</h3>
         {d.latest.map((t: any) => (
           <div key={t.tokenId} className="flex items-center justify-between text-xs py-1.5 border-t border-neutral-300/60">
-            <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{t.name || short(t.tokenId, 8)} <span className="text-neutral-400">{t.symbol}</span></span>
+            <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{t.image ? <img src={normalizeImage(t.image)} alt="" className="w-5 h-5 rounded-full object-cover inline-block mr-1.5 align-middle" /> : null}{tokName(t)} <span className="text-neutral-400">{tokSym(t)}</span></span>
             <span className="text-neutral-500" title={absTime(t.createdAt)}>{ago(t.createdAt)}</span>
           </div>
         ))}
       </div>
-      <p className="text-[11px] text-neutral-400">state root <span className={mono}>{short(d.stateRoot, 12)}</span><Copy text={d.stateRoot} /></p>
+      <p className="text-[11px] text-neutral-400" title="A fingerprint of the entire ledger state — anyone can recompute it to verify this site">integrity fingerprint <span className={mono}>{short(d.stateRoot, 12)}</span><Copy text={d.stateRoot} /></p>
     </div>
   );
 }
@@ -275,18 +274,18 @@ function Results({ data, go }: { data: any; go: (v: View) => void }) {
   if (data.type === "tokens")
     return <div className={card}>{data.data.length === 0 ? <p className="text-xs text-neutral-400">no matches</p> : data.data.map((t: any) => (
       <div key={t.tokenId} className="flex items-center justify-between text-sm py-1 border-t border-neutral-300/60">
-        <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{t.name || short(t.tokenId, 8)} ({t.symbol})</span>
+        <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{tokName(t)} ({tokSym(t)})</span>
         <span className="text-xs text-neutral-500">{fmtXno(t.marketCapRaw)} mcap · {t.holders}h</span>
       </div>))}</div>;
   if (data.type === "block")
     return <div className={card}>
-      <h3 className="font-black mb-2">Nano block (not a HoldFun op)</h3>
+      <h3 className="font-black mb-2">Plain Nano transaction (not a coin action)</h3>
       <Row k="hash"><span className={mono}>{data.data.hash}</span><Copy text={data.data.hash} /></Row>
       <Row k="account"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: data.data.account })}>{data.data.account}</span></Row>
       <Row k="amount">{fmtXno(data.data.amount)} XNO</Row>
       <Row k="confirmed">{data.data.confirmed ? "yes ✓" : "pending"}</Row>
-      <Row k="classified as">{data.data.classification?.kind}{data.data.classification?.tokenId ? ` · token ${short(data.data.classification.tokenId, 8)}` : ""}</Row>
-      <Hexdump ann={data.data.annotation} />
+      <Row k="looks like">{data.data.classification?.kind}{data.data.classification?.tokenId ? ` · token ${short(data.data.classification.tokenId, 8)}` : ""}</Row>
+      <details><summary className="text-[11px] text-neutral-500 cursor-pointer">byte-level decode</summary><Hexdump ann={data.data.annotation} /></details>
     </div>;
   return <p className="text-xs text-neutral-400">nothing found</p>;
 }
@@ -314,13 +313,13 @@ function OpDetail({ d, go }: { d: any; go: (v: View) => void }) {
       <div className={card}>
         <div className="flex items-center gap-2 mb-2 flex-wrap">
           <KindBadge kind={d.kind} valid={d.valid} />
-          <span className={linkC} onClick={() => go({ kind: "token", q: d.tokenId })}>{d.symbol || short(d.tokenId, 8)}</span>
+          <span className={linkC} onClick={() => go({ kind: "token", q: d.tokenId })}>{tokSym(d)}</span>
           <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${d.confirmed ? "bg-neutral-100/60 text-black" : "bg-neutral-100/60 text-black"}`}>{d.confirmed ? "confirmed" : "pending"}</span>
           <span className="text-neutral-400 text-xs" title={absTime(d.timestamp)}>{ago(d.timestamp)}</span>
         </div>
         <Row k="hash"><span className={mono}>{d.hash}</span><Copy text={d.hash} /></Row>
-        {d.carriers && <Row k="carrier blocks"><span className={mono}>{d.carriers.map((c: string) => short(c, 10)).join(" + ")} (fragment pair)</span></Row>}
-        <Row k="signer"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.sender })}>{d.sender}</span><Copy text={d.sender} /></Row>
+        {d.carriers && <Row k="sent as"><span title={d.carriers.join(" + ")}>two linked blocks</span></Row>}
+        <Row k="sent by"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.sender })}>{d.sender}</span><Copy text={d.sender} /></Row>
         {!d.valid && <Row k="rejected"><span className="text-black">{d.reason}</span></Row>}
         {d.depositEdge && <Row k="funded by deposit"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "op", q: d.depositEdge.deposit })}>{short(d.depositEdge.deposit, 12)}</span> · {fmtXno(d.depositEdge.amountRaw)} XNO</Row>}
         <Row k="on Nano L1"><a className={linkC} href={`https://nanexplorer.com/nano/block/${d.hash}`} target="_blank" rel="noreferrer">nanexplorer ↗</a></Row>
@@ -328,12 +327,12 @@ function OpDetail({ d, go }: { d: any; go: (v: View) => void }) {
 
       {Object.keys(d.fields ?? {}).length > 0 && (
         <div className={card}><h3 className="font-black text-sm mb-2">State changes</h3>
-          {Object.entries(d.fields).map(([f, v]: any) => <Row key={f} k={f}><span className={mono}>{v.before} → {v.after}</span></Row>)}
+          {Object.entries(d.fields).map(([f, v]: any) => <Row key={f} k={FIELD_LABEL[f] ?? f}>{FIELD_XNO.has(f) ? `${fmtXno(v.before)} → ${fmtXno(v.after)} XNO` : `${fmtNum(Number(v.before))} → ${fmtNum(Number(v.after))}`}</Row>)}
         </div>
       )}
       {d.balances?.length > 0 && (
-        <div className={card}><h3 className="font-black text-sm mb-2">Balance movements</h3>
-          {d.balances.map((b: any) => <Row key={b.account} k={short(b.account, 10)}><span className={b.delta.startsWith("-") ? "text-black" : "text-black"}>{b.delta}</span> raw tokens</Row>)}
+        <div className={card}><h3 className="font-black text-sm mb-2">Who gained / lost coins</h3>
+          {d.balances.map((b: any) => <Row key={b.account} k={short(b.account, 10)}><span className={b.delta.startsWith("-") ? "text-red-600" : "text-green-700"}>{b.delta.startsWith("-") ? "" : "+"}{fmtNum(Number(b.delta))}</span> coins</Row>)}
         </div>
       )}
       {d.payoutCoverage?.length > 0 && (
@@ -344,7 +343,7 @@ function OpDetail({ d, go }: { d: any; go: (v: View) => void }) {
         </div>
       )}
       {d.blocks?.length > 0 && (
-        <div className={card}><h3 className="font-black text-sm mb-2">Raw block{d.blocks.length > 1 ? "s" : ""}</h3>
+        <details className={card}><summary className="font-black text-sm mb-2 cursor-pointer">Raw block data (advanced)</summary>
           {d.blocks.map((b: any) => (
             <div key={b.hash} className="mb-3 last:mb-0">
               <Row k="block"><span className={mono}>{short(b.hash, 12)}</span><Copy text={b.hash} /></Row>
@@ -354,7 +353,7 @@ function OpDetail({ d, go }: { d: any; go: (v: View) => void }) {
               <Hexdump ann={b.annotation} />
             </div>
           ))}
-        </div>
+        </details>
       )}
     </div>
   );
@@ -372,18 +371,18 @@ function AccountDetail({ d, go }: { d: any; go: (v: View) => void }) {
   return (
     <div className="space-y-3">
       <div className={card}>
-        <h3 className="font-black mb-1 break-all font-mono text-sm">{d.address}<Copy text={d.address} /></h3>
+        <h3 className="font-black mb-1 text-sm">Wallet <span className={`${mono} break-all`}>{short(d.address, 12)}</span><Copy text={d.address} /></h3>
         {d.labels?.map((l: string) => <span key={l} className="inline-block mr-1 px-2 py-0.5 rounded-full bg-blue-900/60 text-blue-300 text-[10px] font-bold">{l}</span>)}
-        <Row k="XNO balance">{fmtXno(d.xnoBalanceRaw)} XNO {d.opened ? "" : "(unopened)"}</Row>
-        {d.createdTokens?.length > 0 && <Row k="created tokens">{d.createdTokens.map((t: string) => <span key={t} className={`${linkC} mr-2`} onClick={() => go({ kind: "token", q: t })}>{short(t, 8)}</span>)}</Row>}
-        {d.authorityOf?.length > 0 && <Row k="metadata authority of">{d.authorityOf.map((t: string) => <span key={t} className={`${linkC} mr-2`} onClick={() => go({ kind: "token", q: t })}>{short(t, 8)}</span>)}</Row>}
+        <Row k="XNO balance">{fmtXno(d.xnoBalanceRaw)} XNO {d.opened ? "" : "(never used)"}</Row>
+        {d.createdTokens?.length > 0 && <Row k="created coins">{d.createdTokens.map((t: any) => <span key={t.tokenId} className={`${linkC} mr-2`} onClick={() => go({ kind: "token", q: t.tokenId })}>{tokSym(t)}</span>)}</Row>}
+        {d.authorityOf?.length > 0 && <Row k="can edit info for">{d.authorityOf.map((t: any) => <span key={t.tokenId} className={`${linkC} mr-2`} onClick={() => go({ kind: "token", q: t.tokenId })}>{tokSym(t)}</span>)}</Row>}
       </div>
       {d.holdings?.length > 0 && (
-        <div className={card}><h3 className="font-black text-sm mb-2">Token holdings</h3>
-          {d.holdings.map((h: any) => <Row key={h.tokenId} k={<span className={linkC} onClick={() => go({ kind: "token", q: h.tokenId })}>{h.symbol || short(h.tokenId, 8)}</span>}>{fmtTok(h.balance, h.decimals)}{h.staked !== "0" ? ` · staked ${fmtTok(h.staked, h.decimals)}` : ""}{h.banked !== "0" ? ` · banked ${fmtXno(h.banked)} XNO` : ""}</Row>)}
+        <div className={card}><h3 className="font-black text-sm mb-2">Coin holdings</h3>
+          {d.holdings.map((h: any) => <Row key={h.tokenId} k={<span className={linkC} onClick={() => go({ kind: "token", q: h.tokenId })}>{tokSym(h)}</span>}>{fmtTok(h.balance, h.decimals)}{h.staked !== "0" ? ` · staked ${fmtTok(h.staked, h.decimals)}` : ""}{h.banked !== "0" ? ` · banked ${fmtXno(h.banked)} XNO` : ""}</Row>)}
         </div>
       )}
-      <div className={card}><h3 className="font-black text-sm mb-2">Ops ({d.opsTotal})</h3>
+      <div className={card}><h3 className="font-black text-sm mb-2">Actions ({d.opsTotal})</h3>
         <OpsTable items={ops} go={go} />
         {next != null && <button onClick={more} className="mt-3 w-full rounded-none bg-white py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-100">Load more</button>}
       </div>
@@ -407,7 +406,7 @@ function TokenDetailX({ d, go }: { d: any; go: (v: View) => void }) {
         <div className="flex items-center gap-3">
           {d.image ? <img src={normalizeImage(d.image)} alt="" className="w-12 h-12 rounded-full object-cover" onError={(e) => ((e.target as HTMLImageElement).style.display = "none")} /> : null}
           <div className="min-w-0">
-            <h3 className="font-black">{d.name || short(d.tokenId, 8)} <span className="text-neutral-500">({d.symbol})</span> {d.authority?.immutable && <span className="px-2 py-0.5 rounded-full bg-purple-900/60 text-purple-300 text-[10px] font-bold">immutable</span>}</h3>
+            <h3 className="font-black">{tokName(d)} <span className="text-neutral-500">({tokSym(d)})</span> {d.authority?.immutable && <span className="px-2 py-0.5 rounded-full bg-purple-900/60 text-purple-300 text-[10px] font-bold">immutable</span>}</h3>
             <p className="text-sm">{fmtXno(d.priceRaw)} XNO <span className={pctColor(d.change24h)}>{pctStr(d.change24h)} 24h</span> · mcap {fmtXno(d.marketCapRaw)}</p>
           </div>
         </div>
@@ -421,20 +420,21 @@ function TokenDetailX({ d, go }: { d: any; go: (v: View) => void }) {
 
       <div className={card}><h3 className="font-black text-sm mb-2">Price</h3><MiniChart series={d.series} /></div>
 
-      <div className={card}>
-        <Row k="tokenId"><span className={mono}>{d.tokenId}</span><Copy text={d.tokenId} /></Row>
-        <Row k="creator"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.creator })}>{short(d.creator, 12)}</span></Row>
-        {d.authority && <Row k="metadata authority"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.authority.authority })}>{short(d.authority.authority, 12)}</span></Row>}
-        {d.launchHash && <Row k="launch block"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "op", q: d.launchHash })}>{short(d.launchHash, 12)}</span></Row>}
-        <Row k="created" >{absTime(d.createdAt)}</Row>
-        <Row k="decimals">{d.decimals} <span className="text-neutral-400">(consensus-bound, immutable)</span></Row>
+      <details className={card}>
+        <summary className="font-black text-sm cursor-pointer">Technical details</summary>
+        <Row k="coin ID"><span className={mono}>{d.tokenId}</span><Copy text={d.tokenId} /></Row>
+        <Row k="created by"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.creator })}>{short(d.creator, 12)}</span></Row>
+        {d.authority && <Row k="who can edit its info"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.authority.authority })}>{short(d.authority.authority, 12)}</span></Row>}
+        {d.launchHash && <Row k="launch transaction"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "op", q: d.launchHash })}>{short(d.launchHash, 12)}</span></Row>}
+        <Row k="created on">{absTime(d.createdAt)}</Row>
+        <Row k="decimals"><span title="consensus-bound, immutable">{d.decimals}</span></Row>
         <Row k="supply">{fmtTok(d.supply, d.decimals)}</Row>
         <Row k="treasury">{fmtTok(d.treasury, d.decimals)}</Row>
-        <Row k="pool tokens">{fmtTok(d.poolTokens, d.decimals)}</Row>
+        <Row k="coins in the pool">{fmtTok(d.poolTokens, d.decimals)}</Row>
         <Row k="staked">{fmtTok(d.totalStaked, d.decimals)}</Row>
         <Row k="burned">{fmtTok(d.burned, d.decimals)}</Row>
-        <Row k="24h buy / sell vol">{fmtXno(d.buyVolumeRaw)} / {fmtXno(d.sellVolumeRaw)} XNO</Row>
-      </div>
+        <Row k="bought / sold (24h)">{fmtXno(d.buyVolumeRaw)} / {fmtXno(d.sellVolumeRaw)} XNO</Row>
+      </details>
 
       {d.reserves && (
         <div className={card}>
@@ -502,25 +502,30 @@ function VerifyButton({ serverRoot }: { serverRoot: string }) {
 function TrustPanel({ d, go }: { d: any; go: (v: View) => void }) {
   return (
     <div className="space-y-3">
-      <div className={card}><h3 className="font-black text-sm mb-2">Consensus</h3>
-        <Row k="state root"><span className={mono}>{d.stateRoot}</span><Copy text={d.stateRoot} /></Row>
-        <Row k="tokens / ops">{d.tokens} / {d.events}</Row>
-        <Row k="anchor account"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.anchor })}>{short(d.anchor, 12)}</span></Row>
-        <Row k="verify yourself">recompute this root in your browser — no secrets, no trust</Row>
+      <div className={card}><h3 className="font-black text-sm mb-2">Don't trust — verify</h3>
+        <Row k="integrity fingerprint"><span className={mono}>{d.stateRoot}</span><Copy text={d.stateRoot} /></Row>
+        <Row k="coins / actions replayed">{d.tokens} / {d.events}</Row>
+        <Row k="protocol anchor wallet"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.anchor })}>{short(d.anchor, 12)}</span></Row>
+        <Row k="verify yourself">your browser re-checks every action and must arrive at the same fingerprint</Row>
         <VerifyButton serverRoot={d.stateRoot} />
       </div>
       <div className={card}><h3 className="font-black text-sm mb-2">Proof of reserves — all pools</h3>
+        <p className="text-[11px] text-neutral-500 mb-1">For each coin: the XNO this site says is in the pool vs what the Nano blockchain actually holds.</p>
         {d.pools.length === 0 && <p className="text-xs text-neutral-400">no pools yet</p>}
-        {d.pools.map((p: any) => (
-          <div key={p.tokenId} className="text-xs py-1.5 border-t border-neutral-300/60">
-            <span className={linkC} onClick={() => go({ kind: "token", q: p.tokenId })}>{p.symbol || short(p.tokenId, 8)}</span> · indexed {fmtXno(p.indexedPoolXno)} · on-chain {fmtXno(p.onchainBalance)} · owed {p.outstandingObligations === "rpc-error" ? "?" : fmtXno(p.outstandingObligations)} XNO
-          </div>
-        ))}
+        {d.pools.map((p: any) => {
+          const backed = BigInt(p.onchainBalance) >= BigInt(p.indexedPoolXno);
+          return (
+            <div key={p.tokenId} className="text-xs py-1.5 border-t border-neutral-300/60">
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold mr-1.5 ${backed ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>{backed ? "✓ backed" : "! check"}</span>
+              <span className={linkC} onClick={() => go({ kind: "token", q: p.tokenId })}>{tokSym(p)}</span> · site says {fmtXno(p.indexedPoolXno)} · blockchain holds {fmtXno(p.onchainBalance)} · still owed {p.outstandingObligations === "rpc-error" ? "?" : fmtXno(p.outstandingObligations)} XNO
+            </div>
+          );
+        })}
       </div>
-      <div className={card}><h3 className="font-black text-sm mb-2">Off-chain snapshot</h3>
-        <Row k="hash"><span className={mono}>{d.snapshot.hash}</span><Copy text={d.snapshot.hash} /></Row>
+      <div className={card}><h3 className="font-black text-sm mb-2">Metadata snapshot</h3>
+        <Row k="fingerprint"><span className={mono}>{d.snapshot.hash}</span><Copy text={d.snapshot.hash} /></Row>
         <Row k="size">{d.snapshot.bytes} bytes</Row>
-        <Row k="anchored on-chain">{d.snapshot.anchored ? "yes" : "not yet"}</Row>
+        <Row k="published to the blockchain">{d.snapshot.anchored ? "yes" : "not yet"}</Row>
       </div>
     </div>
   );

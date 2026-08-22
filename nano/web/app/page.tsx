@@ -18,6 +18,7 @@ import { loadWallet, saveWallet, removeWallet, encryptSeed, decryptSeed } from "
 import { useNanoWebsocket } from "./lib/nano-ws";
 import { QRCodeSVG } from "qrcode.react";
 import { toRaw, clampSlippage, isNanoAddr, fmtNum, fmtXno, fmtXnoPlain } from "./lib/trade";
+import { useXnoUsd, fmtUsd } from "./lib/usd";
 
 const PriceChart = dynamic(() => import("./components/PriceChart"), { ssr: false });
 
@@ -223,6 +224,7 @@ export default function Home() {
   const [detail, setDetail] = useState<Token | null>(null);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
+  const usd = useXnoUsd(); // live XNO→USD for $-equivalents across the app
   const [tab, setTab] = useState<"explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet">("explore");
   const [unlockOpen, setUnlockOpen] = useState(false);
 
@@ -389,7 +391,7 @@ export default function Home() {
               className="hidden sm:inline-block rounded-none bg-black px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-white hover:bg-neutral-800"
               onClick={() => { setSelectedId(null); setTab("create"); }}
             >
-              + Create
+              + Launch Token
             </button>
             {keys ? (
               <button
@@ -417,6 +419,8 @@ export default function Home() {
                 keys={keys}
                 busy={busy}
                 say={say}
+                usd={usd}
+                ensureHello={ensureHello}
                 submitBlock={submitBlock}
                 sendOp={sendOp}
                 promptUnlock={promptUnlock}
@@ -433,7 +437,7 @@ export default function Home() {
             </div>
           )
         ) : tab === "explore" ? (
-          <Feed tokens={tokens} onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} />
+          <Feed tokens={tokens} onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} usd={usd} />
         ) : tab === "ranks" ? (
           <Ranks onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} />
         ) : tab === "scan" ? (
@@ -940,7 +944,7 @@ function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddr
                   <p className="text-sm font-bold truncate">{tokSym(t)} <span className="text-[11px] font-normal text-neutral-500">{tokName(t)}</span></p>
                   <p className="text-[11px] text-neutral-500 truncate">mc {fmtXno(t.marketCap)} XNO · {t.holders} holder{t.holders === 1 ? "" : "s"} · vol {fmtXno(t.volume)} XNO</p>
                 </div>
-                <span className={"text-xs font-bold tabular-nums shrink-0 " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-black" : "text-black")}>{pctStr(t.change24h)}</span>
+                <span className={"text-xs font-bold tabular-nums shrink-0 " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-green-600" : "text-red-600")}>{pctStr(t.change24h)}</span>
               </button>
             ))}
           </div>
@@ -989,7 +993,7 @@ function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddr
 const medal = (i: number) => (i === 0 ? "text-black" : i === 1 ? "text-neutral-700" : i === 2 ? "text-black" : "text-neutral-400");
 function Skel() { return <div className="h-40 rounded-none border border-neutral-300 bg-white animate-pulse" />; }
 
-function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id: string) => void; myAddress?: string }) {
+function Feed({ tokens, onSelect, myAddress, usd }: { tokens: Token[]; onSelect: (id: string) => void; myAddress?: string; usd: number | null }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"mc" | "price" | "change" | "vol" | "new">("mc");
 
@@ -1004,7 +1008,7 @@ function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id:
       // No query → "live" coins: has a name/symbol, real liquidity, OR you hold
       // it (so a creator always sees their own coin even before naming/seeding).
       // Hides only fully-abandoned launches you don't hold.
-      return Boolean(t.name || t.symbol) || BigInt(t.poolXno) > 0n || BigInt(t.myBalance) > 0n;
+      return Boolean(t.name || t.symbol) || BigInt(t.poolXno) > 0n || BigInt(t.myBalance) > 0n || BigInt(t.buyVolume) > 0n;
     })
     .slice()
     .sort((a, b) => {
@@ -1062,12 +1066,12 @@ function Feed({ tokens, onSelect, myAddress }: { tokens: Token[]; onSelect: (id:
                   <p className="font-bold text-sm truncate">{tokName(t)}</p>
                   <p className="text-[11px] text-neutral-500 shrink-0">${tokSym(t)}</p>
                 </div>
-                <p className="text-[11px] text-neutral-500 truncate">mc {fmtXno(t.marketCap)} XNO</p>
+                <p className="text-[11px] text-neutral-500 truncate">mc {fmtXno(t.marketCap)} XNO{usd != null && <> ({fmtUsd(t.marketCap, usd)})</>}</p>
               </div>
               <Sparkline points={t.spark} width={64} height={26} color={trendColor(t.spark)} />
             </div>
             <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-neutral-500">
-              <span className={"font-bold shrink-0 " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-black" : "text-black")}>
+              <span className={"font-bold shrink-0 " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-green-600" : "text-red-600")}>
                 {pctStr(t.change24h)}
               </span>
               <span className="truncate text-neutral-600">{fmtXno(t.price)} XNO</span>
@@ -1146,7 +1150,9 @@ function TokenDetail({
   keys,
   busy,
   say,
+  usd,
   submitBlock,
+  ensureHello,
   sendOp,
   promptUnlock,
   onBack,
@@ -1155,7 +1161,9 @@ function TokenDetail({
   keys: Keys | null;
   busy: boolean;
   say: (s: string) => void;
+  usd: number | null;
   submitBlock: (link: string, delta: bigint) => Promise<string>;
+  ensureHello: () => Promise<void>;
   sendOp: (tokenId: string, op: Op, label: string) => Promise<void>;
   promptUnlock: () => void;
   onBack: () => void;
@@ -1193,6 +1201,13 @@ function TokenDetail({
     const raw = toRaw(amount, 30);
     if (raw <= 0n) return say("enter XNO amount");
     try {
+      // Announce this account to the anchor BEFORE the buy — holdings are
+      // computed by replaying anchor-DISCOVERED accounts, and buy() was the
+      // one op path that never sent the 1-raw hello, so a wallet whose first
+      // action was a buy stayed invisible to the indexer (its purchase never
+      // appeared in the wallet's holdings). Must run before account_info: the
+      // hello advances the frontier.
+      await ensureHello();
       const info = await rpc("account_info", { account: keys.address, representative: "true" });
       if (!info.frontier) return say("account not opened — fund it first");
 
@@ -1335,9 +1350,9 @@ function TokenDetail({
             </button>
           </div>
           <div className="text-right shrink-0">
-            <p className="text-base sm:text-2xl font-black whitespace-nowrap">{fmtXno(token.marketCap)} XNO</p>
+            <p className="text-base sm:text-2xl font-black whitespace-nowrap">{fmtXno(token.marketCap)} XNO{usd != null && <span className="text-sm font-bold text-neutral-500"> ({fmtUsd(token.marketCap, usd)})</span>}</p>
             <p className="text-[11px] text-neutral-500 whitespace-nowrap">
-              market cap · <span className="text-black">{pctStr(token.change24h)}</span>
+              market cap · <span className={token.change24h == null ? "text-neutral-400" : token.change24h >= 0 ? "text-green-600" : "text-red-600"}>{pctStr(token.change24h)}</span>
             </p>
           </div>
         </div>
@@ -1348,7 +1363,7 @@ function TokenDetail({
           {token.telegram && <SocialLink href={token.telegram} label="telegram" />}
         </div>
         <div className="flex items-center gap-3 mt-4 text-[11px] text-neutral-500 flex-wrap">
-          <span>price {fmtXno(token.price)} XNO</span>
+          <span>price {fmtXno(token.price)} XNO{usd != null && <> ({fmtUsd(token.price, usd)})</>}</span>
           <span>liquidity {fmtXno(token.poolXno)} XNO</span>
           <span>{token.holders} holder{token.holders === 1 ? "" : "s"}</span>
           <span>created {timeAgo(token.createdAt)} ago</span>
@@ -1437,7 +1452,7 @@ function TokenDetail({
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <TradesPanel trades={token.trades} />
+        <TradesPanel trades={token.trades} decimals={token.decimals} usd={usd} />
         <HoldersPanel holders={token.topHolders} creator={token.creator} decimals={token.decimals} />
       </div>
     </div>
@@ -1691,7 +1706,7 @@ function StakeBox({
       </div>
 
       <div className="flex gap-2">
-        <div className="relative flex-1">
+        <div className="flex-1 space-y-1">
           <input
             className={inputC}
             placeholder="stake amount"
@@ -1700,19 +1715,22 @@ function StakeBox({
             onChange={(e) => setStakeAmt(e.target.value)}
           />
           {bal > 0n && (
-            <button
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-neutral-600 hover:text-black"
-              onClick={() => setStakeAmt(fmtTok(token.myBalance, token.decimals))}
-            >
-              MAX
-            </button>
+            <div className="grid grid-cols-3 gap-1">
+              {[25, 50, 100].map((p) => (
+                <button key={p}
+                  className="rounded-none border border-neutral-300 py-1 text-[10px] font-bold text-neutral-600 hover:border-black hover:text-black"
+                  onClick={() => setStakeAmt(fmtTok(((bal * BigInt(p)) / 100n).toString(), token.decimals))}>
+                  {p === 100 ? "MAX" : `${p}%`}
+                </button>
+              ))}
+            </div>
           )}
         </div>
         <ActionBtn disabled={busy || bal <= 0n} onClick={doStake}>Stake</ActionBtn>
       </div>
 
       <div className="flex gap-2">
-        <div className="relative flex-1">
+        <div className="flex-1 space-y-1">
           <input
             className={inputC}
             placeholder="unstake amount"
@@ -1721,12 +1739,15 @@ function StakeBox({
             onChange={(e) => setUnstakeAmt(e.target.value)}
           />
           {staked > 0n && (
-            <button
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-bold text-neutral-600 hover:text-black"
-              onClick={() => setUnstakeAmt(fmtTok(token.myStaked, token.decimals))}
-            >
-              MAX
-            </button>
+            <div className="grid grid-cols-3 gap-1">
+              {[25, 50, 100].map((p) => (
+                <button key={p}
+                  className="rounded-none border border-neutral-300 py-1 text-[10px] font-bold text-neutral-600 hover:border-black hover:text-black"
+                  onClick={() => setUnstakeAmt(fmtTok(((staked * BigInt(p)) / 100n).toString(), token.decimals))}>
+                  {p === 100 ? "MAX" : `${p}%`}
+                </button>
+              ))}
+            </div>
           )}
         </div>
         <ActionBtn disabled={busy || staked <= 0n} onClick={doUnstake}>Unstake</ActionBtn>
@@ -1757,20 +1778,24 @@ function ActionBtn({ children, onClick, disabled }: { children: ReactNode; onCli
   );
 }
 
-function TradesPanel({ trades }: { trades: Trade[] }) {
+function TradesPanel({ trades, decimals, usd }: { trades: Trade[]; decimals: number; usd: number | null }) {
+  // XNO value of a trade = token amount × price-per-whole-token.
+  const tradeXno = (t: Trade) => ((BigInt(t.amountRaw) * BigInt(t.priceRaw)) / 10n ** BigInt(decimals)).toString();
   return (
     <div className="rounded-none border border-neutral-300 bg-white p-4">
       <p className="text-sm font-bold text-neutral-700 mb-2">Recent trades</p>
       <div className="space-y-1.5 max-h-72 overflow-y-auto">
         {trades.length === 0 && <p className="text-xs text-neutral-400">no trades yet</p>}
         {trades.map((t, i) => (
-          <div key={i} className="flex items-center justify-between text-xs">
-            <span className="text-neutral-500 font-mono">{short(t.account)}</span>
-            <span className={t.kind === "buy" ? "text-black" : "text-black"}>
+          <div key={i} className="flex items-center justify-between gap-2 text-xs">
+            <span className="text-neutral-500 font-mono shrink-0">{short(t.account)}</span>
+            <span className={"shrink-0 " + (t.kind === "buy" ? "text-green-600" : "text-red-600")}>
               {t.kind === "buy" ? "▲" : "▼"} {t.kind}
             </span>
-            <span className="text-neutral-600">{fmtXno(t.priceRaw)}</span>
-            <span className="text-neutral-400">{timeAgo(t.time)}</span>
+            <span className="text-neutral-600 truncate">
+              {fmtXno(tradeXno(t))} XNO{usd != null && <span className="text-neutral-500"> ({fmtUsd(tradeXno(t), usd)})</span>}
+            </span>
+            <span className="text-neutral-400 shrink-0">{timeAgo(t.time)}</span>
           </div>
         ))}
       </div>
@@ -2098,7 +2123,7 @@ function CreateToken({
         <input className={inputC} placeholder="https://t.me/… (optional)" value={telegram} onChange={(e) => setTelegram(e.target.value)} />
       </div>
       <button className={btn} disabled={busy} onClick={launch}>
-        {busy ? "launching…" : "Create coin (0.000002 XNO)"}
+        {busy ? "launching…" : "Launch Token (0.000002 XNO)"}
       </button>
       <p className="text-[11px] text-neutral-400">creator keeps 5% · 1 raw data fee per op</p>
     </div>
@@ -2142,7 +2167,7 @@ function Portfolio({ tokens, onSelect, account }: { tokens: Token[]; onSelect: (
               </div>
               <div className="text-right">
                 <p className="text-sm font-bold">{fmtXno(valueRaw.toString())} XNO</p>
-                <p className={"text-[11px] " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-black" : "text-black")}>{pctStr(t.change24h)}</p>
+                <p className={"text-[11px] " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-green-600" : "text-red-600")}>{pctStr(t.change24h)}</p>
               </div>
             </button>
           );
@@ -2155,7 +2180,7 @@ function Portfolio({ tokens, onSelect, account }: { tokens: Token[]; onSelect: (
 const TABS: { id: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet"; label: string; icon: string }[] = [
   { id: "explore", label: "Explore", icon: "🏠" },
   { id: "ranks", label: "Ranks", icon: "🏆" },
-  { id: "create", label: "Create", icon: "✨" },
+  { id: "create", label: "Launch", icon: "✨" },
   { id: "scan", label: "Explorer", icon: "🔎" },
   { id: "wallet", label: "Wallet", icon: "👛" },
 ];

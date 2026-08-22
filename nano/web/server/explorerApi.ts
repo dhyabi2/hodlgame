@@ -21,10 +21,10 @@ const pubToAddress = (pub: string) => nanocurrency.deriveAddress(pub.toLowerCase
 
 type Raw = Awaited<ReturnType<typeof raw>>;
 
-function meta(regRow: any) {
+function meta(tokenId: string, regRow: any) {
   return {
-    name: regRow?.name ?? "",
-    symbol: regRow?.symbol ?? "",
+    name: regRow?.name || `Coin ${tokenId.slice(0, 6)}`,
+    symbol: regRow?.symbol || tokenId.slice(0, 4).toUpperCase(),
     image: regRow?.image ?? "",
     description: regRow?.description ?? "",
     website: regRow?.website ?? "",
@@ -37,7 +37,7 @@ function enrich(deltas: OpDelta[], m: Raw) {
   const edges = m.idx.getDepositEdges();
   return deltas.map((d) => {
     const r = m.meta.get(d.tokenId);
-    return { ...d, name: r?.name ?? "", symbol: r?.symbol ?? "", depositEdge: edges.get(d.hash) ?? null };
+    return { ...d, name: r?.name || `Coin ${d.tokenId.slice(0, 6)}`, symbol: r?.symbol || d.tokenId.slice(0, 4).toUpperCase(), depositEdge: edges.get(d.hash) ?? null };
   });
 }
 
@@ -69,7 +69,7 @@ export async function stats() {
     if (a) {
       for (const t of a.trades) if (now - t.time <= 86400) vol24 += BigInt(t.amountRaw);
       tokens.push({
-        tokenId, ...meta(m.meta.get(tokenId)),
+        tokenId, ...meta(tokenId, m.meta.get(tokenId)),
         priceRaw: a.priceRaw, marketCapRaw: a.marketCapRaw, holders: s.balances.size,
         change24h: changePct(a.series, 86400), createdAt: a.launchTime,
       });
@@ -156,18 +156,18 @@ export async function accountView(address: string, cursor = 0, limit = 50) {
   const m = await raw();
   const { deltas } = replayWithDeltas(m.events);
   const holdings: any[] = [];
-  const authorityOf: string[] = [];
-  const createdTokens: string[] = [];
+  const authorityOf: any[] = [];
+  const createdTokens: any[] = [];
   for (const [tokenId, s] of m.state) {
     const bal = s.balances.get(address) ?? 0n;
     const stk = s.staked.get(address) ?? 0n;
     const bank = s.banked.get(address) ?? 0n;
     if (bal > 0n || stk > 0n || bank > 0n) {
       const a = m.byToken.get(tokenId);
-      holdings.push({ tokenId, ...meta(m.meta.get(tokenId)), balance: bal.toString(), staked: stk.toString(), banked: bank.toString(), decimals: s.decimals, priceRaw: a?.priceRaw ?? "0" });
+      holdings.push({ tokenId, ...meta(tokenId, m.meta.get(tokenId)), balance: bal.toString(), staked: stk.toString(), banked: bank.toString(), decimals: s.decimals, priceRaw: a?.priceRaw ?? "0" });
     }
-    if (s.creator === address) createdTokens.push(tokenId);
-    if (m.metaAuthority.get(tokenId)?.authority === address) authorityOf.push(tokenId);
+    if (s.creator === address) createdTokens.push({ tokenId, ...meta(tokenId, m.meta.get(tokenId)) });
+    if (m.metaAuthority.get(tokenId)?.authority === address) authorityOf.push({ tokenId, ...meta(tokenId, m.meta.get(tokenId)) });
   }
   const allOps = enrich(deltas.filter((d) => d.sender === address), m).reverse();
   const page = allOps.slice(cursor, cursor + limit);
@@ -229,7 +229,7 @@ export async function tokenExplorer(tokenId: string, holderCursor = 0) {
   const initialSupply = BigInt(launch?.fields?.supply?.after ?? supply.toString());
   return {
     tokenId,
-    ...meta(m.meta.get(tokenId)),
+    ...meta(tokenId, m.meta.get(tokenId)),
     decimals: s.decimals,
     creator: s.creator,
     launched: s.launched,
@@ -285,7 +285,7 @@ export async function trustDashboard() {
     } catch {
       outstanding = "rpc-error";
     }
-    pools.push({ tokenId, symbol: m.meta.get(tokenId)?.symbol ?? "", poolAddress: address, indexedPoolXno: s.poolXno.toString(), onchainBalance: info?.balance ?? "0", outstandingObligations: outstanding });
+    pools.push({ tokenId, symbol: m.meta.get(tokenId)?.symbol || tokenId.slice(0, 4).toUpperCase(), poolAddress: address, indexedPoolXno: s.poolXno.toString(), onchainBalance: info?.balance ?? "0", outstandingObligations: outstanding });
   }
   const snap = await exportSnapshot();
   let snapshotAnchored = false;
@@ -321,7 +321,7 @@ export async function search(q: string) {
     const row = m.meta.get(tokenId);
     if ((row?.name ?? "").toLowerCase().includes(ql) || (row?.symbol ?? "").toLowerCase().includes(ql)) {
       const a = m.byToken.get(tokenId);
-      matches.push({ tokenId, ...meta(row), supply: s.supply.toString(), priceRaw: a?.priceRaw ?? "0", marketCapRaw: a?.marketCapRaw ?? "0", holders: s.balances.size });
+      matches.push({ tokenId, ...meta(tokenId, row), supply: s.supply.toString(), priceRaw: a?.priceRaw ?? "0", marketCapRaw: a?.marketCapRaw ?? "0", holders: s.balances.size });
     }
   }
   return { type: "tokens", data: matches };

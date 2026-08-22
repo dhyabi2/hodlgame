@@ -20,6 +20,7 @@ import {
   fmtNum,
 } from "../lib/trade";
 import { loadWallet, decryptSeed } from "../lib/wallet";
+import { useXnoUsd, fmtUsd } from "../lib/usd";
 
 interface PricePoint { time: number; priceRaw: string; marketCapRaw: string }
 interface Trade { kind: "buy" | "sell"; account: string; amountRaw: string; priceRaw: string; time: number }
@@ -174,6 +175,7 @@ function TopBar({
 }) {
   const [open, setOpen] = useState(false);
   const ch = token?.change24h ?? null;
+  const usd = useXnoUsd();
   return (
     <header className="sticky top-0 z-40 border-b border-neutral-300 bg-white/95 backdrop-blur">
       <div className="w-full flex items-center gap-4 px-3 sm:px-4 py-2.5">
@@ -210,9 +212,9 @@ function TopBar({
 
         {token && (
           <div className="hidden sm:flex items-baseline gap-4 text-xs">
-            <Stat label="price" value={`${fmtXno(token.price)} XNO`} />
+            <Stat label="price" value={`${fmtXno(token.price)} XNO${usd != null ? ` (${fmtUsd(token.price, usd)})` : ""}`} />
             <Stat label="24h" value={pctStr(ch)} valueClass={chColor(ch)} />
-            <Stat label="mcap" value={`${fmtXno(token.marketCap)}`} />
+            <Stat label="mcap" value={`${fmtXno(token.marketCap)}${usd != null ? ` (${fmtUsd(token.marketCap, usd)})` : ""}`} />
             <Stat label="liq" value={`${fmtXno(token.poolXno)}`} />
             <Stat label="holders" value={String(token.holders)} />
           </div>
@@ -225,7 +227,7 @@ function TopBar({
     </header>
   );
 }
-const chColor = (n: number | null) => (n == null ? "text-neutral-400" : n >= 0 ? "text-black" : "text-black");
+const chColor = (n: number | null) => (n == null ? "text-neutral-400" : n >= 0 ? "text-green-600" : "text-red-600");
 function Stat({ label, value, valueClass = "" }: { label: string; value: string; valueClass?: string }) {
   return (
     <div className="flex flex-col leading-tight">
@@ -633,10 +635,18 @@ function PositionCard({ token, keys, busy, setBusy, say }: { token: Token; keys:
       </div>
       <div className="flex gap-1">
         <input className={inpSm} placeholder="stake" inputMode="decimal" value={stakeAmt} onChange={(e) => setStakeAmt(e.target.value)} />
+        {[25, 50, 100].map((p) => (
+          <button key={p} className="shrink-0 rounded-none border border-neutral-300 px-1.5 text-[10px] font-bold text-neutral-600 hover:border-black" disabled={bal <= 0n}
+            onClick={() => setStakeAmt(fmtTok(((bal * BigInt(p)) / 100n).toString(), token.decimals))}>{p === 100 ? "MAX" : `${p}%`}</button>
+        ))}
         <button className={miniBtn} disabled={busy || bal <= 0n} onClick={doStake}>Stake</button>
       </div>
       <div className="flex gap-1">
         <input className={inpSm} placeholder="unstake" inputMode="decimal" value={unstakeAmt} onChange={(e) => setUnstakeAmt(e.target.value)} />
+        {[25, 50, 100].map((p) => (
+          <button key={p} className="shrink-0 rounded-none border border-neutral-300 px-1.5 text-[10px] font-bold text-neutral-600 hover:border-black" disabled={staked <= 0n}
+            onClick={() => setUnstakeAmt(fmtTok(((staked * BigInt(p)) / 100n).toString(), token.decimals))}>{p === 100 ? "MAX" : `${p}%`}</button>
+        ))}
         <button className={miniBtn} disabled={busy || staked <= 0n} onClick={doUnstake}>Unstake</button>
       </div>
       <button
@@ -713,20 +723,23 @@ function DepthCurve({ token }: { token: Token }) {
 // ── live trades tape ────────────────────────────────────────────────────────
 function Tape({ token, keys }: { token: Token; keys: Keys | null }) {
   const trades = [...token.trades].reverse();
+  const usd = useXnoUsd();
+  const tradeXno = (t: Trade) => ((BigInt(t.amountRaw) * BigInt(t.priceRaw)) / 10n ** BigInt(token.decimals)).toString();
   return (
     <div className="flex h-full flex-col">
       <p className="mb-2 text-sm font-bold text-neutral-700">Trades</p>
-      <div className="grid grid-cols-[1fr_auto_auto] gap-x-2 text-[10px] uppercase tracking-wider text-neutral-400 pb-1 border-b border-neutral-300">
-        <span>price (XNO)</span><span className="text-right">size</span><span className="text-right">age</span>
+      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-2 text-[10px] uppercase tracking-wider text-neutral-400 pb-1 border-b border-neutral-300">
+        <span>price (XNO)</span><span className="text-right">size</span><span className="text-right">value</span><span className="text-right">age</span>
       </div>
       <div className="flex-1 overflow-y-auto">
         {trades.length === 0 && <p className="py-6 text-center text-xs text-neutral-400">no trades yet</p>}
         {trades.slice(0, 60).map((t, i) => {
           const mine = keys && t.account === keys.address;
           return (
-            <div key={i} className={"grid grid-cols-[1fr_auto_auto] gap-x-2 py-0.5 text-[11px] tabular-nums " + (mine ? "bg-neutral-50 rounded" : "")}>
-              <span className={t.kind === "buy" ? "text-black" : "text-black"}>{fmtXno(t.priceRaw)}</span>
+            <div key={i} className={"grid grid-cols-[1fr_auto_auto_auto] gap-x-2 py-0.5 text-[11px] tabular-nums " + (mine ? "bg-neutral-50 rounded" : "")}>
+              <span className={t.kind === "buy" ? "text-green-600" : "text-red-600"}>{fmtXno(t.priceRaw)}</span>
               <span className="text-right text-neutral-600">{fmtTok(t.amountRaw, token.decimals)}</span>
+              <span className="text-right text-neutral-500">{usd != null ? fmtUsd(tradeXno(t), usd) : fmtXno(tradeXno(t))}</span>
               <span className="text-right text-neutral-400">{timeAgo(t.time)}</span>
             </div>
           );

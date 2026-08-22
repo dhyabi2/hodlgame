@@ -80,6 +80,7 @@ export default function PriceChart({
   const chartRef = useRef<IChartApi | null>(null);
   const priceRef = useRef<ISeriesApi<"Area"> | ISeriesApi<"Candlestick"> | null>(null);
   const volRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const maRef = useRef<ISeriesApi<"Line"> | null>(null);
   // keep latest props for the data-updater without re-creating the chart
   const dataRef = useRef({ series, trades, decimals });
   dataRef.current = { series, trades, decimals };
@@ -131,6 +132,14 @@ export default function PriceChart({
     vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
     volRef.current = vol;
 
+    // 20-period moving average overlay — the standard "is this above/below
+    // trend" reference line traders expect on any serious chart.
+    const ma = chart.addLineSeries({
+      color: "#b8860b", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      priceFormat: { type: "custom", formatter: (p: number) => fmtP(p / scaleRef.current), minMove: 1e-8 },
+    });
+    maRef.current = ma;
+
     applyData(true);
 
     chart.subscribeCrosshairMove((param) => {
@@ -143,7 +152,7 @@ export default function PriceChart({
 
     const onResize = () => wrap.current && chart.applyOptions({ width: wrap.current.clientWidth });
     window.addEventListener("resize", onResize);
-    return () => { window.removeEventListener("resize", onResize); chart.remove(); chartRef.current = null; priceRef.current = null; volRef.current = null; };
+    return () => { window.removeEventListener("resize", onResize); chart.remove(); chartRef.current = null; priceRef.current = null; volRef.current = null; maRef.current = null; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [type, tf]);
 
@@ -161,6 +170,15 @@ export default function PriceChart({
     }));
     if (type === "candles") (p as ISeriesApi<"Candlestick">).setData(scaled);
     else (p as ISeriesApi<"Area">).setData(scaled.map((c) => ({ time: c.time, value: c.close })));
+    if (maRef.current) {
+      const PERIOD = 20;
+      const maData = scaled.map((c, i) => {
+        const from = Math.max(0, i - PERIOD + 1);
+        const win = scaled.slice(from, i + 1);
+        return { time: c.time, value: win.reduce((a, x) => a + x.close, 0) / win.length };
+      });
+      maRef.current.setData(maData);
+    }
     if (v) v.setData(buildVolume(trades, secs, decimals));
     const cands = buildCandles(series, secs);
     const last = cands[cands.length - 1];
@@ -182,6 +200,13 @@ export default function PriceChart({
               onClick={() => setType(t)}>{t === "candles" ? "Candles" : "Line"}</button>
           ))}
         </div>
+        {cands.length > 0 && (
+          <span className="hidden sm:inline text-[10px] text-neutral-500 tabular-nums">
+            H <span className="text-green-700">{fmtP(Math.max(...cands.map((c) => c.high)))}</span>{" "}
+            L <span className="text-red-600">{fmtP(Math.min(...cands.map((c) => c.low)))}</span>
+            <span className="ml-2 text-amber-600">— MA20</span>
+          </span>
+        )}
         <div className="flex gap-0.5">
           {TF.map((t, i) => (
             <button key={t.k}
