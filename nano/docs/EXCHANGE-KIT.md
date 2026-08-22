@@ -1,7 +1,14 @@
-# HoldFun Exchange Integration Kit
+# HodlGame Exchange Integration Kit
 
-Everything an exchange needs to list a HoldFun token. The one fact that shapes
-it all: **a HoldFun token is not a native Nano asset** — its balances live in
+> **Scope note (Direct-Settlement v2, 2026-08-22):** everything below about pool
+> accounts, custody, and the sweep applies **only to legacy pooled tokens**
+> (launched with opcode `0x01`). v2 zero-custody tokens (opcode `0x0b`) have no
+> pool account: the sweep skips them entirely and settlement is wallet-to-wallet
+> at trade time. See `../SPEC.md` §8 (or `nano/SPEC.md` from the repo root).
+
+
+Everything an exchange needs to list a HodlGame token. The one fact that shapes
+it all: **a HodlGame token is not a native Nano asset** — its balances live in
 an off-chain deterministic ledger computed by replaying Nano blocks. So an
 exchange doesn't query a chain balance; it **verifies the state root** and
 reads the balance from a replay it can reproduce. That verifiability is the
@@ -39,7 +46,7 @@ zero-trust path.)
 
 Every user is a bare `nano_` keypair; a token `transfer` credits the recipient
 account in the replayed ledger. Give each customer a **deterministic deposit
-account** derived from YOUR master seed (HoldFun never sees it):
+account** derived from YOUR master seed (HodlGame never sees it):
 
 ```ts
 import { depositAddress } from "server/exchange";

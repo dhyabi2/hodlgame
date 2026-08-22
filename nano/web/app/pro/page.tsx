@@ -543,7 +543,9 @@ function OrderTicket({ token, keys, say }: { token: Token; keys: Keys | null; sa
     } finally { setBusy(false); }
   };
 
-  const noPool = !token.pool || BigInt(token.poolXno) <= 0n;
+  // Direct (zero-custody) tokens have NO pool account by design — tradeability
+  // is purely "virtual reserves seeded", never a pool address existing.
+  const noPool = token.direct ? BigInt(token.poolXno) <= 0n : !token.pool || BigInt(token.poolXno) <= 0n;
 
   return (
     <div className="flex h-full flex-col gap-3">
@@ -640,7 +642,14 @@ function PositionCard({ token, keys, busy, setBusy, say }: { token: Token; keys:
         <Row2 l="value" r={`${fmtXno(valueRaw.toString())} XNO`} />
         <Row2 l="staked" r={`${fmtTok(token.myStaked, token.decimals)}`} />
         <Row2 l="claimable" r={`${fmtXno(token.myClaimable)} XNO`} rClass="text-white" />
-        <Row2 l="game balance" r={`${fmtXno(token.myCredit)} XNO`} />
+        {token.direct ? (
+          <>
+            <Row2 l="collateral" r={`${fmtXno(token.myEarmark)} XNO`} />
+            <Row2 l="in payout line" r={`${fmtXno(token.myQueueOwed)} XNO`} rClass="text-white" />
+          </>
+        ) : (
+          <Row2 l="game balance" r={`${fmtXno(token.myCredit)} XNO`} />
+        )}
       </div>
       <div className="flex gap-1">
         <input className={inpSm} placeholder="stake" inputMode="decimal" value={stakeAmt} onChange={(e) => setStakeAmt(e.target.value)} />

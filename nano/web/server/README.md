@@ -1,6 +1,13 @@
 # Operator — indexer + custody (v1)
 
-A single deployable unit: replays Nano blocks into HoldFun's deterministic token
+> **Scope note (Direct-Settlement v2, 2026-08-22):** everything below about pool
+> accounts, custody, and the sweep applies **only to legacy pooled tokens**
+> (launched with opcode `0x01`). v2 zero-custody tokens (opcode `0x0b`) have no
+> pool account: the sweep skips them entirely and settlement is wallet-to-wallet
+> at trade time. See `../SPEC.md` §8 (or `nano/SPEC.md` from the repo root).
+
+
+A single deployable unit: replays Nano blocks into HodlGame's deterministic token
 state, and (for sells) signs XNO payouts from the pool.
 
 ## Run
@@ -10,7 +17,7 @@ cd nano
 npm install
 NANO_RPC_KEY=RPC-KEY-... \
 POOL_SEED=<32-byte hex> \
-TOKEN_NAME="HoldFun" TOKEN_SYMBOL="HOLD" \
+TOKEN_NAME="HodlGame" TOKEN_SYMBOL="HOLD" \
 WATCHED_ACCOUNTS=<comma,sep,nano_,accounts> \
 npm run operator
 ```

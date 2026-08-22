@@ -1,7 +1,6 @@
 # Security Policy
 
-HoldFun custodies real value (the pool's XNO) and its correctness rests on a
-deterministic ledger. We take security seriously and welcome responsible
+HodlGame's correctness rests on a deterministic replay; v2 zero-custody tokens hold no pooled value at all (settlement is wallet-to-wallet), while legacy pooled tokens' XNO sits in pool accounts. We take security seriously and welcome responsible
 disclosure.
 
 ## Reporting a vulnerability

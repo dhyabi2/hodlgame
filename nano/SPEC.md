@@ -1,4 +1,4 @@
-# HoldFun on Nano — Phase 0 spec (encoding + state machine)
+# HodlGame on Nano — spec (encoding + state machine)
 
 This defines the deterministic core the whole L2 rests on. If two implementations
 replay the same Nano blocks, they must produce byte-identical state. Everything
@@ -9,9 +9,11 @@ below is deliberately free of timestamps and network calls.
 - **Creator** — the Nano account that signs the `launch` block.
 - **Token ledger** — a virtual ledger (balances/stakes/pool), derived by indexers.
   It has **no key**; its only "authority" is the deterministic rule set below.
-- **Pool account** — a Nano address holding XNO. Buys are trustless sends to it;
-  sells are paid out by a `t-of-n` threshold signature (custody, not part of this
-  state-machine spec).
+- **Pool account** *(legacy lane — tokens launched with `0x01` only)* — a Nano
+  address holding XNO. Buys are trustless sends to it; sells are paid out by a
+  `t-of-n` threshold signature (custody, not part of this state-machine spec).
+  **Direct-Settlement v2 tokens (launched with `0x0b`) have no pool account at
+  all** — see §8.
 - **Indexer** — replays blocks, serves `/state`, `/balance`, `/price`, `/history`.
 
 ## 2. On-chain encoding
@@ -27,7 +29,14 @@ Each operation is a Nano **state block** where:
 | `balance` | 0 (data-only block; buys instead carry the XNO value) |
 
 Op codes: `launch=0x01, transfer=0x02, buy=0x03, sell=0x04, stake=0x05,
-unstake=0x06, claim=0x07, seedLiq=0x08, addLiq=0x09`.
+unstake=0x06, claim=0x07, seedLiq=0x08, addLiq=0x09, withdraw=0x0a,
+launchDirect=0x0b` (same byte layout as `launch`; marks the token
+**Direct-Settlement / zero-custody**, §8).
+
+Fragment links (`0xE0 | opcode` marker across two chained 1-raw blocks) carry
+two-amount ops fully on-chain: `transfer(to, amount)`, `sell(tokens, minXno)`,
+`buy(xno, minTokens)` (direct self-earmark buys declare their xno this way),
+and `seedLiq/addLiq(xno, tokens)` (direct virtual seeds).
 
 Ops that don't fit 31 bytes (e.g. `launch` with name/IPFS CID) are encoded as
 **commit-reveal**: `link = blake2b(payload)`, and the payload is fetched from any
@@ -181,3 +190,64 @@ buy (e.g. slippage) is refunded the deposit amount by custody reconciliation
 (`poolReceived − creditedBuyXno`), a sender who never depositing cannot refund.
 This mirrors the Velas reference's deposit→commitment chain
 (`verifyXNOPrivacyProtocol/src/vela_indexer.py`).
+
+## 8. Direct-Settlement v2 (zero-custody tokens)
+
+Tokens launched with `launchDirect (0x0b)` never have a pool account. The AMM
+reserves are **virtual** (pure replay quantities); real XNO only ever moves
+wallet-to-wallet between players. Nobody — operator included — can custody,
+freeze, or redirect traders' money, because nothing ever holds it.
+
+**Virtual seed.** `seedLiq/addLiq` for a direct token is a fragment pair
+declaring `(xno, tokens)`. The declared xno is a price-curve setting, not a
+deposit — it claims no real money and costs 2 raw. A creator dumping their 5%
+into fresh virtual liquidity receives exactly **zero** until real buyers have
+committed real collateral (their sell has no earmark, and the queue quotes at
+coverage 0).
+
+**Buy — two lanes.**
+1. *Queue-routed*: the buy op chains from a real XNO send **to a queued
+   seller's own address** (validity-bound to the deposit's destination). Tokens
+   mint through the curve on `min(amount, that seller's residual owed)`; any
+   excess is recorded as the seller's `prepaid` (nets their future proceeds,
+   never a second mint).
+2. *Self-earmark* (only when no seller is owed): a fragment buy declares its
+   xno; validity requires the **signed carrier-block balance** ≥ xno + the
+   buyer's existing floor. Nothing moves — the amount stays in the buyer's own
+   wallet as **earmarked collateral at cost**.
+
+**Earmarks, floors, policing.** Each earmark holder has a **ratcheting floor**
+`= min(earmark, current sell-value of the position)` — it only ever falls, and
+released collateral returns to the holder's free control. Every block of every
+watched chain contributes its **signed balance** as an observation event; if an
+account's balance drops below the **sum of its floors across all direct
+tokens**, each position is voided proportionally (tokens return to the virtual
+reserves, queued claims shrink, earmark/floor drop to what the chain proves).
+One XNO can never double-count as collateral in two games.
+
+**Sell — three-layer netting.** Quote `out` on the curve, then net in order:
+(1) `prepaid`; (2) **self-net** `min(remainder, earmark, signed exit-block
+balance)` — settled instantly by releasing the seller's own collateral, zero
+counterparty (the actual-balance cap means a defector cannot self-net what the
+chain proves gone); (3) the rest — realized appreciation — joins a FIFO
+**queue**, quoted at `face × min(1, R)` where coverage
+`R = Σ other holders' floors / total claims`; the haircut's shaved part returns
+to the virtual reserves. The accounting identity (regression-tested): **the
+flow-backed queue equals exactly unpaid exit-realized appreciation** (+
+defection shortfalls). `withdraw` is **invalid** on direct tokens — they settle
+at sell.
+
+## 9. Canonical order & replay (applies to all tokens)
+
+- **Order**: events sort by `(lamport, height, hash, sub)`. Lamport clocks are
+  derived from the lattice itself: `lam(b) = 1 + max(lam(previous),
+  lam(source send))` for receives/opens (unknown external sources count 0).
+  This orders cross-account events by how value actually flowed — a wallet
+  funded after a launch sorts after it, however young its chain is. `sub`
+  orders a block's op (0) before its own balance observation (1).
+- **Stable fixpoint replay**: events fold in canonical order; an op that is
+  invalid *now* is deferred and retried after **every** subsequent successful
+  apply, so it anchors at the **earliest point it becomes valid**. Appending
+  later events can never change where an earlier event applied — history never
+  re-prices. Every replayer runs the identical procedure over the identical
+  ordered list, so state stays byte-identical.

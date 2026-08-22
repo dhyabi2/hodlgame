@@ -1,10 +1,42 @@
 # Changelog
 
-All notable changes to HoldFun are documented here. The format is based on
+All notable changes to HodlGame are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). The project is pre-1.0;
 everything lands on `main`.
 
 ## [Unreleased]
+
+### Added — 2026-08-22 · Direct-Settlement v2 (zero-custody)
+- **Zero-custody tokens** (launch opcode `0x0b`, the default in the create form):
+  no pool account exists at all. Buys pay queued sellers **wallet-to-wallet**
+  (validity-bound to the deposit's destination) or stay in the buyer's own wallet
+  as **earmarked collateral at cost**, checked against the signed block balance.
+  Sells net prepayments → own earmark (capped by the signed exit-block balance) →
+  the remainder (realized appreciation) joins a FIFO queue quoted with a coverage
+  haircut and paid directly by future buys. Ratcheting floors + signed-balance
+  observations void defected collateral proportionally across tokens. `withdraw`
+  is invalid on direct tokens — they settle at sell. Live-verified end-to-end on
+  mainnet (queued appreciation paid to the seller's wallet exact to the raw).
+- **Virtual liquidity** — a direct token's seed is a fragment-declared price-curve
+  setting: no deposit, costs 2 raw. A creator dumping the 5% into fresh virtual
+  liquidity receives exactly zero until real buyers commit real collateral.
+- **Fragment links extended** — `buy(xno, minTokens)` and `seedLiq/addLiq(xno,
+  tokens)` now ride fragment pairs fully on-chain.
+- **Lamport causal ordering** — canonical order is now `(lamport, height, hash,
+  sub)` with clocks derived from the lattice itself (`lam = 1 + max(prev,
+  source-send)`), so cross-account events order by how value actually flowed.
+- **Stable fixpoint replay** — ops invalid at their canonical position defer and
+  anchor at the earliest point they become valid; appending later events can
+  never re-price already-applied history.
+
+### Fixed
+- **Regional RPC freeze** — identical Nano RPC POST bodies were served frozen for
+  15+ minutes from some regions (edge caching). Every RPC body now carries a
+  per-request nonce plus no-cache headers, so no edge cache can key it.
+
+### Changed
+- Pooled custody (pool accounts, FROST, the sweep) is now the **legacy lane**,
+  scoped to tokens launched with opcode `0x01` before v2.
 
 ### Added
 - **Pro trading terminal** (`/pro`) — single-token power view: canvas candlestick

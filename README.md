@@ -1,4 +1,4 @@
-# HoldFun — a memecoin launchpad as a Nano (XNO) Layer-2
+# HodlGame — a zero-custody memecoin game as a Nano (XNO) Layer-2
 
 [![CI](https://github.com/dhyabi2/holdergame/actions/workflows/ci.yml/badge.svg)](https://github.com/dhyabi2/holdergame/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -12,24 +12,27 @@
 > rest to everyone still staked. No contract can be rugged because there is no
 > contract — the ledger is *replayed*, not executed.
 
-HoldFun runs on **Nano (XNO)**: feeless, sub-second, energy-light. Nano has no smart
-contracts, so HoldFun is a **deterministic Layer-2** — the entire token ledger
+HodlGame runs on **Nano (XNO)**: feeless, sub-second, energy-light. Nano has no smart
+contracts, so HodlGame is a **deterministic Layer-2** — the entire token ledger
 (balances, the AMM, staking, rewards) is computed by anyone replaying signed Nano
-data blocks. The only real asset, the pool's XNO, sits in **threshold custody**
-(FROST 2-of-3). Nobody — including the operator — can mint, freeze, or rug.
+data blocks. Since **Direct-Settlement v2**, new tokens are **zero-custody**: there
+is **no pool account at all** — nobody, operator included, ever holds traders'
+money. A buy either pays a queued seller **wallet-to-wallet** or stays in the
+buyer's **own wallet** as earmarked collateral; a sell settles its principal
+**instantly from the seller's own collateral**, and only realized appreciation
+queues, paid directly by future buys.
 
 ```mermaid
 flowchart LR
-    U[User wallet] -->|signs op in block link| N[(Nano block-lattice)]
+    U[Buyer wallet · XNO stays here as collateral] -->|signs op in block link| N[(Nano block-lattice)]
+    U -->|queue-routed buy: XNO straight to seller| SW[Seller wallet]
     N -->|public blocks| I[Indexer · deterministic replay]
-    I --> S[Token ledger state<br/>balances · AMM · staking]
+    I --> S[Token ledger state<br/>balances · virtual AMM · earmarks · queue · staking]
     S --> API[Market / Explorer API]
     API --> W[Web app · Explorer · Pro terminal]
     S -. state root .-> V[In-browser verifier<br/>recomputes & compares]
-    P[Pool XNO] --- F[FROST 2-of-3 custody]
     style N fill:#0a0a0a,color:#fff
     style I fill:#0a0a0a,color:#fff
-    style F fill:#0a0a0a,color:#fff
 ```
 
 Every operation (launch, buy, sell, stake, unstake, claim, transfer, seed) is encoded
@@ -45,18 +48,20 @@ verify the server with their own machine.
 |------|-------------------|
 | **5% creator cap** | Creator share is `floor(supply × 5%)`, computed structurally at launch. No one can request more. |
 | **Supply locked** | Nothing mints after launch. Supply only ever *decreases*, via the burn. |
-| **Trading** | Constant-product AMM (XNO ⇄ token) with a **1% fee** retained in the pool. |
+| **Trading** | Constant-product AMM (XNO ⇄ token) with a **1% fee** retained in the (virtual) reserves. |
+| **Zero custody** (v2 tokens) | No pool account exists. Buys pay queued sellers wallet-to-wallet or self-collateralize in the buyer's own wallet (earmarks, policed against signed block balances). Sells settle principal instantly from the seller's own collateral; only realized appreciation queues, paid by future buys with a coverage haircut. |
+| **Anti-rug, mechanical** | A creator dumping the 5% into fresh virtual liquidity receives exactly **zero** until real buyers commit real collateral. |
 | **Holding is the game** | Staking earns a share of the XNO rebate vault, distributed **pro-rata by stake** (a bounded `rewardPerShare` accumulator — *not* block height, which an account can inflate). |
 | **Exit tax** | **Unstaking** pays a 20% tax: **5% burned** (permanent deflation) + **15% redistributed** to everyone still staked. |
 | **Consensus decimals** | A token's decimals are pinned in its launch block byte, so every indexer agrees on scale without trusting metadata. |
-| **Keyless ledger** | Pool accounts are **derived from chain data**; there is no admin key over the token ledger. |
+| **Keyless ledger** | v2 tokens have **no pool account at all**; legacy pooled tokens' accounts are derived from chain data. There is no admin key over the token ledger. |
 
 ## Features
 
 - **Deterministic token ledger** — pure state machine, replayable, byte-identical across parties ([`nano/core`](nano/core)).
 - **On-chain everything** — ops, slippage-protected trades (fragment links), signed metadata, signed comments, and metadata-authority anchors all live in Nano blocks.
 - **AMM + staking + rewards** — constant-product swaps, stake-to-earn XNO rebates, exit-tax deflation.
-- **FROST 2-of-3 custody** — the pool's XNO is held by a threshold signer set with pool-key rotation ([`docs/FROST-CUSTODY.md`](nano/docs/FROST-CUSTODY.md)).
+- **Direct-Settlement v2 (zero-custody)** — new tokens trade wallet-to-wallet with no pool account: earmarked collateral with ratcheting floors, signed-balance defection policing, and a FIFO appreciation queue paid directly by future buys. Legacy pooled tokens (pre-v2 launches) still replay under the old rules, with FROST threshold tooling retained only for those pools ([`docs/FROST-CUSTODY.md`](nano/docs/FROST-CUSTODY.md), superseded).
 - **Etherscan-style Explorer** — global op feed, op detail with raw-block hexdump + state deltas, token/account pages, proof-of-reserves, and **in-browser verification** ([`docs/EXPLORER-SPEC.md`](nano/docs/EXPLORER-SPEC.md)).
 - **Pro trading terminal** — `/pro`: candlestick chart, order ticket with live quote + hotkeys, AMM depth curve, live trade tape, holders.
 - **Exchange Integration Kit** — headless deposit/withdrawal, balance proofs, and Merkle balance proofs for listing a token ([`docs/EXCHANGE-KIT.md`](nano/docs/EXCHANGE-KIT.md)).
@@ -109,9 +114,9 @@ MIGRATION-XNO.md      the full Solana → Nano migration proposal
 | Doc | What it covers |
 |-----|----------------|
 | [`nano/SPEC.md`](nano/SPEC.md) | Byte encoding + the deterministic state machine |
-| [`MIGRATION-XNO.md`](MIGRATION-XNO.md) | Why & how HoldFun moved from Solana to Nano |
+| [`MIGRATION-XNO.md`](MIGRATION-XNO.md) | Why & how HodlGame moved from Solana to Nano |
 | [`docs/SECURITY-AUDIT.md`](nano/docs/SECURITY-AUDIT.md) | The break-the-validation method + confirmed fixes |
-| [`docs/FROST-CUSTODY.md`](nano/docs/FROST-CUSTODY.md) | Threshold custody of pool XNO + key rotation |
+| [`docs/FROST-CUSTODY.md`](nano/docs/FROST-CUSTODY.md) | *(superseded — legacy pools only)* Threshold custody + key rotation |
 | [`docs/EXPLORER-SPEC.md`](nano/docs/EXPLORER-SPEC.md) | The full Etherscan-parity explorer design |
 | [`docs/EXCHANGE-KIT.md`](nano/docs/EXCHANGE-KIT.md) | Listing a token on an exchange |
 | [`docs/TRUSTLESS-ROADMAP.md`](nano/docs/TRUSTLESS-ROADMAP.md) | Founder-independent continuity |

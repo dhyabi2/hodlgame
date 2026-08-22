@@ -1,14 +1,20 @@
-# HoldFun on Nano — BPMN 2.0 process models
+# HodlGame on Nano — BPMN 2.0 process models
+
+> **Scope note (Direct-Settlement v2, 2026-08-22):** diagrams involving the pool
+> account / custody / sweep describe the **legacy pooled lane** (opcode `0x01`).
+> v2 zero-custody tokens (opcode `0x0b`) settle wallet-to-wallet with no pool —
+> see `../../SPEC.md` §8.
+
 
 This folder contains **BPMN 2.0** models (`.bpmn` = XML) of every flow in the
-HoldFun Nano layer-2, documenting **how the whole thing works without smart
+HodlGame Nano layer-2, documenting **how the whole thing works without smart
 contracts** — and, since the trustless-continuity work
 (`docs/TRUSTLESS-ROADMAP.md`), **without any private inputs**: every flow
 below is a pure function of public chain data.
 
 ## The core idea (read first)
 
-Nano (XNO) has **no smart contracts**. HoldFun substitutes four primitives
+Nano (XNO) has **no smart contracts**. HodlGame substitutes four primitives
 that, together, reproduce a token ledger *deterministically*:
 
 1. **The token ledger is a pure function of signed data.** Every action is a

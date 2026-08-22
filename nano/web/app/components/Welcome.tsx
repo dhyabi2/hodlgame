@@ -6,6 +6,7 @@
 // monochrome, same design system as the rest of the app.
 
 import { useEffect, useRef, useState } from "react";
+import { LogoWord } from "./Logo";
 
 export const TERMS_KEY = "holdfun-terms-accepted"; // legacy prefix — do not rename (see VERCEL.md)
 
@@ -39,8 +40,8 @@ const MECHANISMS: { n: string; title: string; body: string }[] = [
   },
   {
     n: "04",
-    title: "The pool can't be emptied",
-    body: "Liquidity is mathematically protected: no trade can drain the pool — not a whale, not the creator, not anyone. Every XNO paid in stays in the pool, backing the price for everyone who remains. Anyone trying to buy it all only makes the remaining holders richer.",
+    title: "The creator can't cash out on you",
+    body: "A creator's 5% is worth nothing until real buyers commit real collateral — dumping it into a fresh coin pays exactly zero, by protocol math. And every buyer's collateral is watched by the ledger itself: drop your backing below the line and your position shrinks to match, automatically, for everyone to see. The rules don't trust anyone — they check everyone.",
   },
   {
     n: "05",
@@ -65,7 +66,7 @@ const TERMS: { h: string; p: string }[] = [
   },
   {
     h: "3. Nature of the platform",
-    p: "HodlGame is a self-custodial interface to a public, deterministic ledger game. Coins launched here are community game tokens created by users, not by us. They have no intrinsic value, represent no ownership, equity, debt, or claim against anyone, and are not offered as securities or investments of any kind. Sell proceeds accrue as an in-game XNO balance derived from the public ledger and settle on-chain when you choose to withdraw.",
+    p: "HodlGame is a self-custodial interface to a public, deterministic ledger game. Coins launched here are community game tokens created by users, not by us. They have no intrinsic value, represent no ownership, equity, debt, or claim against anyone, and are not offered as securities or investments of any kind. New coins settle wallet-to-wallet with no pooled funds: sale principal releases from your own collateral instantly, and any profit is a queued claim paid only by future buyers — it may pay slowly, partially, or never if buying stops. Legacy pooled coins settle sell proceeds as an in-game XNO balance that pays out on withdraw.",
   },
   {
     h: "4. Risk disclosure",
@@ -105,7 +106,9 @@ export default function Welcome({ onAccept }: { onAccept: () => void }) {
         {/* hero */}
         <p className="text-[10px] font-black uppercase tracking-[0.3em] text-neutral-500">Welcome to</p>
         <div className="mt-2 flex items-start justify-between gap-4">
-          <h1 className="text-5xl sm:text-7xl font-black tracking-tight leading-none">HODLGAME</h1>
+          <h1 className="leading-none" aria-label="HODLGAME">
+            <LogoWord height={44} className="w-full max-w-[560px] h-auto text-white" />
+          </h1>
           <a
             href="https://github.com/dhyabi2/holdergame"
             target="_blank"

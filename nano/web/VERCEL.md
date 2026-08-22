@@ -1,4 +1,4 @@
-# Deploying HoldFun to Vercel
+# Deploying HodlGame to Vercel
 
 **Production domain: [hodlgame.fun](https://hodlgame.fun)** (nanocrypto.fun remains attached and serves the same app) — attach it to the
 main Vercel project (Settings → Domains) and point the registrar's DNS at Vercel
@@ -86,7 +86,7 @@ for more than one store connected to `web`.
 
 ## Cron
 
-The sweep runs every minute via `/api/cron/sweep` (`vercel.json`). On the Vercel
+The sweep (LEGACY pooled tokens only — v2 zero-custody tokens have no pool and are skipped) runs every minute via `/api/cron/sweep` (`vercel.json`). On the Vercel
 **Hobby** plan crons are limited — use **Pro** for a live trading engine.
 
 ## What cannot run here

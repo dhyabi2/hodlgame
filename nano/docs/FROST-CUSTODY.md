@@ -1,5 +1,13 @@
 # FROST 2-of-3 pool custody (W1) — deployment runbook
 
+> **⚠️ SUPERSEDED (2026-08-22).** **Direct-Settlement v2** shipped: new tokens are
+> **zero-custody** — no pool account exists at all, so there is nothing to hold in
+> threshold custody. Buys pay queued sellers wallet-to-wallet or self-collateralize
+> in the buyer's own wallet; sells settle principal instantly from the seller's own
+> collateral. Everything below applies **only to legacy pooled tokens** (launched
+> with opcode `0x01` before v2). See `../SPEC.md` §8.
+
+
 Goal: retire the single `POOL_SEED` (one key that can drain every pool) for a
 **2-of-3 blake2b-FROST** group, reusing the production stack from
 `~/verifyXNOPrivacyProtocol` (BlackBird/VELA), which already runs live 2-of-3
@@ -9,10 +17,10 @@ own settlement replay before signing.
 
 ## Security level (honest)
 
-This gives HoldFun **exactly VELA's security level** — a large step up from
+This gives HodlGame **exactly VELA's security level** — a large step up from
 single-key. It defends:
 - **single-box compromise** (an attacker on one VPS gets one share < quorum);
-- **app-tier compromise** (a broken HoldFun coordinator can't move funds — a
+- **app-tier compromise** (a broken HodlGame coordinator can't move funds — a
   cosigner rejects any payout not owed per its own replay);
 - **one-box loss** (2-of-3 liveness).
 
@@ -32,7 +40,7 @@ Two-box loss freezes funds by design (keep the recovery shares safe).
 ## Prerequisite — DE-ROOT VELA's cosigners FIRST (mandatory)
 
 VELA's cosigners run `User=root` (`config/vela-cosigner.service`). Until that
-changes, a HoldFun `0600` share is readable by VELA's root process and the
+changes, a HodlGame `0600` share is readable by VELA's root process and the
 isolation is fiction. On each box:
 
 ```
@@ -47,9 +55,9 @@ systemctl daemon-reload && systemctl restart vela-cosigner
 > (`hostinger vps snapshots create <id>`), do one box at a time, and confirm
 > VELA still produces a 2-of-3 signature before moving on.
 
-## Stand up HoldFun's independent group
+## Stand up HodlGame's independent group
 
-Per box, as a **separate user** so a VELA compromise can't reach HoldFun's
+Per box, as a **separate user** so a VELA compromise can't reach HodlGame's
 share (and vice-versa):
 
 ```
@@ -57,7 +65,7 @@ adduser --system --group holdfun-cosigner
 install -d -m 0700 -o holdfun-cosigner -g holdfun-cosigner /opt/holdfun/data/frost
 ```
 
-HoldFun config (fresh secrets, NOT VELA's):
+HodlGame config (fresh secrets, NOT VELA's):
 - `/opt/holdfun/.cosigner_api_key`  ← `openssl rand -hex 32`
 - `/opt/holdfun/.verify_key`        ← `openssl rand -hex 32` (loopback to the verifier)
 - `FROST_DATA_DIR=/opt/holdfun/data/frost`, `COSIGNER_PORT=8083`
@@ -69,19 +77,19 @@ on loopback only.
 
 Two processes per cosigner box:
 1. **FROST cosigner** — `deploy/holdfun_cosigner.py` (this repo): VELA's FROST
-   cosigner with HoldFun's policy — it POSTs the payout `context` to the local
-   HoldFun verifier and signs only on approval.
-2. **HoldFun verifier** — `npm run operator` (server/server.ts) with
+   cosigner with HodlGame's policy — it POSTs the payout `context` to the local
+   HodlGame verifier and signs only on approval.
+2. **HodlGame verifier** — `npm run operator` (server/server.ts) with
    `POOL_SEED` (to derive pool ADDRESSES, never to sign), `VERIFY_KEY`,
    `NANO_RPC_KEY`, `WATCHED_ACCOUNTS`/anchor. Exposes `POST /frost/verify-payout`
    on loopback; the cosigner calls it. Fails closed.
 
 ## The coordinator
 
-On the coordinator box, run VELA's `frost_signer.py` pointed at HoldFun's key
+On the coordinator box, run VELA's `frost_signer.py` pointed at HodlGame's key
 group + a thin HTTP gateway exposing `POST /sign` (accepts the block fields +
-context from HoldFun's sweep, runs the FROST round, returns the signed block).
-HoldFun's operator reaches it via `FROST_COORDINATOR_URL` + `FROST_COORDINATOR_KEY`.
+context from HodlGame's sweep, runs the FROST round, returns the signed block).
+HodlGame's operator reaches it via `FROST_COORDINATOR_URL` + `FROST_COORDINATOR_KEY`.
 
 ## Key generation (DKG)
 
@@ -126,10 +134,10 @@ self-register. Destroy `POOL_SEED` only after confirming the FROST balances
 1. Snapshot all 3 boxes.
 2. De-root VELA cosigners (one at a time, verify VELA signs).
 3. Create holdfun-cosigner user + dirs + config on all 3.
-4. Deploy HoldFun verifier + cosigner; deploy coordinator + gateway.
+4. Deploy HodlGame verifier + cosigner; deploy coordinator + gateway.
 5. Run DKG; encrypt shares.
-6. Set `FROST_COORDINATOR_URL` on the HoldFun operator; sweeps now threshold-sign.
+6. Set `FROST_COORDINATOR_URL` on the HodlGame operator; sweeps now threshold-sign.
 7. Migrate each pool; destroy POOL_SEED.
 
-Until step 6, HoldFun keeps signing single-key (unchanged) — the switch is a
+Until step 6, HodlGame keeps signing single-key (unchanged) — the switch is a
 single env var, reversible by unsetting it.

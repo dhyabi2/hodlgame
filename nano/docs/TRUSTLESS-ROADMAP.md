@@ -1,5 +1,13 @@
 # Trustless Continuity Roadmap
 
+> **⚠️ SUPERSEDED (2026-08-22).** **Direct-Settlement v2** shipped: new tokens are
+> **zero-custody** — no pool account exists at all, so there is nothing to hold in
+> threshold custody. Buys pay queued sellers wallet-to-wallet or self-collateralize
+> in the buyer's own wallet; sells settle principal instantly from the seller's own
+> collateral. Everything below applies **only to legacy pooled tokens** (launched
+> with opcode `0x01` before v2). See `../SPEC.md` §8.
+
+
 > **Status (2026-08-21):** SHIPPED — W2 (chain-derived settlement), W3
 > (fragment links), W5 (ipfs:// images), W7 (anchor discovery), W8
 > (chain-derived pools + verify CLI), W9 (nano.to + nano-gpt fallback + local block
@@ -20,11 +28,11 @@
 > collapses the ladder: skip Layer 1 (musig-nano 2-of-2) entirely and lift
 > BlackBird's `frost/src/suite.rs` ciphersuite + DKG/sign CLI + coordinator
 > orchestration for the endgame directly. The key adoption beyond threshold
-> signing itself: **cosigner-as-verifier** — HoldFun's second signer must
+> signing itself: **cosigner-as-verifier** — HodlGame's second signer must
 > re-derive expected payouts from its own indexer replay before releasing a
 > share (settlement is already deterministic, so this check is cheap).
 
-Goal: HoldFun keeps working if the founder — or any single person, secret, or
+Goal: HodlGame keeps working if the founder — or any single person, secret, or
 company account — disappears. Each section is one finding from the continuity
 audit, the candidate fixes that were brainstormed and evaluated, the winning
 design, and what trust remains afterwards. Build order is at the end.

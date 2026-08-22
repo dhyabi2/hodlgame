@@ -1,17 +1,24 @@
-# HoldFun Growth Mechanics — endogenous game theory
+# HodlGame Growth Mechanics — endogenous game theory
 
-> How HoldFun manufactures activity and virality **from within the protocol** —
+> **Scope note (Direct-Settlement v2, 2026-08-22):** everything below about pool
+> accounts, custody, and the sweep applies **only to legacy pooled tokens**
+> (launched with opcode `0x01`). v2 zero-custody tokens (opcode `0x0b`) have no
+> pool account: the sweep skips them entirely and settlement is wallet-to-wallet
+> at trade time. See `../SPEC.md` §8 (or `nano/SPEC.md` from the repo root).
+
+
+> How HodlGame manufactures activity and virality **from within the protocol** —
 > self-reinforcing incentive loops encoded in the deterministic state machine,
 > funded only by value that already flows through the system. No external
 > treasury, no paid acquisition, no emissions, no determinism breaks.
 >
 > Produced with the Brainstorming methodology (5 parallel branches: referral,
-> retention, launch, status, sybil), then reconciled against HoldFun's real
+> retention, launch, status, sybil), then reconciled against HodlGame's real
 > mechanics and constraints.
 
 ## The one idea everything else hangs on
 
-HoldFun already has a **positive-sum-to-hold / value-leaks-on-exit** core: the
+HodlGame already has a **positive-sum-to-hold / value-leaks-on-exit** core: the
 20% unstake tax burns 5% and pays **15% pro-rata to everyone still staked**. So
 in any token with real interest, the Nash equilibrium for a rational holder is:
 
@@ -81,7 +88,7 @@ the protocol, not extracting from it.
 immutable) binds `referee → referrer` in replayed state; the indexer builds an
 immutable `ReferralMap` from public blocks. On each unstake, settlement splits
 the tax `5% burn / 13% stakers / 2% referrer` and credits the referrer's banked
-XNO (claimed with the existing `claim` op, paid from FROST pool custody). All
+XNO (claimed with the existing `claim` op; on legacy pooled tokens paid from pool custody — on v2 zero-custody tokens rewards are token-denominated and settle like any other position). All
 arithmetic, fully re-derivable.
 
 **Sybil/collusion.** Self-referral rejected (`referee == referrer`). Farming is

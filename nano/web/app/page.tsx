@@ -20,6 +20,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { toRaw, clampSlippage, isNanoAddr, fmtNum, fmtXno, fmtXnoPlain } from "./lib/trade";
 import { useXnoUsd, fmtUsd } from "./lib/usd";
 import Welcome, { useTermsAccepted } from "./components/Welcome";
+import { LogoWord, LogoMark } from "./components/Logo";
 
 const PriceChart = dynamic(() => import("./components/PriceChart"), { ssr: false });
 
@@ -429,8 +430,9 @@ export default function Home() {
     <main className="min-h-screen bg-black text-white pb-20 overflow-x-hidden">
       <header className={"sticky top-0 z-20 h-14 flex items-center bg-black/90 backdrop-blur border-b " + (!selectedId && tab === "explore" ? "border-transparent" : "border-neutral-800")}>
         <div className="w-full px-4 flex items-center gap-3 sm:gap-5">
-          <button className="text-base sm:text-lg font-black tracking-[0.1em] text-white shrink-0" onClick={() => { setSelectedId(null); setTab("explore"); }}>
-            HODLGAME
+          <button className="text-white shrink-0" title="HODLGAME" onClick={() => { setSelectedId(null); setTab("explore"); }}>
+            <LogoWord height={16} className="hidden sm:block" />
+            <LogoMark size={26} className="sm:hidden" />
           </button>
           {/* Desktop nav only — on mobile the bottom tab bar handles navigation. */}
           <nav className="hidden sm:flex items-center gap-4 text-xs font-bold uppercase tracking-wide text-neutral-400 min-w-0 overflow-x-auto">
@@ -552,9 +554,10 @@ function UnlockModal({
   goSetup: () => void;
 }) {
   const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (!open) { setPw(""); setErr(""); } }, [open]);
+  useEffect(() => { if (!open) { setPw(""); setPw2(""); setErr(""); } }, [open]);
   if (!open) return null;
 
   const unlock = async () => {
@@ -566,6 +569,20 @@ function UnlockModal({
       if (!/^[0-9a-fA-F]{64}$/.test(s)) return setErr("wrong password");
       onUnlocked(keysFromSeed(s));
     } catch { setErr("wrong password"); }
+    finally { setBusy(false); }
+  };
+
+  // Inline creation: a newcomer who clicked Buy on a shared coin link gets a
+  // wallet in one step WITHOUT being navigated away from the coin.
+  const create = async () => {
+    if (pw.length < 6) return setErr("password must be ≥ 6 chars");
+    if (pw !== pw2) return setErr("passwords do not match");
+    setBusy(true); setErr("");
+    try {
+      const s = genSeed();
+      saveWallet(await encryptSeed(s, pw));
+      onUnlocked(keysFromSeed(s));
+    } catch (e: any) { setErr(e?.message ?? "encryption failed"); }
     finally { setBusy(false); }
   };
 
@@ -593,8 +610,29 @@ function UnlockModal({
           </>
         ) : (
           <>
-            <p className="text-xs text-neutral-400">You need a wallet to trade. It’s created and encrypted right in your browser — takes a few seconds.</p>
-            <button className={btn} onClick={goSetup}>Create / import wallet →</button>
+            <p className="text-xs text-neutral-400">Create your wallet right here — it’s generated and encrypted in your browser and never leaves it. Takes ten seconds; you stay on this coin.</p>
+            <input
+              className={inputC}
+              type="password"
+              placeholder="choose a password (≥ 6 chars)"
+              value={pw}
+              autoFocus
+              onChange={(e) => setPw(e.target.value)}
+            />
+            <input
+              className={inputC}
+              type="password"
+              placeholder="confirm password"
+              value={pw2}
+              onChange={(e) => setPw2(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && create()}
+            />
+            {err && <p className="text-xs text-white">{err}</p>}
+            <button className={btn} disabled={busy} onClick={create}>{busy ? "creating…" : "Create wallet"}</button>
+            <p className="text-[11px] text-neutral-500">
+              Back up your seed from the Wallet tab when you get a moment — it’s the only recovery.{" "}
+              <button className="underline hover:text-white" onClick={goSetup}>import an existing seed instead →</button>
+            </p>
           </>
         )}
       </div>
@@ -1798,6 +1836,8 @@ function TokenDetail({
             buy={buy}
             sell={sell}
             sendOp={sendOp}
+            address={keys?.address ?? null}
+            promptUnlock={promptUnlock}
           />
         ) : (
           <CommentThread tokenId={token.tokenId} comments={token.comments} keys={keys} isDev={keys?.address === token.creator} />
@@ -1910,6 +1950,8 @@ function TradePanel({
   buy,
   sell,
   sendOp,
+  address,
+  promptUnlock,
 }: {
   token: Token;
   myHolding: Holder | undefined;
@@ -1922,6 +1964,8 @@ function TradePanel({
   buy: () => Promise<void>;
   sell: () => Promise<void>;
   sendOp: (tokenId: string, op: Op, label: string) => Promise<void>;
+  address: string | null;
+  promptUnlock: () => void;
 }) {
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const slip = clampSlippage(slippage);
@@ -1956,6 +2000,48 @@ function TradePanel({
 
   return (
     <div className="space-y-3">
+      {/* Fast onboarding: a newcomer arriving on a shared coin link gets the
+          shortest possible path — create a wallet in place (UnlockModal),
+          then fund it by scanning/tapping straight from their existing XNO
+          wallet. Incoming funds auto-receive every few seconds; there is no
+          manual receive step and no navigation away from the coin. */}
+      {!address && (
+        <button
+          className="w-full rounded-none border border-neutral-700 bg-neutral-950 p-3 text-left hover:border-white"
+          onClick={promptUnlock}
+        >
+          <span className="block text-xs font-black uppercase tracking-wide">New here? Start in 30 seconds</span>
+          <span className="mt-1 block text-[11px] text-neutral-500">
+            1. Create a wallet (right here, stays in your browser) · 2. Send it XNO from any wallet · 3. Buy.
+          </span>
+        </button>
+      )}
+      {address && BigInt(xnoBal || "0") <= 0n && (
+        <div className="rounded-none border border-neutral-700 bg-neutral-950 p-3">
+          <p className="text-xs font-black uppercase tracking-wide">Fund your wallet to buy</p>
+          <div className="mt-2 flex items-start gap-3">
+            <div className="shrink-0 bg-white p-1.5">
+              <QRCodeSVG value={`nano:${address}`} size={96} bgColor="#ffffff" fgColor="#000000" level="M" />
+            </div>
+            <div className="min-w-0 space-y-1.5">
+              <p className="text-[11px] text-neutral-400 leading-relaxed">
+                Scan with any XNO wallet, or send to this address. Nano is feeless and lands in seconds.
+              </p>
+              <button
+                className="max-w-full truncate rounded-none bg-neutral-900 px-2 py-1 text-[11px] font-mono text-neutral-200 hover:bg-neutral-800"
+                title={`${address} — click to copy`}
+                onClick={() => { try { navigator.clipboard.writeText(address); } catch {} }}
+              >
+                {short(address)} ⧉ copy
+              </button>
+              <a className="block text-[11px] font-bold text-white underline" href={`nano:${address}`}>
+                Open in your XNO wallet →
+              </a>
+              <p className="text-[10px] text-neutral-600">waiting for XNO… this page updates by itself the moment it arrives</p>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between text-[11px] text-neutral-500">
         <span>balance: {side === "buy" ? `${fmtXno(xnoBal)} XNO` : `${fmtTok(myHolding?.balanceRaw, token.decimals)} ${tokSym(token)}`}</span>
         <label className="flex items-center gap-1.5">

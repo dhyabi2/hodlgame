@@ -1,6 +1,6 @@
-# Contributing to HoldFun
+# Contributing to HodlGame
 
-Thanks for helping. HoldFun is a deterministic Layer-2 — correctness *is* the
+Thanks for helping. HodlGame is a deterministic Layer-2 — correctness *is* the
 product, so the bar for changes to the ledger is high and the tests are the
 contract. This guide gets you productive fast.
 

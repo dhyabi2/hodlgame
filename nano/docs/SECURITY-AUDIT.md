@@ -1,5 +1,11 @@
 # Security audit — break-the-validation pass (2026-08-21)
 
+> **Scope note (Direct-Settlement v2, 2026-08-22):** findings touching pool
+> custody, the sweep, and the guardian concern the **legacy pooled lane**
+> (opcode `0x01`). v2 zero-custody tokens have no pool account and no custody
+> path at all — see `../SPEC.md` §8.
+
+
 Methodology: enumerate every security gate (validation, auth, signature,
 value-binding, settlement, custody), assign one adversarial "breaker" per gate
 that must actually reproduce an exploit with a runnable PoC (not describe one),

@@ -1,4 +1,11 @@
-# HoldFun Explorer — full item list
+# HodlGame Explorer — full item list
+
+> **Scope note (Direct-Settlement v2, 2026-08-22):** everything below about pool
+> accounts, custody, and the sweep applies **only to legacy pooled tokens**
+> (launched with opcode `0x01`). v2 zero-custody tokens (opcode `0x0b`) have no
+> pool account: the sweep skips them entirely and settlement is wallet-to-wallet
+> at trade time. See `../SPEC.md` §8 (or `nano/SPEC.md` from the repo root).
+
 
 > **Status (2026-08-21): COMPLETE + rich pass.** Rated against the top-20
 > explorer factors and every gap closed to 100: overview/stats dashboard

@@ -1,4 +1,4 @@
-<!-- Thanks for contributing to HoldFun. Keep PRs focused. -->
+<!-- Thanks for contributing to HodlGame. Keep PRs focused. -->
 
 ## What & why
 

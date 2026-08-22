@@ -1,8 +1,13 @@
-# HoldFun Nano (XNO) Layer-2
+# HodlGame Nano (XNO) Layer-2
 
-HoldFun's token economics implemented as a **deterministic Layer-2 on Nano**. No
-smart contracts — the token ledger is computed by replaying signed Nano data blocks,
-and the only real asset (the pool's XNO) sits in **FROST 2-of-3 threshold custody**.
+HodlGame's token economics implemented as a **deterministic Layer-2 on Nano**. No
+smart contracts — the token ledger is computed by replaying signed Nano data blocks.
+Since **Direct-Settlement v2**, new tokens are **zero-custody**: no pool account
+exists, buys pay queued sellers wallet-to-wallet or self-collateralize in the
+buyer's own wallet, and sells settle principal instantly from the seller's own
+collateral (only realized appreciation queues, paid by future buys). Legacy pooled
+tokens (pre-v2 launches) still replay under the old rules; FROST 2-of-3 threshold
+custody remains only as tooling for those legacy pools.
 
 See [`./SPEC.md`](./SPEC.md) (encoding + state machine) and
 [`../MIGRATION-XNO.md`](../MIGRATION-XNO.md) (the Solana → Nano proposal). The
@@ -12,11 +17,12 @@ top-level [README](../README.md) has the feature overview and architecture diagr
 
 ```
 core/       deterministic core (no network, no keys) — the trust model
-  ops.ts        operation types
+  ops.ts        operation types (incl. Direct-Settlement launch 0x0b + balance observations)
   state.ts      state machine: launch (5% cap), transfer, buy/sell (AMM),
-                stake/unstake (20% unstake tax = 5% burn + 15% rebate), claim, liquidity
+                stake/unstake (20% unstake tax = 5% burn + 15% rebate), claim, liquidity;
+                direct tokens: earmarks, ratchet floors, queue + coverage haircut, voiding
   oplink.ts     compact op <-> 32-byte block link (decimals pinned in the launch byte)
-  fraglink.ts   two-amount ops (slippage-protected sell / transfer) across chained blocks
+  fraglink.ts   two-amount ops (sell/transfer/buy/seedLiq/addLiq) across chained blocks
   metaAuth.ts   signed off-chain metadata; metaAnchor.ts anchors authority on-chain
   canonical.ts  canonical event ordering + state root (third-party-verifiable)
   merkle.ts     Merkle balance proofs
@@ -68,7 +74,8 @@ npm run live-smoke    # reads real Nano blocks from a public node (network)
 - [x] Nano client signing + **PoW + block broadcast** (the web app submits signed blocks)
 - [x] Slippage-protected trades on-chain (fragment links)
 - [x] Signed metadata + on-chain authority anchors; signed comments
-- [x] **FROST 2-of-3 threshold custody** for pool XNO + key rotation
+- [x] **Direct-Settlement v2 (zero-custody)** — no pool account for new tokens; wallet-to-wallet settlement, live-verified on mainnet
+- [x] FROST 2-of-3 threshold custody + key rotation (legacy pooled tokens only)
 - [x] Market/Explorer/Exchange APIs + full Next.js UI (explore · trade · create · scan · wallet · /pro)
 - [x] In-browser trustless verification (browser recomputes the state root)
 - [x] Merkle balance proofs · epoch snapshots anchored on-chain · Shamir seed splitting
