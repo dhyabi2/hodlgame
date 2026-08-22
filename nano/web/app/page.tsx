@@ -276,6 +276,7 @@ export default function Home() {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Token | null>(null);
+  const [detailMissing, setDetailMissing] = useState(false); // deep-linked coin confirmed unknown
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
   const usd = useXnoUsd(); // live XNO→USD for $-equivalents across the app
@@ -349,13 +350,20 @@ export default function Home() {
     const acct = keys?.address ?? "";
     if (!selectedId) {
       setDetail(null);
+      setDetailMissing(false);
       return;
     }
+    setDetailMissing(false);
     let live = true;
     const load = async () => {
       try {
         const j = await (await fetch(`/api/token?token=${selectedId}&account=${acct}`)).json();
-        if (live && j.token) setDetail(j.token);
+        if (!live) return;
+        if (j.token) { setDetail(j.token); setDetailMissing(false); }
+        // A successful response with no token (HTTP 404 {error:"unknown token"})
+        // is a CONFIRMED miss — show a not-found card instead of loading forever.
+        // Only mark missing while nothing has loaded yet (don't flip a live coin).
+        else if (j.error && !detail) setDetailMissing(true);
       } catch {}
     };
     load();
@@ -488,6 +496,17 @@ export default function Home() {
                 onBack={() => setSelectedId(null)}
               />
             </div>
+          ) : detailMissing ? (
+            // Confirmed-unknown coin (stale/broken shared link) — a clear
+            // dead-end message with a way back, never an infinite loader.
+            <div className="w-full max-w-3xl mx-auto">
+              <button onClick={() => setSelectedId(null)} className="text-xs text-neutral-500 hover:text-white">← all coins</button>
+              <div className="mt-4 rounded-none border border-neutral-800 bg-neutral-950 p-10 text-center">
+                <p className="text-lg font-black text-white">Coin not found</p>
+                <p className="mt-1 text-sm text-neutral-500">This link points to a coin that doesn’t exist (or hasn’t been indexed yet).</p>
+                <button onClick={() => setSelectedId(null)} className="mt-4 rounded-none bg-white px-4 py-2 text-xs font-black uppercase tracking-wide text-black hover:bg-neutral-200">Browse all coins</button>
+              </div>
+            </div>
           ) : (
             // Deep-linked / just-selected coin whose detail is still loading — show
             // a loading card, never the empty "No coins yet" feed (which made a
@@ -533,7 +552,9 @@ export default function Home() {
         </div>
       )}
 
-      <TabBar tab={tab} setTab={setTab} />
+      {/* Clear any open coin when switching tabs, else the coin detail (which
+          takes render priority) stays on screen and the bottom nav looks dead. */}
+      <TabBar tab={tab} setTab={(t) => { setSelectedId(null); setTab(t); }} />
 
       <UnlockModal
         open={unlockOpen}
@@ -1144,7 +1165,10 @@ function Feed({ tokens, onSelect, myAddress, usd, onCreate }: { tokens: Token[];
     { k: "new", label: "Newest" },
   ];
 
-  if (tokens.length === 0) {
+  // No coins at all, OR coins exist but every one was filtered out (e.g. all
+  // imageless) and the user isn't searching — either way show the CTA instead
+  // of empty shelves that read as a broken/half-loaded page.
+  if (tokens.length === 0 || (live.length === 0 && !searched)) {
     return (
       <div className="bg-neutral-950 py-16 text-center space-y-4">
         <p className="text-3xl sm:text-5xl font-black uppercase tracking-tight text-white">No coins yet</p>
@@ -1227,11 +1251,14 @@ function Feed({ tokens, onSelect, myAddress, usd, onCreate }: { tokens: Token[];
 
 /** Big cover image (or a bold monogram when the coin has none). */
 function PosterImage({ t, className }: { t: Token; className: string }) {
-  const [broken, setBroken] = useState(false);
-  useEffect(() => setBroken(false), [t.image]);
+  // Advance through the IPFS gateway list on each error (like Avatar) instead of
+  // giving up after the first — a slow/down gateway no longer forces the
+  // monogram when a working mirror exists.
+  const [idx, setIdx] = useState(0);
+  useEffect(() => setIdx(0), [t.image]);
   const candidates = t.image ? imageCandidates(t.image) : [];
-  if (candidates.length > 0 && !broken) {
-    return <img src={candidates[0]} alt="" className={className + " object-cover"} onError={() => setBroken(true)} />;
+  if (candidates.length > 0 && idx < candidates.length) {
+    return <img src={candidates[idx]} alt="" className={className + " object-cover"} onError={() => setIdx((i) => i + 1)} />;
   }
   // Monogram fallback: never a dead black hole on the black canvas — a
   // neutral-900 tile with the symbol plus an oversized ghost for poster depth.
@@ -1466,6 +1493,7 @@ function TokenDetail({
 }) {
   const [amount, setAmount] = useState("");
   const [tab, setTab] = useState<"trade" | "thread">("trade");
+  const [side, setSide] = useState<"buy" | "sell">("buy"); // lifted so the mobile action bar can pick a side
   // Default to a sane 1% slippage and remember the user's last choice, so they
   // don't re-set protection on every coin.
   const [slippage, setSlippage] = useState(() => {
@@ -1720,8 +1748,9 @@ function TokenDetail({
     }
   }
 
-  // Mobile action bar → jump to (and reveal) the trade form.
-  const goTrade = () => {
+  // Mobile action bar → jump to (and reveal) the trade form on the chosen side.
+  const goTrade = (s: "buy" | "sell") => {
+    setSide(s);
     setTab("trade");
     try { document.getElementById("trade-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }); } catch {}
   };
@@ -1843,6 +1872,8 @@ function TokenDetail({
             sendOp={sendOp}
             address={keys?.address ?? null}
             promptUnlock={promptUnlock}
+            side={side}
+            setSide={setSide}
           />
         ) : (
           <CommentThread tokenId={token.tokenId} comments={token.comments} keys={keys} isDev={keys?.address === token.creator} />
@@ -1896,8 +1927,8 @@ function TokenDetail({
 
       {/* Mobile: conversion never scrolls away — fixed bar above the tab nav. */}
       <div className="sm:hidden fixed bottom-14 inset-x-0 z-30 border-t border-neutral-800 bg-black/95 backdrop-blur px-4 py-2 flex gap-2">
-        <button className="flex-1 rounded-none bg-white py-3 text-sm font-black uppercase text-black" onClick={goTrade}>Buy</button>
-        <button className="flex-1 rounded-none border border-white py-3 text-sm font-black uppercase text-white" onClick={goTrade}>Sell</button>
+        <button className="flex-1 rounded-none bg-white py-3 text-sm font-black uppercase text-black" onClick={() => goTrade("buy")}>Buy</button>
+        <button className="flex-1 rounded-none border border-white py-3 text-sm font-black uppercase text-white" onClick={() => goTrade("sell")}>Sell</button>
       </div>
     </div>
   );
@@ -1957,6 +1988,8 @@ function TradePanel({
   sendOp,
   address,
   promptUnlock,
+  side,
+  setSide,
 }: {
   token: Token;
   myHolding: Holder | undefined;
@@ -1971,8 +2004,9 @@ function TradePanel({
   sendOp: (tokenId: string, op: Op, label: string) => Promise<void>;
   address: string | null;
   promptUnlock: () => void;
+  side: "buy" | "sell";
+  setSide: (s: "buy" | "sell") => void;
 }) {
-  const [side, setSide] = useState<"buy" | "sell">("buy");
   const slip = clampSlippage(slippage);
 
   // Live quote preview — mirrors the on-chain constant-product math exactly

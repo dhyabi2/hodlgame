@@ -96,13 +96,19 @@ export default function ProPage() {
     const load = async () => {
       try {
         const j = await (await fetch(`/api/token?token=${tokenId}&account=${keys?.address ?? ""}`)).json();
-        if (live && j.token) setToken(j.token);
+        if (!live) return;
+        if (j.token) setToken(j.token);
+        // Bad/stale ?token= (404 {error}): fall back to the first real token so
+        // a shared Pro link never strands the user on the loading skeleton.
+        else if (j.error && !token) {
+          setTokenId((prev) => (tokens.find((t) => t.tokenId === prev) ? prev : tokens[0]?.tokenId ?? null));
+        }
       } catch {}
     };
     load();
     const t = setInterval(load, 4000);
     return () => { live = false; clearInterval(t); };
-  }, [tokenId, keys?.address]);
+  }, [tokenId, keys?.address, tokens]);
 
   useEffect(() => {
     if (!tokenId) return;

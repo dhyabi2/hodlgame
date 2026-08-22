@@ -165,7 +165,7 @@ function changePct(series: PricePoint[], secondsAgo: number): number | null {
   return Number.isFinite(pct) ? pct : null;
 }
 
-async function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, account = ""): Promise<TokenView> {
+async function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, account = "", withComments = true): Promise<TokenView> {
   const meta = raw.meta.get(tokenId) ?? EMPTY_META;
   const s = raw.state.get(tokenId);
   return {
@@ -229,19 +229,38 @@ async function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, accoun
     series: a.series,
     trades: a.trades,
     topHolders: a.holders,
-    comments: await commentsFor(tokenId),
+    // Skip the per-token comments blob read on list/ranks paths (they discard
+    // it). Only the single-token detail view needs it.
+    comments: withComments ? await commentsFor(tokenId) : [],
   };
 }
 
-/** Feed view: all tokens, trimmed (spark only, no full series/trades). */
+/** Feed view: all tokens, trimmed (spark only, no full series/trades/comments). */
 export async function feed(account = ""): Promise<TokenView[]> {
   const raw = await compute();
   const out: TokenView[] = [];
   for (const [tokenId, a] of raw.byToken) {
-    const v = await toView(tokenId, a, raw, account);
+    const v = await toView(tokenId, a, raw, account, false);
     v.series = [];
     v.trades = [];
     v.topHolders = [];
+    v.comments = [];
+    out.push(v);
+  }
+  return out.sort((x, y) => (BigInt(y.marketCap) > BigInt(x.marketCap) ? 1 : -1));
+}
+
+/** Ranks view: like feed() but KEEPS topHolders + trades, which the leaderboards
+ * derivation needs (the holders board and the wash-resistant volume/holders
+ * boards read them). Drops only the heavy series + comments. Fixes the
+ * always-empty "Top holders" board caused by feeding computeLeaderboards the
+ * fully-stripped feed() payload. */
+export async function ranksFeed(account = ""): Promise<TokenView[]> {
+  const raw = await compute();
+  const out: TokenView[] = [];
+  for (const [tokenId, a] of raw.byToken) {
+    const v = await toView(tokenId, a, raw, account, false);
+    v.series = [];
     v.comments = [];
     out.push(v);
   }

@@ -38,6 +38,16 @@ export interface TokenView {
   createdAt: number;
   myBalance: string;
   myCredit: string; // in-game XNO credit from sells (raw) — withdrawable
+  // ── Direct-Settlement (zero-custody) surface ──────────────────────────────
+  direct: boolean;
+  myEarmark: string; // my remaining self-collateral (raw XNO, in MY wallet)
+  myFloor: string; // ratcheted balance floor I must keep on-chain (raw)
+  myQueueOwed: string; // my queued flow-backed claim total (raw)
+  myPrepaid: string; // XNO buys already overpaid me (nets my next sell)
+  queueTotal: string; // all outstanding flow-backed claims (raw)
+  totalFloor: string; // sum of all ratcheted earmark floors (raw) — coverage numerator
+  queueHead: { account: string; owedRaw: string } | null; // next seller a buy must pay
+  coveragePct: number | null; // floored collateral of all holders / claims, %
   myStaked: string;
   myClaimable: string;
   totalStaked: string;
@@ -155,7 +165,7 @@ function changePct(series: PricePoint[], secondsAgo: number): number | null {
   return Number.isFinite(pct) ? pct : null;
 }
 
-async function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, account = ""): Promise<TokenView> {
+async function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, account = "", withComments = true): Promise<TokenView> {
   const meta = raw.meta.get(tokenId) ?? EMPTY_META;
   const s = raw.state.get(tokenId);
   return {
@@ -185,30 +195,72 @@ async function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, accoun
     createdAt: a.launchTime,
     myBalance: account ? (a.holders.find((h) => h.account === account)?.balanceRaw ?? "0") : "0",
     myCredit: account && s ? (s.xnoCredit.get(account) ?? 0n).toString() : "0",
+    direct: s?.direct ?? false,
+    myEarmark: account && s ? (s.earmark.get(account) ?? 0n).toString() : "0",
+    myFloor: account && s ? (s.earmarkFloor.get(account) ?? 0n).toString() : "0",
+    myQueueOwed: account && s ? s.queue.filter((e) => e.account === account).reduce((t, e) => t + e.owed, 0n).toString() : "0",
+    myPrepaid: account && s ? (s.prepaid.get(account) ?? 0n).toString() : "0",
+    queueTotal: s ? s.queue.reduce((t, e) => t + e.owed, 0n).toString() : "0",
+    // Sum of all ratcheted floors — the client mirrors the on-chain sell
+    // haircut exactly (credited = min(rem, max(0, (totalFloor − myFloor) −
+    // queueTotal))), so the preview never disagrees with execution.
+    totalFloor: (() => { let f = 0n; if (s) for (const v of s.earmarkFloor.values()) f += v; return f.toString(); })(),
+    queueHead: s?.queue.find((e) => e.owed > 0n)
+      ? { account: s!.queue.find((e) => e.owed > 0n)!.account, owedRaw: s!.queue.find((e) => e.owed > 0n)!.owed.toString() }
+      : null,
+    coveragePct: (() => {
+      if (!s?.direct) return null;
+      const q = s.queue.reduce((t, e) => t + e.owed, 0n);
+      if (q <= 0n) return 100;
+      let f = 0n;
+      for (const v of s.earmarkFloor.values()) f += v;
+      const pct = Number((f * 10_000n) / q) / 100;
+      return Number.isFinite(pct) ? Math.min(pct, 999) : null;
+    })(),
     myStaked: account && s ? (s.staked.get(account)?.toString() ?? "0") : "0",
     myClaimable: account && s ? claimableReward(s, account).toString() : "0",
     totalStaked: s?.totalStaked.toString() ?? "0",
     buyVolume: a.buyVolumeRaw,
     sellVolume: a.sellVolumeRaw,
     holders: a.holders.length,
-    pool: raw.master ? tokenPoolKeys(raw.master, tokenId).address : null,
+    // Direct tokens have no pool account — by design, forever.
+    pool: s?.direct ? null : raw.master ? tokenPoolKeys(raw.master, tokenId).address : null,
     spark: a.series.slice(-48),
     series: a.series,
     trades: a.trades,
     topHolders: a.holders,
-    comments: await commentsFor(tokenId),
+    // Skip the per-token comments blob read on list/ranks paths (they discard
+    // it). Only the single-token detail view needs it.
+    comments: withComments ? await commentsFor(tokenId) : [],
   };
 }
 
-/** Feed view: all tokens, trimmed (spark only, no full series/trades). */
+/** Feed view: all tokens, trimmed (spark only, no full series/trades/comments). */
 export async function feed(account = ""): Promise<TokenView[]> {
   const raw = await compute();
   const out: TokenView[] = [];
   for (const [tokenId, a] of raw.byToken) {
-    const v = await toView(tokenId, a, raw, account);
+    const v = await toView(tokenId, a, raw, account, false);
     v.series = [];
     v.trades = [];
     v.topHolders = [];
+    v.comments = [];
+    out.push(v);
+  }
+  return out.sort((x, y) => (BigInt(y.marketCap) > BigInt(x.marketCap) ? 1 : -1));
+}
+
+/** Ranks view: like feed() but KEEPS topHolders + trades, which the leaderboards
+ * derivation needs (the holders board and the wash-resistant volume/holders
+ * boards read them). Drops only the heavy series + comments. Fixes the
+ * always-empty "Top holders" board caused by feeding computeLeaderboards the
+ * fully-stripped feed() payload. */
+export async function ranksFeed(account = ""): Promise<TokenView[]> {
+  const raw = await compute();
+  const out: TokenView[] = [];
+  for (const [tokenId, a] of raw.byToken) {
+    const v = await toView(tokenId, a, raw, account, false);
+    v.series = [];
     v.comments = [];
     out.push(v);
   }
