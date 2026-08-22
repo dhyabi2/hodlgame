@@ -88,6 +88,10 @@ export interface IndexedEvent {
    * signed-balance observation. Consensus-relevant tiebreak — the op always
    * folds before its own block's balance is checked against the floors. */
   sub?: number;
+  /** Lamport causal clock over the block-lattice (see lamportClocks). Primary
+   * sort key when present — orders events by Nano's OWN causality instead of
+   * raw per-account height. */
+  lam?: bigint;
 }
 
 /**
@@ -100,9 +104,50 @@ export interface IndexedEvent {
  * the same block (same hash), never relying on sort stability.
  */
 export function canonicalOrder(a: IndexedEvent, b: IndexedEvent): number {
+  // Causal first: Lamport clocks derived from the lattice itself (a receive
+  // happens-after its source send) order events across accounts the way value
+  // actually flowed — a wallet funded after a launch sorts after it, however
+  // young its chain is. Height alone made a fresh wallet's whole history sort
+  // before an old wallet's, structurally mis-pricing cross-wallet trades.
+  const la = a.lam ?? 0n, lb = b.lam ?? 0n;
+  if (la !== lb) return la < lb ? -1 : 1;
   if (a.height !== b.height) return a.height < b.height ? -1 : 1;
   if (a.hash === b.hash) return (a.sub ?? 0) - (b.sub ?? 0);
   return a.hash < b.hash ? -1 : 1;
+}
+
+/**
+ * Lamport clocks for every decoded block: lam(b) = 1 + max(lam(previous),
+ * lam(source send) if b is a receive/open). Pure function of the block set —
+ * deterministic for every replayer — and computed iteratively (monotone
+ * fixpoint over height-ordered chains), so cross-chain funding edges deepen
+ * the clock without recursion. Unknown sources (external funders) count as 0.
+ */
+export function lamportClocks(chains: Map<string, DecodedChain>): Map<string, bigint> {
+  const all = new Map<string, NanoBlock>();
+  for (const { byHash } of chains.values()) for (const b of byHash.values()) all.set(b.hash, b);
+  const lam = new Map<string, bigint>();
+  const isHex64 = (s: string) => /^[0-9a-fA-F]{64}$/.test(s);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const { byHash } of chains.values()) {
+      const ordered = [...byHash.values()].sort((x, y) => (x.height < y.height ? -1 : 1));
+      for (const b of ordered) {
+        let m = lam.get(b.previous) ?? 0n;
+        if ((b.subtype === "receive" || b.subtype === "open") && isHex64(b.link)) {
+          const s = lam.get(b.link.toUpperCase()) ?? lam.get(b.link.toLowerCase()) ?? lam.get(b.link) ?? 0n;
+          if (s > m) m = s;
+        }
+        const v = m + 1n;
+        if ((lam.get(b.hash) ?? -1n) < v) {
+          lam.set(b.hash, v);
+          changed = true;
+        }
+      }
+    }
+  }
+  return lam;
 }
 
 /** One account chain, fragment-aware decoded: each entry is a routed event
@@ -372,6 +417,8 @@ export class MultiIndexer {
     };
 
     this.depositEdges = new Map();
+    // Causal clocks for the whole decoded lattice (canonicalOrder key).
+    const lamMap = lamportClocks(decoded);
     // Direct-Settlement tokens (consensus-bound in the launch link, 0x0b):
     // their buys/seeds bind differently — no pool account exists at all.
     const directSet = new Set<TokenId>();
@@ -440,6 +487,7 @@ export class MultiIndexer {
             continue; // declared-but-unbacked → skip
           }
         }
+        ev.lam = lamMap.get(ev.hash) ?? 0n;
         events.push(ev);
       }
     }
@@ -459,6 +507,7 @@ export class MultiIndexer {
             height: b.height,
             hash: b.hash,
             sub: 1,
+            lam: lamMap.get(b.hash) ?? 0n,
           });
         }
       }
