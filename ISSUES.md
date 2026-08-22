@@ -26,7 +26,7 @@ will quantify and may add more. All fixes are parallelization / dedupe-within-a-
 request / cutting redundant work — **none introduce a cache**, so results stay
 byte-identical.
 
-### [ ] PERF-1 (high) — Sequential per-account block fetch
+### [x] PERF-1 FIXED (high) — Sequential per-account block fetch
 - **Where:** `nano/indexer/multiIndexer.ts:395` (`collectChains`)
 - **Why slow:** `for (const account of accounts) ... await this.source.listBlocks(account)` fetches every watched account's chain **one at a time**. With N accounts that is N serial RPC round-trips (each itself several sub-calls). This is the single biggest latency source — it sits under every page.
 - **Fix:** `Promise.all(accounts.map(a => this.decodeChain(...await listBlocks(a))))`, or a bounded-concurrency map (e.g. 8–12 in flight) to respect RPC limits. Collapses N serial round-trips to ~1 round-trip of wall-time.
@@ -38,7 +38,7 @@ byte-identical.
 - **Fix:** collect only the newly-discovered `extra` accounts and merge, or run the discovery pass first and collect once. Re-uses the frontier-keyed incremental fetch so unchanged accounts are cheap, but avoids re-decoding the full set.
 - **Accuracy:** same union of accounts → same events → same state. No cache.
 
-### [ ] PERF-3 (high) — Sequential `counterparties()` in the discovery pass
+### [x] PERF-3 FIXED (high) — Sequential `counterparties()` in the discovery pass
 - **Where:** `nano/web/server/market.ts:103–108` (nested `for` over pool set × counterparties, `await` each)
 - **Why slow:** each pool's `src.counterparties(...)` is awaited serially inside a nested loop — another serial RPC fan-out.
 - **Fix:** `Promise.all` the counterparties lookups across all pools.
@@ -329,7 +329,7 @@ cross-request) dedupe, or removing discarded work. All byte-accurate, no cache.
 
 > Ranks 1–5 overlap sections A/PERF above with more detail; 6–8 are additional.
 
-### [ ] PERF-1 · rank 1 (high, small) — Parallelize `collectChains` listBlocks
+### [x] PERF-1 FIXED · rank 1 (high, small) — Parallelize `collectChains` listBlocks
 - **Where:** `indexer/multiIndexer.ts:395`
 - **Fix:** bounded-concurrency map (~8–12 in flight) resolving `[account, decodeChain(await listBlocks(account))]` via `Promise.all`, then build the Map iterating the **original `accounts` order** so insertion order is unchanged. Cap concurrency for rpc.nano.to rate limits.
 - **Accuracy:** `decodeChain` is pure per-account (locally verified blocks, zero cross-account dependency); ordering happens after via `lamportClocks + canonicalOrder`. Byte-identical state; only wall-clock changes.
@@ -341,7 +341,7 @@ cross-request) dedupe, or removing discarded work. All byte-accurate, no cache.
 - **Accuracy:** `feed()` already overwrites `v.comments=[]` (`:240`), so the read is 100% discarded; payload byte-identical.
 - **Win:** removes N serial whole-comments-blob GETs (Vercel Blob, useCache:false) from `/api/state` (4s) and `/api/leaderboards` (8s). Often the 2nd-largest chunk.
 
-### [ ] PERF-3 · rank 3 (high, small) — Parallelize + dedupe the 2nd discovery-pass counterparties scan
+### [x] PERF-3 FIXED · rank 3 (high, small) — Parallelize + dedupe the 2nd discovery-pass counterparties scan
 - **Where:** `server/market.ts:103–109`
 - **Fix:** flatten to a unique pubkey Set first, resolve with bounded `Promise.all`, union inbound senders not in `watchedSet` into `extra`.
 - **Accuracy:** results only unioned into a Set (order-independent, idempotent); deduping removes duplicate RPC without changing the union; replay re-validates.
@@ -359,13 +359,13 @@ cross-request) dedupe, or removing discarded work. All byte-accurate, no cache.
 - **Accuracy:** both endpoints already derive from the identical compute() replay; feeding one call to both surfaces is byte-identical and removes the window where two polls see different snapshots.
 - **Win:** halves backend compute()/RPC on the busiest screens — removes one full parallel replay every 8s on Home and one per detail refresh (3s) while a coin is open (~50% backend load per active viewer).
 
-### [ ] PERF-6 · rank 6 (medium, small) — Parallelize `discoverAccounts` pool counterparties loop
+### [x] PERF-6 FIXED · rank 6 (medium, small) — Parallelize `discoverAccounts` pool counterparties loop
 - **Where:** `indexer/discovery.ts:33–37`
 - **Fix:** `Promise.all([...pools.keys()].sort().map(p => reader.counterparties(p)))`, then merge inbound.sender/outbound into `users`; final `[...users].sort()` normalizes.
 - **Accuracy:** pure Set accumulation with a deterministic final sort; discovery only proposes candidates (replay re-validates).
 - **Win:** discovery prelude O(pools) serial → ~1; ~1–5s before the main replay. Runs twice (keyed+keyless) per compute(). All pages.
 
-### [ ] PERF-7 · rank 7 (medium, small) — Parallelize compute() prologue
+### [x] PERF-7 FIXED · rank 7 (medium, small) — Parallelize compute() prologue
 - **Where:** `server/market.ts:86–93`
 - **Fix:** `const [reg, commit, watched] = await Promise.all([loadRegistry(), commitResolver(), watchedAccounts()])` — the MultiIndexer isn't needed until after collectEvents.
 - **Accuracy:** three independent live reads, no shared mutable state; concurrency changes only wall-clock.
@@ -581,3 +581,24 @@ cross-request) dedupe, or removing discarded work. All byte-accurate, no cache.
 - **Where:** `server/httpguard.ts:24`
 - **Impact:** x-real-ip is only trustworthy if a trusted proxy overwrites it; any request that reaches the app without that (direct-to-origin, self-host behind a proxy that doesn't set it, or a misconfigured edge) lets the client set it freely — identical spoofability to the x-forwarded-for it was meant to replace. Rotating it bypas…
 - **Fix:** Two independent fixes. (1) IP source: derive the client IP from the platform's trusted signal — on Vercel use @vercel/functions ipAddress(req) / request.ip, or the last x-forwarded-for hop the edge appends — and never trust an inbound x-real-ip unless a trusted-proxy invariant guarantees the edge overwrites it. This ha…
+## G. Consensus-replay performance — task w3f32f7tv (11 byte-identical-safe fixes)
+
+All keep the folded state + state root byte-identical (zero consensus risk) — pure speedups. Each should still ship with a state-root-equality test. Ranked by (speedup x centrality) / effort.
+
+Biggest win: Rank 1 — Selective copy-on-write in core/state.ts cloneState (own-on-first-write per map, sharing the 7-8 untouched Map refs by reference). cloneState runs on EVERY applyOp/applyVoid and is the single most central per-op cost in the entire replay fold; two independent profiles converge on it as 'the true dominating cost.' It cuts the dominant per-op term from O(9A+Q) to O(1-2 maps) for ~4-9x, and…
+
+| # | Fix | Files | Before -> After | Effort | Speedup |
+|---|-----|-------|----------------|--------|---------|
+| 1 | Selective copy-on-write clone in cloneState (own-on-first-write per ma… | `core/state.ts:244-258 (cloneState), applyOp:26…` | O(9A + Q) per op regardless of wha… -> O(k*A_k) per op, k = maps the case… | medium | ~4-9x on the dominant per-op term for tr… |
+| 2 | Skip the queue deep-copy for ops that never mutate a queue entry | `core/state.ts:255 (queue.map in cloneState); m…` | O(Q) queue copy on every op -> O(1) for all non-queue ops (launch… | small | Removes an O(Q) allocation from ~every n… |
+| 3 | Gate drainDeferred on a token-change signal instead of after every app… | `indexer/replay.ts:94 (tryApply/drainDeferred c…` | drainDeferred after EVERY successf… -> O(1) gate per apply; drain runs on… | small | Eliminates the dominant O(N*D*A) redunda… |
+| 4 | Skip ratchetFloors on buys — ratchet only the self-earmark buyer, nobo… | `core/state.ts:348 (unconditional ratchetFloors…` | O(H) per buy — one bigint multiply… -> O(1) per buy | small | Removes the heaviest (divide-per-holder)… |
+| 5 | Skip balance observations for accounts that can never hold an earmark… | `indexer/multiIndexer.ts:499-541 (per-block + h…` | Emits B per-block + M head observa… -> Emits only earmarker observations;… | small | Collapses the ~2x event-list inflation b… |
+| 6 | Hoist the invariant per-chain height-sort out of the while(changed) la… | `indexer/multiIndexer.ts:135 (sort inside lampo…` | O(R*B log B) — R = cross-chain-dep… -> O(B log B + R*B) — sort once, each… | small | ~R x less sorting; removes R*B transient… |
+| 7 | Maintain a running queueSum; make queueTotal an O(1) read | `core/state.ts:192 (queueTotal); write sites 32…` | O(Q) scan per queuing sell; Q grow… -> O(1) | medium | Removes an O(N_sell*Q) up-to-O(N^2) term… |
+| 8 | Maintain a running floorSum; make floorTotalExcept an O(1) subtraction | `core/state.ts:200 (floorTotalExcept); write si…` | O(H) additive scan on every queuin… -> O(1) | medium | Removes ~O(N_sell*H) additions across a… |
+| 9 | Gated in-place top-Map variant for the replay-only entrypoint (not on… | `core/multi.ts:57 (applyBlock `new Map(m)`); ne…` | O(T) new Map(m) copy per op -> O(1) for the top Map in the replay… | small | Removes an O(T) shallow copy per op; sec… |
+| 10 | Replace the lamport fixpoint with a single topological (Kahn) pass ove… | `indexer/multiIndexer.ts:126-151 (lamportClocks…` | O(R*B log B), R = cross-chain dept… -> O(B + E) = O(B) | medium | Eliminates both the R factor and the per… |
+| 11 | Reverse-index floors by account so applyBalanceObservation scans O(tok… | `core/multi.ts:34 (full-map scan in applyBalanc…` | O(T) per observation regardless of… -> O(f), f = direct tokens where the… | medium | Removes the T factor from the residual o… |
+
+Rejected (genuine consensus risk, do NOT implement): Eleven byte-identical-safe fixes across four hot paths, verified against live code, ranked by (speedup x hot-path centrality) / effort. Two REJECTED ideas were dropped for genuine consensus risk: (a) blanket mutate-in-place applyOp — the direct-buy branch mutates the queue (state.ts:326) BEFORE constantProductOut can throw (:330), which would leave s0 partially mutated and break fixpointOrder's defer/retry; and (b) collapsing balance observations to only balance-DECREASE points — applyVoid prorates by non-associative integer floor division (bal*90/100 then *80/90 != bal*80/100), so dropping intermediate observations changes the truncation path and forks the root. The top four keepers are all…
