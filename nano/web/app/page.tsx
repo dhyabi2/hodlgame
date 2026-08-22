@@ -377,7 +377,7 @@ export default function Home() {
       <header className={"sticky top-0 z-20 h-14 flex items-center bg-black/90 backdrop-blur border-b " + (!selectedId && tab === "explore" ? "border-transparent" : "border-neutral-800")}>
         <div className="w-full px-4 flex items-center gap-3 sm:gap-5">
           <button className="text-base sm:text-lg font-black tracking-[0.1em] text-white shrink-0" onClick={() => { setSelectedId(null); setTab("explore"); }}>
-            HOLDFUN
+            HODLGAME
           </button>
           {/* Desktop nav only — on mobile the bottom tab bar handles navigation. */}
           <nav className="hidden sm:flex items-center gap-4 text-xs font-bold uppercase tracking-wide text-neutral-400 min-w-0 overflow-x-auto">

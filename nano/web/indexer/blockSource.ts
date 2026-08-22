@@ -181,27 +181,46 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
       nanoRpc("", { action: "account_info", account }).then((i: any) => String(i?.frontier ?? "")).catch(() => ""),
     ]);
 
-    if (keyedFrontier && keyedFrontier === keylessFrontier) {
-      return this.fetchChain(this.apiKey, account, limit, keyedFrontier);
-    }
+    // A walk is COMPLETE only when the verified chain actually contains the
+    // frontier its own tier reported. Root-caused live (2026-08-22, part 3 of
+    // the stale-backend saga): a backend can answer account_info with the
+    // fresh frontier while its account_history is still hours behind — the
+    // walk "succeeds" with an old, shorter chain (a creator's just-submitted
+    // liquidity seed was silently missing), and before this check that stale
+    // chain was CACHED under the fresh frontier key, poisoning the instance
+    // until restart. Now: up to two rounds across both tiers, prefer any
+    // complete walk (longest); only fall back to the longest incomplete walk
+    // when no round produced a complete one, and never cache incomplete.
+    const attempt = async (): Promise<{ blocks: NanoBlock[]; complete: boolean }[]> => {
+      const settled = await Promise.allSettled([
+        this.fetchChain(this.apiKey, account, limit, keyedFrontier),
+        this.fetchChain("", account, limit, keylessFrontier),
+      ]);
+      return settled
+        .filter((r): r is PromiseFulfilledResult<{ blocks: NanoBlock[]; complete: boolean }> => r.status === "fulfilled")
+        .map((r) => r.value);
+    };
 
-    const [keyed, keyless] = await Promise.allSettled([
-      this.fetchChain(this.apiKey, account, limit, keyedFrontier),
-      this.fetchChain("", account, limit, keylessFrontier),
-    ]);
-    const results = [keyed, keyless]
-      .filter((r): r is PromiseFulfilledResult<NanoBlock[]> => r.status === "fulfilled")
-      .map((r) => r.value);
-    if (results.length === 0) throw new Error(`listBlocks(${account}): both keyed and keyless RPC failed`);
-    return results.reduce((a, b) => (b.length > a.length ? b : a));
+    let best: { blocks: NanoBlock[]; complete: boolean } | null = null;
+    for (let round = 0; round < 2; round++) {
+      for (const r of await attempt()) {
+        if (best === null) { best = r; continue; }
+        const better = (r.complete && !best.complete) || (r.complete === best.complete && r.blocks.length > best.blocks.length);
+        if (better) best = r;
+      }
+      if (best !== null && best.complete) return best.blocks;
+    }
+    if (best === null) throw new Error(`listBlocks(${account}): both keyed and keyless RPC failed`);
+    return best.blocks;
   }
 
-  private async fetchChain(apiKey: string, account: string, limit: number, frontier: string): Promise<NanoBlock[]> {
+  private async fetchChain(apiKey: string, account: string, limit: number, frontier: string): Promise<{ blocks: NanoBlock[]; complete: boolean }> {
     // H2 fast path: if the account's frontier is unchanged, its verified block
-    // list is unchanged — skip the whole history pull.
+    // list is unchanged — skip the whole history pull. Only COMPLETE chains
+    // are ever cached (see below), so a hit is always frontier-consistent.
     if (frontier) {
       const hit = FRONTIER_CACHE.get(`${account}|${frontier}`);
-      if (hit) return hit;
+      if (hit) return { blocks: hit, complete: true };
     }
 
     const raw: RawFetchedBlock[] = [];
@@ -235,13 +254,18 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
 
     // Sort + verify + derive amount/subtype from signed balances (shared logic).
     const out = finalizeChain(raw);
-    // Cache under the frontier we observed (only if the whole chain fit —
-    // a truncated pull at `limit` must not be cached as complete).
-    if (frontier && raw.length < limit) {
+    // Complete = the verified chain reaches the frontier this tier reported.
+    // An account_history served by a lagging backend can be SHORTER than the
+    // frontier implies even in the same request — that chain is real but
+    // stale, must never be cached, and callers should prefer a complete walk.
+    const complete = !frontier || out.some((b) => b.hash === frontier);
+    // Cache only complete, un-truncated chains (a truncated pull at `limit`
+    // must not be cached as the whole history either).
+    if (frontier && complete && raw.length < limit) {
       if (FRONTIER_CACHE.size >= FRONTIER_CACHE_MAX) FRONTIER_CACHE.delete(FRONTIER_CACHE.keys().next().value!);
       FRONTIER_CACHE.set(`${account}|${frontier}`, out);
     }
-    return out;
+    return { blocks: out, complete };
   }
 }
 

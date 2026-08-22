@@ -1,10 +1,10 @@
 # Deploying HoldFun to Vercel
 
-**Production domain: [nanocrypto.fun](https://nanocrypto.fun)** — attach it to the
+**Production domain: [hodlgame.fun](https://hodlgame.fun)** (nanocrypto.fun remains attached and serves the same app) — attach it to the
 main Vercel project (Settings → Domains) and point the registrar's DNS at Vercel
 (A `76.76.21.21` or the CNAME Vercel shows). The old `*.vercel.app` aliases keep
 working; app-internal links are all relative, so no code references any domain —
-only `app/layout.tsx` (`SITE_URL`, for Open Graph/canonical) names it.
+only `app/layout.tsx` (`SITE_URL`, for Open Graph/canonical) names it. App display name: **HodlGame** (storage keys keep the legacy `holdfun-` prefix -- renaming them would orphan users' wallets).
 
 The whole L2 can run on Vercel because every op is on the public Nano ledger and
 state is deterministically replayable. No always-on server is needed.
