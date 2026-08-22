@@ -59,6 +59,17 @@ export default function ProPage() {
   const [keys, setKeys] = useState<Keys | null>(null);
   const [toast, setToast] = useState<string>("");
   const say = (s: string) => { setToast(s); setTimeout(() => setToast(""), 3500); };
+  // Command palette: order-ticket handlers are registered here by OrderTicket so
+  // the palette can drive side/size/confirm as well as token switching.
+  const orderApiRef = useRef<OrderApi | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) { e.preventDefault(); setPaletteOpen((v) => !v); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // initial token from ?token=
   useEffect(() => {
@@ -147,7 +158,7 @@ export default function ProPage() {
               <ChartPanel token={token} />
             </Panel>
             <Panel className="col-span-12 lg:col-span-4">
-              <OrderTicket token={token} keys={keys} say={say} />
+              <OrderTicket token={token} keys={keys} say={say} orderApiRef={orderApiRef} />
             </Panel>
             <Panel className="col-span-12 lg:col-span-4 min-h-[240px]">
               <DepthCurve token={token} />
@@ -166,7 +177,84 @@ export default function ProPage() {
           {toast}
         </div>
       )}
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        tokens={tokens}
+        onPickToken={(id) => { setToken(null); setTokenId(id); }}
+        orderApiRef={orderApiRef}
+        say={say}
+      />
     </main>
+  );
+}
+
+interface OrderApi { setSide: (s: "buy" | "sell") => void; setPct: (p: number) => void; confirm: () => void; focusAmount: () => void; }
+
+/** Cmd/Ctrl+K command palette: keyboard-drives every core action — switch to any
+ * coin, set side, size to 25/50/100%, confirm, or jump back to the app. A
+ * fuzzy-filtered list with keycaps; the fastest possible degen flow. */
+function CommandPalette({ open, onClose, tokens, onPickToken, orderApiRef, say }: {
+  open: boolean; onClose: () => void; tokens: Token[];
+  onPickToken: (id: string) => void; orderApiRef: React.MutableRefObject<OrderApi | null>; say: (s: string) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(0);
+  useEffect(() => { if (open) { setQ(""); setSel(0); } }, [open]);
+  if (!open) return null;
+
+  const api = orderApiRef.current;
+  type Cmd = { id: string; label: string; hint?: string; run: () => void };
+  const cmds: Cmd[] = [];
+  if (api) {
+    cmds.push({ id: "buy", label: "Set side: Buy", hint: "B", run: () => api.setSide("buy") });
+    cmds.push({ id: "sell", label: "Set side: Sell", hint: "S", run: () => api.setSide("sell") });
+    cmds.push({ id: "p25", label: "Size 25%", run: () => api.setPct(0.25) });
+    cmds.push({ id: "p50", label: "Size 50%", run: () => api.setPct(0.5) });
+    cmds.push({ id: "p100", label: "Size Max (100%)", run: () => api.setPct(1) });
+    cmds.push({ id: "confirm", label: "Confirm order", hint: "⏎", run: () => api.confirm() });
+  }
+  cmds.push({ id: "app", label: "Back to the app", run: () => { window.location.href = "/"; } });
+  for (const t of tokens.slice(0, 40)) {
+    const sym = t.symbol || t.tokenId.slice(0, 4).toUpperCase();
+    cmds.push({ id: "tok:" + t.tokenId, label: `Switch to ${sym}${t.name ? " · " + t.name : ""}`, run: () => onPickToken(t.tokenId) });
+  }
+  const ql = q.trim().toLowerCase();
+  const filtered = ql ? cmds.filter((c) => c.label.toLowerCase().includes(ql)) : cmds;
+  const pick = (c?: Cmd) => { if (!c) return; c.run(); onClose(); };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-start justify-center bg-black/60 backdrop-blur-sm pt-24" onClick={onClose}>
+      <div className="w-full max-w-lg rounded-none border border-neutral-700 bg-neutral-950" onClick={(e) => e.stopPropagation()}>
+        <input
+          autoFocus
+          className="w-full rounded-none bg-transparent border-b border-neutral-800 px-4 py-3 text-sm text-white outline-none placeholder:text-neutral-600"
+          placeholder="Type a command or coin…  (Esc to close)"
+          value={q}
+          onChange={(e) => { setQ(e.target.value); setSel(0); }}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") onClose();
+            else if (e.key === "ArrowDown") { e.preventDefault(); setSel((s) => Math.min(filtered.length - 1, s + 1)); }
+            else if (e.key === "ArrowUp") { e.preventDefault(); setSel((s) => Math.max(0, s - 1)); }
+            else if (e.key === "Enter") { e.preventDefault(); pick(filtered[sel]); }
+          }}
+        />
+        <div className="max-h-80 overflow-y-auto">
+          {filtered.length === 0 && <p className="px-4 py-6 text-center text-xs text-neutral-500">no matches</p>}
+          {filtered.map((c, i) => (
+            <button
+              key={c.id}
+              className={"flex w-full items-center justify-between px-4 py-2.5 text-left text-sm " + (i === sel ? "bg-white text-black" : "text-neutral-300 hover:bg-neutral-900")}
+              onMouseEnter={() => setSel(i)}
+              onClick={() => pick(c)}
+            >
+              <span>{c.label}</span>
+              {c.hint && <span className={"rounded-none border px-1.5 text-[10px] font-mono " + (i === sel ? "border-black/30" : "border-neutral-700 text-neutral-500")}>{c.hint}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -466,7 +554,7 @@ function fmtAxis(p: number): string {
 }
 
 // ── order ticket ────────────────────────────────────────────────────────────
-function OrderTicket({ token, keys, say }: { token: Token; keys: Keys | null; say: (s: string) => void }) {
+function OrderTicket({ token, keys, say, orderApiRef }: { token: Token; keys: Keys | null; say: (s: string) => void; orderApiRef?: React.MutableRefObject<OrderApi | null> }) {
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [amount, setAmount] = useState("");
   const [slippage, setSlippage] = useState("1");
@@ -527,6 +615,15 @@ function OrderTicket({ token, keys, say }: { token: Token; keys: Keys | null; sa
       setAmount(String(+(bal * p).toFixed(6)));
     }
   };
+
+  // Expose the ticket's actions to the Cmd+K palette (registered after the
+  // handlers are defined; refreshed whenever they change identity).
+  useEffect(() => {
+    if (!orderApiRef) return;
+    orderApiRef.current = { setSide, setPct, confirm, focusAmount: () => inputRef.current?.focus() };
+    return () => { if (orderApiRef.current && orderApiRef.current.confirm === confirm) orderApiRef.current = null; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
 
   const confirm = async () => {
     if (!keys) return say("connect a wallet first");

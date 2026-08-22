@@ -474,28 +474,61 @@ function TokenDetailX({ d, go }: { d: any; go: (v: View) => void }) {
   );
 }
 
+// Verify-It-Yourself: makes "don't trust, verify" a thing people enjoy doing.
+// While the browser really re-replays the ledger, the digest resolves
+// character-by-character in a mono font, then snaps to VERIFIED — the real
+// computation, dressed as a reveal.
+const HEXCH = "0123456789abcdef";
 function VerifyButton({ serverRoot }: { serverRoot: string }) {
   const [state, setState] = useState<"idle" | "running" | "done">("idle");
   const [res, setRes] = useState<VerifyResult | null>(null);
+  const [scramble, setScramble] = useState("");
+
   async function run() {
     setState("running");
-    try { setRes(await verifyInBrowser()); }
-    catch (e: any) { setRes({ ok: false, localRoot: "", serverRoot, tokens: 0, ops: 0, accounts: 0, error: e.message }); }
+    // Scramble a fake digest while the real replay runs underneath.
+    const len = Math.max(16, serverRoot.length || 64);
+    let raf = 0;
+    const tick = () => {
+      let s = "";
+      for (let i = 0; i < len; i++) s += HEXCH[Math.floor((Date.now() / 40 + i * 7) % 16)];
+      setScramble(s);
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    let result: VerifyResult;
+    try { result = await verifyInBrowser(); }
+    catch (e: any) { result = { ok: false, localRoot: "", serverRoot, tokens: 0, ops: 0, accounts: 0, error: e.message }; }
+    cancelAnimationFrame(raf);
+    // Resolve the real digest left-to-right for the reveal payoff.
+    const real = result.localRoot || serverRoot || "";
+    for (let i = 1; i <= real.length; i += 2) {
+      setScramble(real.slice(0, i) + Array.from({ length: real.length - i }, (_, k) => HEXCH[(Date.now() / 30 + k) % 16 | 0]).join(""));
+      await new Promise((r) => setTimeout(r, 12));
+    }
+    setScramble(real);
+    setRes(result);
     setState("done");
   }
+
   return (
     <div className="mt-2">
       <button onClick={run} disabled={state === "running"} className="rounded-none bg-white px-4 py-2 text-xs font-bold text-black hover:bg-neutral-200 disabled:opacity-40">
-        {state === "running" ? "recomputing in your browser…" : "Verify in your browser"}
+        {state === "running" ? "recomputing in your browser…" : state === "done" ? "Verify again" : "Verify it yourself"}
       </button>
-      {res && <div className="mt-2 text-xs">
-        {res.error ? <p className="text-white">verify error: {res.error}</p> : <>
-          <p className={res.ok ? "text-white font-bold" : "text-white font-bold"}>{res.ok ? "✓ VERIFIED — your browser reproduced the server's root" : "✗ MISMATCH — server root differs from your recomputation"}</p>
-          <Row k="your root"><span className={mono}>{res.localRoot || "—"}</span></Row>
-          <Row k="server root"><span className={mono}>{res.serverRoot || "—"}</span></Row>
-          <Row k="replayed">{res.accounts} accounts · {res.tokens} tokens · {res.ops} ops (no secrets)</Row>
-        </>}
-      </div>}
+      {state !== "idle" && (
+        <div className="mt-2 text-xs">
+          <p className="text-[10px] uppercase tracking-wide text-neutral-500">your browser’s computed fingerprint</p>
+          <p className={mono + " break-all text-neutral-300"}>{scramble || "…"}</p>
+          {res && (res.error
+            ? <p className="mt-1 text-white">verify error: {res.error}</p>
+            : <div className={"mt-1 " + (state === "done" ? "animate-pulse-once" : "")}>
+                <p className="font-black text-sm">{res.ok ? "✓ VERIFIED — your machine reproduced the site’s fingerprint" : "✗ MISMATCH — the site’s root differs from your recomputation"}</p>
+                <Row k="server root"><span className={mono + " break-all"}>{res.serverRoot || "—"}</span></Row>
+                <Row k="replayed">{res.accounts} accounts · {res.tokens} tokens · {res.ops} ops (no secrets, no trust)</Row>
+              </div>)}
+        </div>
+      )}
     </div>
   );
 }
