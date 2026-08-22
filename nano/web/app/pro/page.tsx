@@ -291,17 +291,21 @@ function TopBar({
             <span className="text-neutral-500 text-xs">▾</span>
           </button>
           {open && (
-            <div className="absolute left-0 top-full mt-1 max-h-80 w-72 overflow-y-auto rounded-none border border-neutral-800 bg-neutral-950 p-1 shadow-2xl">
-              {tokens.map((t) => (
+            <div className="absolute left-0 top-full mt-1 max-h-96 w-80 overflow-y-auto rounded-none border border-neutral-800 bg-neutral-950 p-1 shadow-2xl">
+              <p className="px-2 py-1.5 text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500">Top by market cap</p>
+              {[...tokens]
+                .sort((a, b) => (BigInt(b.marketCap || "0") > BigInt(a.marketCap || "0") ? 1 : -1))
+                .map((t, i) => (
                 <button
                   key={t.tokenId}
                   className="flex w-full items-center gap-2 rounded-none px-2 py-1.5 text-left hover:bg-neutral-900"
                   onClick={() => { onPick(t.tokenId); setOpen(false); }}
                 >
+                  <span className="w-4 text-center text-[10px] font-black text-neutral-600">{i + 1}</span>
                   <Avatar image={t.image} symbol={tokSym(t)} size={20} />
-                  <span className="flex-1 truncate text-sm font-bold">{tokSym(t)}</span>
-                  <span className="text-[11px] text-neutral-500">{fmtXno(t.price)}</span>
-                  <span className={"text-[11px] w-14 text-right " + chColor(t.change24h)}>{pctStr(t.change24h)}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-bold">{tokSym(t)}</span>
+                  <span className="w-20 text-right text-[11px] text-neutral-400" title="market cap">mc {fmtXno(t.marketCap)}</span>
+                  <span className={"w-12 text-right text-[11px] " + chColor(t.change24h)}>{pctStr(t.change24h)}</span>
                 </button>
               ))}
               {tokens.length === 0 && <p className="px-2 py-3 text-center text-xs text-neutral-500">no tokens yet</p>}
