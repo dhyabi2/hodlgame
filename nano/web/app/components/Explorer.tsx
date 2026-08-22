@@ -206,8 +206,15 @@ export default function Explorer() {
         {!["stats", "feed", "trust"].includes(view.kind) && <span className="px-3 py-1.5 rounded-full bg-neutral-900 text-neutral-300 font-mono">{view.kind}: {short((view as any).q ?? "", 10)}</span>}
       </div>
 
-      {loading && <p className="text-xs text-neutral-500">loading…</p>}
-      {err && <p className="text-xs text-white">{err}</p>}
+      {/* Elegant skeleton while the explorer replays the ledger (~a few
+          seconds) — never a bare "loading…" or a premature "no coins". */}
+      {(loading || !data) && !err && <ExplorerSkeleton kind={view.kind} />}
+      {err && (
+        <div className={card}>
+          <p className="text-sm font-bold text-white">Couldn’t load the explorer</p>
+          <p className="mt-1 text-xs text-neutral-500">{err}</p>
+        </div>
+      )}
       {!loading && !err && data && (
         <>
           {view.kind === "stats" && <StatsPanel d={data} go={go} />}
@@ -229,6 +236,43 @@ export default function Explorer() {
           {view.kind === "trust" && <TrustPanel d={data} go={go} />}
         </>
       )}
+    </div>
+  );
+}
+
+/** Stark-monochrome loading skeleton for the explorer. Mirrors the shape of the
+ * stats view (stat tiles + a token list) so the layout doesn't jump on load. */
+function ExplorerSkeleton({ kind }: { kind: string }) {
+  const Bar = ({ w }: { w: string }) => <div className={`h-3 rounded-none bg-neutral-900 animate-pulse ${w}`} />;
+  if (kind === "stats") {
+    return (
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className={card + " space-y-2"}>
+              <Bar w="w-16" />
+              <div className="h-5 rounded-none bg-neutral-900 animate-pulse w-24" />
+            </div>
+          ))}
+        </div>
+        <div className={card + " space-y-3"}>
+          <Bar w="w-40" />
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex items-center justify-between border-t border-neutral-800/60 pt-2.5">
+              <div className="flex items-center gap-2">
+                <div className="h-5 w-5 rounded-full bg-neutral-900 animate-pulse" />
+                <Bar w="w-28" />
+              </div>
+              <Bar w="w-20" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className={card + " space-y-3"}>
+      {Array.from({ length: 6 }).map((_, i) => <Bar key={i} w={i % 2 ? "w-3/4" : "w-full"} />)}
     </div>
   );
 }
