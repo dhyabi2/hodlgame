@@ -130,6 +130,26 @@ async function main() {
     console.log("4 ok: signed-balance observation voids the defector's collateral");
   }
 
+  // ── 5. fixpoint STABILITY: appending later events never re-prices history ──
+  // A fresh wallet's buy (height 4) sorts before an old wallet's launch
+  // (height 30); the fixpoint defers it and anchors it at its earliest valid
+  // point (right after the seed). A later buy (height 35) arriving must not
+  // change what the deferred buy received.
+  {
+    const { fixpointOrder } = await import("./replay");
+    const T5 = "55".repeat(16);
+    const base = [
+      { tokenId: T5, op: { kind: "buy", xno: 20_000_000n, minTokens: 0n, balanceAt: 100_000_000n } as const, sender: ALICE.address, height: 4n },
+      { tokenId: T5, op: { kind: "launch", supply: 1_000_000_000_000n, name: "", symbol: "", decimals: 6, image: "", direct: true } as const, sender: CR.address, height: 30n },
+      { tokenId: T5, op: { kind: "seedLiq", xno: 100_000_000n, tokens: 1_000_000_000n } as const, sender: CR.address, height: 32n },
+    ];
+    const later = { tokenId: T5, op: { kind: "buy", xno: 40_000_000n, minTokens: 0n, balanceAt: 900_000_000n } as const, sender: BOB.address, height: 35n };
+    const without = fixpointOrder(base as any).state.get(T5)!.balances.get(ALICE.address)!;
+    const withLater = fixpointOrder([...base, later] as any).state.get(T5)!.balances.get(ALICE.address)!;
+    assert.equal(without, withLater, "Alice's deferred buy must be anchored — a later block can't re-price it");
+    console.log("5 ok: fixpoint anchors deferred ops — appending events never rewrites history");
+  }
+
   console.log("✅ direct-settlement indexer tests passed");
 }
 

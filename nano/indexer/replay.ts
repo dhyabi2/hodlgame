@@ -57,28 +57,44 @@ export function fixpointOrder<T extends MultiBlock>(events: T[]): {
 } {
   let state = multiEmpty();
   const applied: T[] = [];
-  let pending = events.map((e, i) => ({ e, i }));
-  let lastErr = new Map<number, string>();
-  for (;;) {
-    const still: { e: T; i: number }[] = [];
-    const errs = new Map<number, string>();
-    for (const p of pending) {
-      try {
-        state = applyBlock(state, p.e);
-        applied.push(p.e);
-      } catch (err) {
-        errs.set(p.i, err instanceof Error ? err.message : String(err));
-        still.push(p);
+  const deferred: { e: T; i: number }[] = [];
+  const errs = new Map<number, string>();
+  const tryApply = (p: { e: T; i: number }): boolean => {
+    try {
+      state = applyBlock(state, p.e);
+      applied.push(p.e);
+      errs.delete(p.i);
+      return true;
+    } catch (err) {
+      errs.set(p.i, err instanceof Error ? err.message : String(err));
+      return false;
+    }
+  };
+  // STABILITY (not just determinism): a deferred op is retried IMMEDIATELY
+  // after every successful apply, so it anchors to the EARLIEST point where
+  // it becomes valid. A pass-based fixpoint is deterministic too, but a block
+  // arriving later in canonical order could jump ahead of an earlier deferred
+  // one and retroactively re-price already-observed history. With
+  // earliest-unlock anchoring, appending later events can never change where
+  // an earlier event applied — history stays stable as the chain grows.
+  const drainDeferred = () => {
+    let progress = true;
+    while (progress) {
+      progress = false;
+      for (let j = 0; j < deferred.length; ) {
+        if (tryApply(deferred[j])) {
+          deferred.splice(j, 1);
+          progress = true;
+        } else j++;
       }
     }
-    lastErr = errs;
-    if (still.length === pending.length || still.length === 0) {
-      pending = still;
-      break;
-    }
-    pending = still;
+  };
+  for (let i = 0; i < events.length; i++) {
+    const p = { e: events[i], i };
+    if (tryApply(p)) drainDeferred();
+    else deferred.push(p);
   }
-  const invalid = pending.map((p) => ({ index: p.i, reason: lastErr.get(p.i) ?? "invalid" }));
+  const invalid = deferred.map((p) => ({ index: p.i, reason: errs.get(p.i) ?? "invalid" }));
   return { applied, state, invalid };
 }
 
