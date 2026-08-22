@@ -50,8 +50,19 @@ function readAmt(buf: Uint8Array, offset: number): bigint {
   return n;
 }
 
+// Fraggable two-amount ops. buy carries (xno, minTokens) so a Direct-Settlement
+// self-earmark buy can DECLARE its xno with no deposit block (validity checks
+// it against the signed block balance); seedLiq/addLiq carry (xno, tokens) so a
+// direct token's creator can seed VIRTUAL reserves with no pool deposit.
 function fragCode(kind: Op["kind"]): number | null {
-  return kind === "transfer" ? OP_CODE.transfer : kind === "sell" ? OP_CODE.sell : null;
+  switch (kind) {
+    case "transfer": return OP_CODE.transfer;
+    case "sell": return OP_CODE.sell;
+    case "buy": return OP_CODE.buy;
+    case "seedLiq": return OP_CODE.seedLiq;
+    case "addLiq": return OP_CODE.addLiq;
+    default: return null;
+  }
 }
 
 function bodyOf(op: Op): Uint8Array {
@@ -63,6 +74,12 @@ function bodyOf(op: Op): Uint8Array {
     writeAmt(b, 0, op.tokens);
     writeAmt(b, AMT_BYTES, op.minXno);
     // bytes 30..47 stay zero (verified on decode)
+  } else if (op.kind === "buy") {
+    writeAmt(b, 0, op.xno);
+    writeAmt(b, AMT_BYTES, op.minTokens);
+  } else if (op.kind === "seedLiq" || op.kind === "addLiq") {
+    writeAmt(b, 0, op.xno);
+    writeAmt(b, AMT_BYTES, op.tokens);
   } else {
     throw new Error("op does not use fragment links: " + op.kind);
   }
@@ -87,7 +104,13 @@ export function isFragA(linkHex: string): boolean {
   const b0 = parseInt(linkHex.slice(0, 2), 16);
   if ((b0 & 0xf0) !== FRAG_HIGH) return false;
   const code = b0 & 0x0f;
-  return code === OP_CODE.transfer || code === OP_CODE.sell;
+  return (
+    code === OP_CODE.transfer ||
+    code === OP_CODE.sell ||
+    code === OP_CODE.buy ||
+    code === OP_CODE.seedLiq ||
+    code === OP_CODE.addLiq
+  );
 }
 
 /** Join frag A + frag B back into the op. Throws on any malformation —
@@ -108,9 +131,16 @@ export function assembleFrag(aHex: string, bHex: string): { tokenId: TokenId; op
     const to = nanocurrency.deriveAddress(toPub, { useNanoPrefix: true });
     return { tokenId, op: { kind: "transfer", to, amount: readAmt(body, 32) } };
   }
-  // sell: trailing padding MUST be zero (rejects garbage that merely carries the marker)
+  // two-amount ops: trailing padding MUST be zero (rejects garbage that merely
+  // carries the marker)
   for (let i = 2 * AMT_BYTES; i < BODY_BYTES; i++) {
-    if (body[i] !== 0) throw new Error("sell fragment padding not zero");
+    if (body[i] !== 0) throw new Error("fragment padding not zero");
   }
-  return { tokenId, op: { kind: "sell", tokens: readAmt(body, 0), minXno: readAmt(body, AMT_BYTES) } };
+  const a0 = readAmt(body, 0);
+  const a1 = readAmt(body, AMT_BYTES);
+  if (code === OP_CODE.sell) return { tokenId, op: { kind: "sell", tokens: a0, minXno: a1 } };
+  if (code === OP_CODE.buy) return { tokenId, op: { kind: "buy", xno: a0, minTokens: a1 } };
+  if (code === OP_CODE.seedLiq) return { tokenId, op: { kind: "seedLiq", xno: a0, tokens: a1 } };
+  if (code === OP_CODE.addLiq) return { tokenId, op: { kind: "addLiq", xno: a0, tokens: a1 } };
+  throw new Error("unknown fragment opcode");
 }

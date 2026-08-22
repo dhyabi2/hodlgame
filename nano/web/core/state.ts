@@ -56,6 +56,31 @@ export interface State {
   // withdrawal, so nothing can ever be double-paid or clawed back.
   xnoCredit: Map<string, bigint>;
   xnoWithdrawn: Map<string, bigint>;
+  // ── Direct-Settlement (zero-custody) mode ─────────────────────────────────
+  // `direct` tokens have NO pool account and no operator key, ever. The AMM
+  // reserves are VIRTUAL (replay-only numbers); real XNO only ever moves
+  // wallet-to-wallet: a buy either pays a queued seller directly (validity-
+  // bound to the chained send's destination) or stays in the buyer's own
+  // account as `earmark` collateral. A sell settles instantly up to
+  // min(quote, earmark, signed exit-block balance) by RELEASING the seller's
+  // own earmark (no transfer needed — the XNO never left their account), and
+  // only the remainder — exit-realized appreciation — is queued as a claim on
+  // future buy flow, quoted at face × min(1, coverage).
+  direct: boolean;
+  // Remaining self-collateral at cost, per buyer. Invariant (policed by
+  // `balance` observations + applyVoid): the account's real balance ≥ floor.
+  earmark: Map<string, bigint>;
+  // Ratcheted floor per earmark holder: only ever falls, tracking
+  // min(earmark, current sell-value of their position). The guaranteed layer —
+  // dropping the real balance below it voids the position proportionally.
+  earmarkFloor: Map<string, bigint>;
+  // FIFO flow-backed claims (sellers' unpaid appreciation). Paid directly by
+  // future buys, wallet-to-wallet; the replay only does the bookkeeping.
+  queue: { account: string; owed: bigint }[];
+  // Buy-excess prepayments: when a buy pays a queued seller MORE than their
+  // residual owed, the excess is real XNO the seller already received — it
+  // nets against their future sell proceeds first (no double-pay).
+  prepaid: Map<string, bigint>;
   height: bigint;
 }
 
@@ -82,6 +107,11 @@ export function emptyState(): State {
     poolTokens: 0n,
     xnoCredit: new Map(),
     xnoWithdrawn: new Map(),
+    direct: false,
+    earmark: new Map(),
+    earmarkFloor: new Map(),
+    queue: [],
+    prepaid: new Map(),
     height: 0n,
   };
 }
@@ -135,8 +165,84 @@ function constantProductOut(reserveIn: bigint, reserveOut: bigint, amountIn: big
   return (afterFee * reserveOut) / (reserveIn + afterFee);
 }
 
-export function applyOp(s0: State, op: Op, sender: string, height: bigint): State {
-  const s: State = {
+// ── Direct-Settlement helpers ───────────────────────────────────────────────
+
+// Instant sell-value of an account's whole position (balance + staked) at the
+// current virtual reserves — what the curve would pay if they exited now.
+function sellValueOf(s: State, a: string): bigint {
+  const pos = get(s.balances, a) + get(s.staked, a);
+  if (pos <= 0n || s.poolXno <= 0n || s.poolTokens <= 0n) return 0n;
+  return (pos * s.poolXno) / (s.poolTokens + pos);
+}
+
+// Ratchet every earmark holder's floor DOWN to min(floor, earmark, sell-value).
+// Called after each price-changing op on a direct token. Released collateral
+// (the gap between earmark and floor) returns to the holder's free control;
+// the earmark itself (netting base at exit) is unchanged.
+function ratchetFloors(s: State) {
+  for (const [a, em] of s.earmark) {
+    const sv = sellValueOf(s, a);
+    const cur = s.earmarkFloor.get(a) ?? em;
+    let f = cur < em ? cur : em;
+    if (sv < f) f = sv;
+    set(s.earmarkFloor, a, f);
+  }
+}
+
+function queueTotal(s: State): bigint {
+  let t = 0n;
+  for (const e of s.queue) t += e.owed;
+  return t;
+}
+
+// Coverage numerator for quoting a seller: everyone ELSE's guaranteed
+// (floored) collateral. A snapshot for haircut pricing — never a payment source.
+function floorTotalExcept(s: State, a: string): bigint {
+  let t = 0n;
+  for (const [acct, f] of s.earmarkFloor) if (acct !== a) t += f;
+  return t;
+}
+
+/** Proportionally void an earmark holder's position down to `newFloor` after a
+ * balance observation showed their real balance below the ratcheted floor
+ * (collateral defection). Tokens (held + staked) return to the virtual pool,
+ * their queued claims shrink, and the earmark/floor drop to what the chain
+ * proves still exists. Pure — returns a fresh state. */
+export function applyVoid(s0: State, account: string, newFloor: bigint): State {
+  const floor = s0.earmarkFloor.get(account) ?? 0n;
+  if (!s0.direct || floor <= 0n || newFloor >= floor) return s0;
+  const s = cloneState(s0);
+  const short = floor - (newFloor > 0n ? newFloor : 0n);
+  const bal = get(s.balances, account);
+  const vb = (bal * short) / floor;
+  set(s.balances, account, bal - vb);
+  let voided = vb;
+  const st = get(s.staked, account);
+  if (st > 0n) {
+    settle(s, account); // bank pending rewards at the old stake first
+    const vs = (st * short) / floor;
+    set(s.staked, account, st - vs);
+    s.totalStaked -= vs;
+    resetDebt(s, account);
+    voided += vs;
+  }
+  s.poolTokens += voided; // voided tokens back the remaining holders
+  s.queue = s.queue
+    .map((e) => (e.account === account ? { account: e.account, owed: e.owed - (e.owed * short) / floor } : e))
+    .filter((e) => e.owed > 0n);
+  const em = get(s.earmark, account);
+  set(s.earmark, account, em - (em * short) / floor);
+  set(s.earmarkFloor, account, newFloor > 0n ? newFloor : 0n);
+  return s;
+}
+
+/** Sum of an account's ratcheted floors — the balance it must keep on-chain. */
+export function requiredFloor(s: State, account: string): bigint {
+  return s.earmarkFloor.get(account) ?? 0n;
+}
+
+function cloneState(s0: State): State {
+  return {
     ...s0,
     balances: new Map(s0.balances),
     staked: new Map(s0.staked),
@@ -144,7 +250,19 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint): Stat
     rewardDebt: new Map(s0.rewardDebt),
     xnoCredit: new Map(s0.xnoCredit),
     xnoWithdrawn: new Map(s0.xnoWithdrawn),
+    earmark: new Map(s0.earmark),
+    earmarkFloor: new Map(s0.earmarkFloor),
+    queue: s0.queue.map((e) => ({ ...e })),
+    prepaid: new Map(s0.prepaid),
   };
+}
+
+export function applyOp(s0: State, op: Op, sender: string, height: bigint): State {
+  // Balance observations are handled at the multi-token layer (cross-token
+  // floor proration) — reaching a single-token apply they are a pure no-op.
+  if (op.kind === "balance") return s0;
+
+  const s = cloneState(s0);
 
   switch (op.kind) {
     case "launch": {
@@ -153,6 +271,7 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint): Stat
       const creatorShare = (op.supply * MAX_CREATOR_SHARE_BPS) / BPS; // floor(5%)
       if (creatorShare <= 0n) throw new InvalidOp("supply too small");
       s.launched = true;
+      s.direct = Boolean(op.direct);
       s.creator = sender;
       s.creatorShare = creatorShare;
       s.supply = op.supply;
@@ -181,11 +300,52 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint): Stat
       if (!s.launched) throw new InvalidOp("not launched");
       if (op.xno <= 0n) throw new InvalidOp("zero xno");
       if (s.poolXno <= 0n || s.poolTokens <= 0n) throw new InvalidOp("no liquidity");
-      const out = constantProductOut(s.poolXno, s.poolTokens, op.xno);
-      if (out < op.minTokens || out >= s.poolTokens) throw new InvalidOp("slippage");
-      s.poolXno += op.xno;
-      s.poolTokens -= out;
-      set(s.balances, sender, get(s.balances, sender) + out);
+      if (!s.direct) {
+        const out = constantProductOut(s.poolXno, s.poolTokens, op.xno);
+        if (out < op.minTokens || out >= s.poolTokens) throw new InvalidOp("slippage");
+        s.poolXno += op.xno;
+        s.poolTokens -= out;
+        set(s.balances, sender, get(s.balances, sender) + out);
+        s.height = height;
+        return s;
+      }
+      // Direct-Settlement buy. Two lanes:
+      //  (a) queue-routed: the chained deposit paid a QUEUED seller directly
+      //      (depositTo, indexer-attached from the send's destination). Tokens
+      //      mint through the curve on min(xno, that seller's residual owed);
+      //      any excess is a prepayment netting against the seller's future
+      //      proceeds — never a second mint (no double-count).
+      //  (b) self-earmark (queue empty only): no deposit — the declared xno
+      //      stays in the buyer's own account as collateral, validity-checked
+      //      against the SIGNED carrier-block balance.
+      if (op.depositTo) {
+        const entry = s.queue.find((e) => e.account === op.depositTo && e.owed > 0n);
+        if (!entry) throw new InvalidOp("deposit does not pay a queued seller");
+        const pay = op.xno < entry.owed ? op.xno : entry.owed;
+        entry.owed -= pay;
+        const excess = op.xno - pay;
+        if (excess > 0n) set(s.prepaid, op.depositTo, get(s.prepaid, op.depositTo) + excess);
+        s.queue = s.queue.filter((e) => e.owed > 0n);
+        const out = constantProductOut(s.poolXno, s.poolTokens, pay);
+        if (out < op.minTokens || out >= s.poolTokens) throw new InvalidOp("slippage");
+        s.poolXno += pay;
+        s.poolTokens -= out;
+        set(s.balances, sender, get(s.balances, sender) + out);
+      } else {
+        if (s.queue.some((e) => e.owed > 0n)) throw new InvalidOp("queued sellers must be paid first");
+        // The earmark commits xno ON TOP of any floor already required — the
+        // signed block balance must cover both, or the buy is invalid.
+        const bal = op.balanceAt ?? 0n;
+        if (bal < op.xno + (s.earmarkFloor.get(sender) ?? 0n)) throw new InvalidOp("insufficient collateral");
+        const out = constantProductOut(s.poolXno, s.poolTokens, op.xno);
+        if (out < op.minTokens || out >= s.poolTokens) throw new InvalidOp("slippage");
+        s.poolXno += op.xno;
+        s.poolTokens -= out;
+        set(s.balances, sender, get(s.balances, sender) + out);
+        set(s.earmark, sender, get(s.earmark, sender) + op.xno);
+        set(s.earmarkFloor, sender, (s.earmarkFloor.get(sender) ?? 0n) + op.xno);
+      }
+      ratchetFloors(s);
       s.height = height;
       return s;
     }
@@ -201,15 +361,57 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint): Stat
       set(s.balances, sender, bal - op.tokens);
       s.poolTokens += op.tokens;
       s.poolXno -= out;
-      // Proceeds become in-game credit (see State.xnoCredit) — the real XNO
-      // stays in the pool account until the seller explicitly withdraws.
-      set(s.xnoCredit, sender, get(s.xnoCredit, sender) + out);
+      if (!s.direct) {
+        // Proceeds become in-game credit (see State.xnoCredit) — the real XNO
+        // stays in the pool account until the seller explicitly withdraws.
+        set(s.xnoCredit, sender, get(s.xnoCredit, sender) + out);
+        s.height = height;
+        return s;
+      }
+      // Direct-Settlement sell: three-layer netting (the verified accounting
+      // identity — the flow-backed queue must equal exactly unpaid
+      // exit-realized appreciation, never phantom claims):
+      //  1. prepaid — XNO a buy already overpaid them (received early);
+      //  2. self-net — min(remainder, earmark, SIGNED exit-block balance):
+      //     settled instantly by releasing their OWN collateral, zero
+      //     counterparty. The actual-balance cap means a defector who
+      //     stripped collateral cannot self-net what the chain proves gone;
+      //  3. flow queue — the rest (appreciation), quoted at face × min(1, R)
+      //     where R = everyone else's floored collateral / total claims.
+      //     The haircut's shaved part returns to the virtual pool.
+      const pre = get(s.prepaid, sender);
+      const usePre = out < pre ? out : pre;
+      set(s.prepaid, sender, pre - usePre);
+      let rem = out - usePre;
+      const em = get(s.earmark, sender);
+      const exitBal = op.balanceAt ?? 0n;
+      let net = rem < em ? rem : em;
+      if (net > exitBal) net = exitBal;
+      set(s.earmark, sender, em - net);
+      // Re-clamp their floor to the reduced earmark (release is instant).
+      const fl = s.earmarkFloor.get(sender) ?? 0n;
+      const emAfter = em - net;
+      if (fl > emAfter) set(s.earmarkFloor, sender, emAfter);
+      rem -= net;
+      let credited = 0n;
+      if (rem > 0n) {
+        const num = floorTotalExcept(s, sender);
+        const den = queueTotal(s) + rem;
+        credited = num >= den ? rem : (rem * num) / den;
+        if (credited > 0n) s.queue = [...s.queue, { account: sender, owed: credited }];
+        s.poolXno += rem - credited; // the shaved part backs the remaining holders
+      }
+      // The slippage guard covers the seller's ECONOMIC total: prepayment
+      // netted + own collateral released + queued (post-haircut) claim.
+      if (usePre + net + credited < op.minXno) throw new InvalidOp("slippage");
+      ratchetFloors(s);
       s.height = height;
       return s;
     }
 
     case "withdraw": {
       if (!s.launched) throw new InvalidOp("not launched");
+      if (s.direct) throw new InvalidOp("direct tokens settle at sell");
       const credit = get(s.xnoCredit, sender);
       if (credit <= 0n) throw new InvalidOp("nothing to withdraw");
       set(s.xnoWithdrawn, sender, get(s.xnoWithdrawn, sender) + credit);
@@ -280,8 +482,15 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint): Stat
       if (op.xno <= 0n && op.tokens <= 0n) throw new InvalidOp("zero amounts");
       if (op.tokens > s.treasury) throw new InvalidOp("exceeds treasury");
       s.treasury -= op.tokens;
+      // Direct tokens: xno is a DECLARED VIRTUAL reserve (frag-encoded, no
+      // deposit, no pool account) — it only sets the price curve. It claims no
+      // real money: the first sellers' quotes against it queue as flow-backed
+      // claims until real buys arrive, so an inflated virtual seed only hurts
+      // the creator's own exit (their sell has no earmark and queues at R=0
+      // until real buyers commit collateral).
       s.poolXno += op.xno;
       s.poolTokens += op.tokens;
+      if (s.direct) ratchetFloors(s);
       s.height = height;
       return s;
     }

@@ -34,8 +34,8 @@ const MECHANISMS: { n: string; title: string; body: string }[] = [
   },
   {
     n: "03",
-    title: "Sell instantly — settle when YOU choose",
-    body: "Selling credits your game balance with XNO the moment the trade lands — no waiting on anyone. The real coins move on-chain only when you press Withdraw: one click collects everything you're owed, across every coin you've ever traded, including the ones you forgot. It's also what keeps the game fast when it's crowded: payouts can never clog, because they only happen when a player actually wants out.",
+    title: "Nobody holds your money — not even us",
+    body: "New coins run in zero-custody mode: there is no pool account, no vault, no operator key — nothing that could be hacked, seized, or rugged, because nothing ever holds traders' money. When you buy, your XNO either pays a waiting seller directly, wallet to wallet, or stays in YOUR wallet as collateral behind your position. When you sell, everything up to what you put in settles instantly from your own collateral — only your key can move it, so nobody can stop it. Your profit is paid by the next buyers, straight to your wallet, first come first served — exactly where profit comes from on every exchange ever built, except here you can see the line and its coverage before you commit.",
   },
   {
     n: "04",

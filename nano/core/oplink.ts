@@ -11,7 +11,7 @@
 // for the commit-reveal path.
 
 import type { Op } from "./ops";
-import { OP_CODE } from "./ops";
+import { OP_CODE, OP_CODE_LAUNCH_DIRECT } from "./ops";
 import type { TokenId } from "./token";
 import { TOKEN_ID_BYTES } from "./token";
 
@@ -65,6 +65,7 @@ function primaryAmount(op: Op): bigint {
     case "withdraw": return 0n;
     case "seedLiq":
     case "addLiq": return op.tokens; // xno is bound by the chained pool deposit
+    case "balance": throw new Error("balance is a synthetic observation, never encoded");
     default: throw new Error("op does not fit compact link: " + op.kind);
   }
 }
@@ -72,7 +73,8 @@ function primaryAmount(op: Op): bigint {
 /** Encode an op (scoped to `tokenId`) into a 32-byte (64-hex) link. */
 export function encodeOpLink(tokenId: TokenId, op: Op): string {
   const buf = new Uint8Array(32);
-  buf[0] = OP_CODE[op.kind];
+  if (op.kind === "balance") throw new Error("balance is a synthetic observation, never encoded");
+  buf[0] = op.kind === "launch" && op.direct ? OP_CODE_LAUNCH_DIRECT : OP_CODE[op.kind];
   writeTokenId(buf, 1, op.kind === "launch" ? "" : tokenId);
   writeAmount(buf, 1 + TOKEN_ID_BYTES, primaryAmount(op));
   // Bind decimals ON-CHAIN for launch (the launch link's tokenId slot is
@@ -107,7 +109,8 @@ export function decodeOpLink(
   const amt = readAmount(buf, 1 + TOKEN_ID_BYTES);
   let op: Op;
   switch (code) {
-    case OP_CODE.launch: {
+    case OP_CODE.launch:
+    case OP_CODE_LAUNCH_DIRECT: {
       // Decimals are consensus-bound in byte 1 (decimals+1; 0 = legacy → fall
       // back to off-chain meta, else 6). New tokens carry immutable decimals.
       const dByte = buf[1];
@@ -119,6 +122,7 @@ export function decodeOpLink(
         symbol: meta?.symbol ?? "",
         decimals,
         image: meta?.image ?? "",
+        ...(code === OP_CODE_LAUNCH_DIRECT ? { direct: true } : {}),
       };
       break;
     }

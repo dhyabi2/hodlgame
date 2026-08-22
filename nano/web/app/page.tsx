@@ -80,6 +80,14 @@ interface Token {
   createdAt: number;
   myBalance: string;
   myCredit: string;
+  direct: boolean;
+  myEarmark: string;
+  myFloor: string;
+  myQueueOwed: string;
+  myPrepaid: string;
+  queueTotal: string;
+  queueHead: { account: string; owedRaw: string } | null;
+  coveragePct: number | null;
   myStaked: string;
   myClaimable: string;
   totalStaked: string;
@@ -204,6 +212,28 @@ const quoteBuy = (poolXno: string, poolTokens: string, xno: bigint): bigint => {
   const afterFee = (xno * 9900n) / 10000n;
   return (afterFee * pt) / (px + afterFee);
 };
+
+// Mirror of state.ts direct-sell netting for previews/messages: how much
+// settles instantly (prepay + own collateral released) vs queues for the
+// next buys (post-coverage-haircut estimate).
+function previewSellDirect(
+  token: { poolXno: string; poolTokens: string; myPrepaid: string; myEarmark: string; coveragePct: number | null },
+  tokens: bigint,
+  walletRaw: string
+) {
+  const out = quoteSell(token.poolXno, token.poolTokens, tokens);
+  const pre = BigInt(token.myPrepaid || "0");
+  const usePre = out < pre ? out : pre;
+  let rem = out - usePre;
+  const em = BigInt(token.myEarmark || "0");
+  const bal = BigInt(walletRaw || "0");
+  let net = rem < em ? rem : em;
+  if (net > bal) net = bal;
+  rem -= net;
+  const covBps = BigInt(Math.round(Math.min(100, Math.max(0, token.coveragePct ?? 0)) * 100));
+  const queued = (rem * covBps) / 10_000n;
+  return { total: out, instant: usePre + net, queued };
+}
 
 const quoteSell = (poolXno: string, poolTokens: string, tokens: bigint): bigint => {
   const px = BigInt(poolXno);
@@ -1420,6 +1450,7 @@ function TokenDetail({
 
   async function buy() {
     if (!keys) return promptUnlock();
+    if (token.direct) return buyDirect();
     if (!token.pool) return say("this token has no pool yet");
     const raw = toRaw(amount, 30);
     if (raw <= 0n) return say("enter XNO amount");
@@ -1469,8 +1500,59 @@ function TokenDetail({
     }
   }
 
+  // Direct-Settlement buy: with a seller waiting, the XNO goes STRAIGHT to
+  // their wallet (deposit send to the queue head + chained op). With no queue,
+  // nothing moves at all — the amount stays in this wallet as collateral,
+  // declared in a fragment pair the network checks against the signed balance.
+  async function buyDirect() {
+    if (!keys) return promptUnlock();
+    const raw = toRaw(amount, 30);
+    if (raw <= 0n) return say("enter XNO amount");
+    if (BigInt(token.poolXno) <= 0n) return say("not tradeable yet — the creator hasn't set a starting price");
+    const slip = clampSlippage(slippage);
+    try {
+      await ensureHello();
+      const info = await rpc("account_info", { account: keys.address, representative: "true" });
+      if (!info.frontier) return say("account not opened — fund it first");
+      if (token.queueHead) {
+        const owed = BigInt(token.queueHead.owedRaw);
+        const pay = raw < owed ? raw : owed;
+        const expected = quoteBuy(token.poolXno, token.poolTokens, pay);
+        const minTokens = slip > 0 ? (expected * BigInt(Math.round((100 - slip) * 100))) / 10000n : 0n;
+        const w1 = (await rpc("work_generate", { hash: info.frontier, difficulty: "fffffff800000000" })).work;
+        const blk1 = buildBlock(keys.secretKey, {
+          work: w1, previous: info.frontier, representative: info.representative,
+          balance: (BigInt(info.balance) - pay).toString(),
+          link: nanocurrency.derivePublicKey(token.queueHead.account),
+        });
+        const r1 = await rpc("process", { json_block: "true", block: blk1 });
+        const w2 = (await rpc("work_generate", { hash: r1.hash, difficulty: "fffffff800000000" })).work;
+        const blk2 = buildBlock(keys.secretKey, {
+          work: w2, previous: r1.hash, representative: info.representative,
+          balance: (BigInt(info.balance) - pay - 1n).toString(),
+          link: encodeOpLink(token.tokenId, { kind: "buy", xno: 0n, minTokens }),
+        });
+        await rpc("process", { json_block: "true", block: blk2 });
+        say(`buy ✓ — ${fmtXno(pay.toString())} XNO paid a waiting seller directly, wallet to wallet`);
+      } else {
+        const need = raw + BigInt(token.myFloor || "0") + 2n;
+        if (BigInt(info.balance) < need) return say("not enough XNO — in a zero-custody coin your buy amount stays in YOUR wallet as collateral, so it must actually be there");
+        const expected = quoteBuy(token.poolXno, token.poolTokens, raw);
+        const minTokens = slip > 0 ? (expected * BigInt(Math.round((100 - slip) * 100))) / 10000n : 0n;
+        const [fragA, fragB] = encodeFragLinks(token.tokenId, { kind: "buy", xno: raw, minTokens });
+        await submitBlock(fragA, 1n);
+        await submitBlock(fragB, 1n);
+        say("buy ✓ — your XNO never left your wallet; it now backs your position as collateral");
+      }
+      setAmount("");
+    } catch (e: any) {
+      say("buy failed: " + e.message);
+    }
+  }
+
   async function sell() {
     if (!keys) return promptUnlock();
+    if (token.direct) return sellDirect();
     const raw = toRaw(amount, token.decimals);
     if (raw <= 0n) return say("enter token amount");
     setAmount("");
@@ -1493,11 +1575,36 @@ function TokenDetail({
     }
   }
 
+  // Direct-Settlement sell: principal settles INSTANTLY by releasing the
+  // seller's own collateral (their XNO never moved); only realized profit
+  // queues, paid straight to their wallet by the next buys.
+  async function sellDirect() {
+    if (!keys) return promptUnlock();
+    const raw = toRaw(amount, token.decimals);
+    if (raw <= 0n) return say("enter token amount");
+    const slip = clampSlippage(slippage);
+    try {
+      const p = previewSellDirect(token, raw, xnoBal);
+      const guarded = p.instant + p.queued;
+      const minXno = slip > 0 ? (guarded * BigInt(Math.round((100 - slip) * 100))) / 10000n : 0n;
+      const [fragA, fragB] = encodeFragLinks(token.tokenId, { kind: "sell", tokens: raw, minXno });
+      await submitBlock(fragA, 1n);
+      await submitBlock(fragB, 1n);
+      const parts = [`${fmtXno(p.instant.toString())} XNO yours instantly (your collateral, released)`];
+      if (p.queued > 0n) parts.push(`${fmtXno(p.queued.toString())} XNO queued — the next buys pay it straight to your wallet`);
+      say(`sold ✓ — ${parts.join(" · ")}`);
+      setAmount("");
+    } catch (e: any) {
+      say("sell failed: " + e.message);
+    }
+  }
+
   // Creator seeds/adds pool liquidity: deposit XNO to the pool (value-bound),
   // then a chained seedLiq op moving `tokens` from treasury into the pool. This
   // is what makes a launched token tradeable — mirrors the buy deposit+op flow.
   async function seed() {
     if (!keys) return promptUnlock();
+    if (token.direct) return seedDirect();
     if (!token.pool) return say("no pool derived for this token yet");
     if (keys.address !== token.creator) return say("only the creator can seed liquidity");
     const xnoRaw = toRaw(seedXno, 30);
@@ -1522,6 +1629,29 @@ function TokenDetail({
       });
       const r2 = await rpc("process", { json_block: "true", block: blk2 });
       say(`liquidity seeded ✓ ${r2.hash.slice(0, 10)}…`);
+      setSeedXno(""); setSeedTokens("");
+    } catch (e: any) {
+      say("seed failed: " + e.message);
+    }
+  }
+
+  // Direct token: the "seed" is a VIRTUAL starting reserve — a fragment pair
+  // declaring the price curve. No deposit is taken and no pool account exists;
+  // an inflated number only hurts the creator (their own exit has no
+  // collateral behind it until real buyers commit).
+  async function seedDirect() {
+    if (!keys) return promptUnlock();
+    if (keys.address !== token.creator) return say("only the creator can seed liquidity");
+    const xnoRaw = toRaw(seedXno, 30);
+    const tokRaw = toRaw(seedTokens, token.decimals);
+    if (xnoRaw <= 0n) return say("enter the virtual XNO reserve (sets the starting price)");
+    if (tokRaw <= 0n) return say("enter token amount to seed");
+    if (tokRaw > BigInt(token.treasury)) return say("token amount exceeds treasury");
+    try {
+      const [fragA, fragB] = encodeFragLinks(token.tokenId, { kind: "seedLiq", xno: xnoRaw, tokens: tokRaw });
+      await submitBlock(fragA, 1n);
+      const hash = await submitBlock(fragB, 1n);
+      say(`starting price set ✓ ${hash.slice(0, 10)}… — virtual reserve, no deposit taken`);
       setSeedXno(""); setSeedTokens("");
     } catch (e: any) {
       say("seed failed: " + e.message);
@@ -1683,10 +1813,20 @@ function TokenDetail({
             <p className="text-[11px] text-neutral-500">pool {fmtXno(token.poolXno)} XNO · treasury {fmtTok(token.treasury, token.decimals)}</p>
           </div>
           {BigInt(token.poolXno) <= 0n && (
-            <p className="text-[11px] text-white">This token has no pool yet — seed it to make it tradeable.</p>
+            <p className="text-[11px] text-white">
+              {token.direct
+                ? "Set the starting price to make it tradeable — the XNO figure is virtual (nothing is deposited)."
+                : "This token has no pool yet — seed it to make it tradeable."}
+            </p>
+          )}
+          {token.direct && (
+            <p className="text-[11px] text-neutral-500">
+              Zero-custody coin: the XNO reserve is a price-curve setting, not a deposit.
+              No money leaves your wallet.
+            </p>
           )}
           <div className="flex gap-2">
-            <input className={inputC} placeholder="XNO to add" inputMode="decimal" value={seedXno} onChange={(e) => setSeedXno(e.target.value)} />
+            <input className={inputC} placeholder={token.direct ? "virtual XNO reserve" : "XNO to add"} inputMode="decimal" value={seedXno} onChange={(e) => setSeedXno(e.target.value)} />
             <input className={inputC} placeholder="tokens to add" inputMode="decimal" value={seedTokens} onChange={(e) => setSeedTokens(e.target.value)} />
           </div>
           <button className={btn} disabled={busy} onClick={seed}>Seed pool</button>
@@ -1907,15 +2047,64 @@ function TradePanel({
           </div>
         </div>
       )}
+      {token.direct && side === "sell" && (() => {
+        const raw = toRaw(amount, token.decimals);
+        if (raw <= 0n) return null;
+        const p = previewSellDirect(token, raw, xnoBal);
+        return (
+          <div className="rounded-none border border-neutral-800 bg-neutral-950 p-2.5 text-[11px] text-neutral-500 space-y-1">
+            <div className="flex justify-between">
+              <span>yours instantly (collateral released)</span>
+              <span className="tabular-nums text-white">{fmtXno(p.instant.toString())} XNO</span>
+            </div>
+            {p.queued > 0n && (
+              <div className="flex justify-between">
+                <span>profit, queued — next buys pay your wallet</span>
+                <span className="tabular-nums text-white">{fmtXno(p.queued.toString())} XNO</span>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+      {token.direct && side === "buy" && token.queueHead && (
+        <p className="text-[11px] text-neutral-500">
+          your XNO goes straight to the seller ahead in line — wallet to wallet, up to{" "}
+          <span className="tabular-nums text-neutral-300">{fmtXno(token.queueHead.owedRaw)} XNO</span>
+        </p>
+      )}
       <button className={btn} disabled={busy} onClick={side === "buy" ? buy : sell}>
-        {busy ? "…" : side === "buy" ? "Buy (send XNO)" : "Sell tokens"}
+        {busy ? "…" : side === "buy" ? (token.direct && !token.queueHead ? "Buy (XNO stays in your wallet)" : "Buy (send XNO)") : "Sell tokens"}
       </button>
 
       <StakeBox token={token} busy={busy} sendOp={sendOp} />
 
-      {/* Exit-only settlement: sell proceeds accrue here instantly (zero
-          waiting, zero PoW); one Withdraw click settles real XNO on-chain. */}
-      {BigInt(token.myCredit || "0") > 0n && (
+      {/* Direct-Settlement surfaces: queued payout position + collateral. */}
+      {token.direct && BigInt(token.myQueueOwed || "0") > 0n && (
+        <div className="rounded-none border border-neutral-700 bg-neutral-950 p-3">
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">In line for payout</p>
+          <p className="mt-0.5 text-sm font-black tabular-nums">{fmtXno(token.myQueueOwed)} XNO</p>
+          <p className="mt-1 text-[11px] text-neutral-500 leading-relaxed">
+            The next buys pay this straight to your wallet, first come first served — no
+            withdraw step, no one to ask. {token.coveragePct != null && <>Coverage now: {token.coveragePct.toFixed(0)}%.</>}
+          </p>
+        </div>
+      )}
+      {token.direct && BigInt(token.myEarmark || "0") > 0n && (
+        <div className="rounded-none border border-neutral-800 bg-neutral-950 p-3">
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">Your collateral</p>
+          <p className="mt-0.5 text-sm font-black tabular-nums">{fmtXno(token.myEarmark)} XNO <span className="text-[10px] font-normal text-neutral-500">— still in YOUR wallet</span></p>
+          <p className="mt-1 text-[11px] text-neutral-500 leading-relaxed">
+            It backs your position and is released the moment you sell. Keep at least{" "}
+            <span className="tabular-nums text-neutral-300">{fmtXno(token.myFloor)} XNO</span> in this wallet —
+            spending below that line shrinks your position to match.
+          </p>
+        </div>
+      )}
+
+      {/* Exit-only settlement (pooled tokens): sell proceeds accrue here
+          instantly (zero waiting, zero PoW); one Withdraw click settles real
+          XNO on-chain. Direct tokens never show this — they settle at sell. */}
+      {!token.direct && BigInt(token.myCredit || "0") > 0n && (
         <div className="rounded-none border border-neutral-700 bg-neutral-950 p-3 flex items-center justify-between gap-3">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">Game balance</p>
@@ -1931,6 +2120,12 @@ function TradePanel({
         </div>
       )}
 
+      {token.direct && (
+        <p className="text-[11px] text-neutral-500">
+          zero-custody coin — no pool account exists. Trades settle wallet-to-wallet;
+          nobody (including this site) can touch traders' money.
+        </p>
+      )}
       {token.pool && (
         <p className="text-[11px] text-neutral-500">
           liquidity pool account{" "}
@@ -2251,6 +2446,9 @@ function CreateToken({
   const [image, setImage] = useState("");
   const [uploading, setUploading] = useState(false);
   const [showReq, setShowReq] = useState(false); // flag the required name/symbol fields on a failed submit
+  // Direct-Settlement (zero-custody) launch: trades settle wallet-to-wallet,
+  // no pool account ever exists. Default ON — it is the trustless mode.
+  const [zeroCustody, setZeroCustody] = useState(true);
 
   async function upload(file: File) {
     if (!file.type.startsWith("image/")) return say("please choose an image file");
@@ -2303,7 +2501,7 @@ function CreateToken({
     setBusy(true);
     try {
       const hash = await submitBlock(
-        encodeOpLink("", { kind: "launch", supply: rawSupply, name: meta.name, symbol: meta.symbol, decimals, image: "" }),
+        encodeOpLink("", { kind: "launch", supply: rawSupply, name: meta.name, symbol: meta.symbol, decimals, image: "", direct: zeroCustody }),
         1n
       );
       const tokenId = tokenIdFromLaunchHash(hash);
@@ -2399,6 +2597,23 @@ function CreateToken({
         <input className={inputC} placeholder="https://x.com/… (optional)" value={twitter} onChange={(e) => setTwitter(e.target.value)} />
         <input className={inputC} placeholder="https://t.me/… (optional)" value={telegram} onChange={(e) => setTelegram(e.target.value)} />
       </div>
+      <button
+        type="button"
+        className="w-full rounded-none border border-neutral-800 p-3 text-left hover:border-neutral-600"
+        onClick={() => setZeroCustody(!zeroCustody)}
+      >
+        <span className="flex items-center justify-between">
+          <span className="text-xs font-black uppercase tracking-wide">Zero-custody mode</span>
+          <span className={"text-[10px] font-black uppercase tracking-wide px-2 py-0.5 " + (zeroCustody ? "bg-white text-black" : "border border-neutral-700 text-neutral-500")}>
+            {zeroCustody ? "on" : "off"}
+          </span>
+        </span>
+        <span className="mt-1 block text-[11px] text-neutral-500 leading-relaxed">
+          {zeroCustody
+            ? "No pool account exists — nobody (not even us) ever holds traders' money. Buys pay sellers wallet-to-wallet; sellers' principal settles instantly from their own collateral."
+            : "Classic pooled coin: trades settle through a pool account operated by the platform."}
+        </span>
+      </button>
       <button className={btn} disabled={busy} onClick={launch}>
         {busy ? "launching…" : "Launch Token (0.000002 XNO)"}
       </button>
@@ -2411,7 +2626,8 @@ function Portfolio({ tokens, onSelect, account, sendOp, busy, usd }: { tokens: T
   const mine = tokens.filter((t) => BigInt(t.myBalance) > 0n);
   // Every token game where this wallet has withdrawable in-game XNO — scanned
   // from the whole replayed ledger so forgotten coins are never left behind.
-  const credited = tokens.filter((t) => BigInt(t.myCredit || "0") > 0n);
+  // Direct tokens settle at sell — the withdraw op does not exist for them.
+  const credited = tokens.filter((t) => !t.direct && BigInt(t.myCredit || "0") > 0n);
   const totalCredit = credited.reduce((a, t) => a + BigInt(t.myCredit), 0n);
   const [withdrawing, setWithdrawing] = useState(false);
   const withdrawAll = async () => {

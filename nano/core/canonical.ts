@@ -43,6 +43,11 @@ function consensusView(s: State) {
     poolTokens: s.poolTokens,
     xnoCredit: s.xnoCredit,
     xnoWithdrawn: s.xnoWithdrawn,
+    direct: s.direct,
+    earmark: s.earmark,
+    earmarkFloor: s.earmarkFloor,
+    queue: s.queue.map((e) => ({ account: e.account, owed: e.owed })),
+    prepaid: s.prepaid,
     height: s.height,
   };
 }

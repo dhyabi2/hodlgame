@@ -85,7 +85,9 @@ export function analyze(events: IndexedEvent[]): Analytics {
     let out: bigint | null = null;
     if (ev.op.kind === "sell") {
       const pre = s.get(ev.tokenId);
-      if (pre && pre.poolXno > 0n && pre.poolTokens > 0n) {
+      // Direct tokens never produce pool payouts — sells settle wallet-side
+      // (earmark release + flow queue), so no SellPayout entry is emitted.
+      if (pre && !pre.direct && pre.poolXno > 0n && pre.poolTokens > 0n) {
         out = (ev.op.tokens * pre.poolXno) / (pre.poolTokens + ev.op.tokens);
       }
     }

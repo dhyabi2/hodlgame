@@ -12,6 +12,7 @@ import {
   pctStr,
   timeAgo,
   execBuy,
+  execBuyDirect,
   execSell,
   toRaw,
   sendOp,
@@ -32,6 +33,8 @@ interface Token {
   change1h: number | null; change24h: number | null; createdAt: number;
   myBalance: string; myCredit: string; myStaked: string; myClaimable: string; totalStaked: string;
   buyVolume: string; sellVolume: string; holders: number; pool: string | null;
+  direct: boolean; myEarmark: string; myFloor: string; myQueueOwed: string; myPrepaid: string;
+  queueTotal: string; queueHead: { account: string; owedRaw: string } | null; coveragePct: number | null;
   series: PricePoint[]; trades: Trade[]; topHolders: Holder[];
 }
 
@@ -524,11 +527,15 @@ function OrderTicket({ token, keys, say }: { token: Token; keys: Keys | null; sa
     setBusy(true);
     try {
       if (side === "buy") {
-        const h = await execBuy(keys, token, amount, slip);
+        const h = token.direct
+          ? await execBuyDirect(keys, token, amount, slip)
+          : await execBuy(keys, token, amount, slip);
         say(`bought ✓ ${h.slice(0, 10)}…`);
       } else {
-        const h = await execSell(keys, token, amount, slip);
-        say(`sold ✓ — XNO credited to your game balance. Withdraw any time.`);
+        const h = await execSell(keys, token, amount, slip); // direct sells settle at sell (state.ts nets wallet-side)
+        say(token.direct
+          ? "sold ✓ — principal settled instantly from your collateral; any profit is queued for the next buys"
+          : "sold ✓ — XNO credited to your game balance. Withdraw any time.");
       }
       setAmount("");
     } catch (e: any) {

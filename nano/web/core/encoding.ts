@@ -26,6 +26,7 @@ function rStr(b: Buffer, o: number): { s: string; o: number } {
 }
 
 export function encodeOp(op: Op): Buffer {
+  if (op.kind === "balance") throw new Error("balance is a synthetic observation, never encoded");
   const parts: Buffer[] = [Buffer.from([OP_CODE[op.kind]])];
   const w16 = (n: bigint) => parts.push(u16(n));
   const wstr = (s: string) => {

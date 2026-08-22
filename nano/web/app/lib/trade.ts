@@ -246,11 +246,123 @@ export async function execBuy(
   return r2.hash as string;
 }
 
+/** Direct-Settlement buy (zero-custody tokens). Two lanes:
+ *  - a seller is queued → the XNO is sent STRAIGHT TO THEIR WALLET (deposit
+ *    send to the queue head) with the buy op chained after it;
+ *  - queue empty → nothing moves at all: the amount stays in the buyer's own
+ *    wallet as collateral, declared via a fragment buy the network checks
+ *    against the signed block balance. */
+export async function execBuyDirect(
+  keys: Keys,
+  token: {
+    tokenId: string;
+    poolXno: string;
+    poolTokens: string;
+    queueHead: { account: string; owedRaw: string } | null;
+    myFloor: string;
+  },
+  xnoAmount: string,
+  slipPctRaw: number
+): Promise<string> {
+  const raw = toRaw(xnoAmount, 30);
+  const slipPct = Math.min(100, Math.max(0, Number.isFinite(slipPctRaw) ? slipPctRaw : 0));
+  if (raw <= 0n) throw new Error("enter XNO amount");
+  const info = await rpc("account_info", { account: keys.address, representative: "true" });
+  if (!info.frontier) throw new Error("account not opened — fund it first");
+
+  const head = token.queueHead;
+  if (head) {
+    // Pay the queued seller directly, wallet to wallet. Tokens mint on
+    // min(amount, their residual) — cap the spend to it so nothing overpays.
+    const owed = BigInt(head.owedRaw);
+    const pay = raw < owed ? raw : owed;
+    const expected = quoteBuy(token.poolXno, token.poolTokens, pay);
+    const minTokens = slipPct > 0 ? (expected * BigInt(Math.round((100 - slipPct) * 100))) / 10000n : 0n;
+    const w1 = (await rpc("work_generate", { hash: info.frontier, difficulty: WORK_DIFF })).work;
+    const blk1 = buildBlock(keys.secretKey, {
+      work: w1,
+      previous: info.frontier,
+      representative: info.representative,
+      balance: (BigInt(info.balance) - pay).toString(),
+      link: nanocurrency.derivePublicKey(head.account),
+    });
+    const r1 = await rpc("process", { json_block: "true", block: blk1 });
+    const w2 = (await rpc("work_generate", { hash: r1.hash, difficulty: WORK_DIFF })).work;
+    const blk2 = buildBlock(keys.secretKey, {
+      work: w2,
+      previous: r1.hash,
+      representative: info.representative,
+      balance: (BigInt(info.balance) - pay - 1n).toString(),
+      link: encodeOpLink(token.tokenId, { kind: "buy", xno: 0n, minTokens }),
+    });
+    const r2 = await rpc("process", { json_block: "true", block: blk2 });
+    return r2.hash as string;
+  }
+
+  // Self-collateralized: the XNO never leaves this wallet. The two fragment
+  // blocks burn 2 raw; the signed balance must cover amount + existing floor.
+  const need = raw + BigInt(token.myFloor || "0") + 2n;
+  if (BigInt(info.balance) < need) throw new Error("not enough XNO to collateralize this buy");
+  const expected = quoteBuy(token.poolXno, token.poolTokens, raw);
+  const minTokens = slipPct > 0 ? (expected * BigInt(Math.round((100 - slipPct) * 100))) / 10000n : 0n;
+  const [fragA, fragB] = encodeFragLinks(token.tokenId, { kind: "buy", xno: raw, minTokens });
+  await submitLink(keys, fragA, 1n);
+  return submitLink(keys, fragB, 1n);
+}
+
+/** Client preview of a Direct-Settlement sell: how much settles INSTANTLY
+ * (prepayments + the seller's own collateral released) vs how much queues as a
+ * claim on future buys (post-coverage-haircut estimate). Mirrors state.ts. */
+export function quoteSellDirect(
+  token: { poolXno: string; poolTokens: string; myPrepaid: string; myEarmark: string; queueTotal: string; coveragePct: number | null },
+  walletBalanceRaw: string,
+  tokens: bigint
+): { total: bigint; instant: bigint; queued: bigint; forfeited: bigint } {
+  const out = quoteSell(token.poolXno, token.poolTokens, tokens);
+  const pre = BigInt(token.myPrepaid || "0");
+  const usePre = out < pre ? out : pre;
+  let rem = out - usePre;
+  const em = BigInt(token.myEarmark || "0");
+  const bal = BigInt(walletBalanceRaw || "0");
+  let net = rem < em ? rem : em;
+  if (net > bal) net = bal;
+  rem -= net;
+  const covBps = BigInt(Math.round(Math.min(100, Math.max(0, token.coveragePct ?? 0)) * 100));
+  const queued = (rem * covBps) / 10_000n;
+  return { total: out, instant: usePre + net, queued, forfeited: rem - queued };
+}
+
+/** Direct-Settlement virtual seed: creator declares the starting reserves in a
+ * fragment pair — no deposit, no pool account, the "reserve" is a price curve
+ * setting that claims no real money. */
+export async function execSeedDirect(
+  keys: Keys,
+  tokenId: string,
+  virtualXno: string,
+  tokens: bigint
+): Promise<string> {
+  const xnoRaw = toRaw(virtualXno, 30);
+  if (xnoRaw <= 0n || tokens <= 0n) throw new Error("enter amounts");
+  const [fragA, fragB] = encodeFragLinks(tokenId, { kind: "seedLiq", xno: xnoRaw, tokens });
+  await submitLink(keys, fragA, 1n);
+  return submitLink(keys, fragB, 1n);
+}
+
 /** Sell tokens for XNO. With slippage protection the full op is carried
  * on-chain across two chained fragment blocks. */
 export async function execSell(
   keys: Keys,
-  token: { tokenId: string; decimals: number; poolXno: string; poolTokens: string },
+  token: {
+    tokenId: string;
+    decimals: number;
+    poolXno: string;
+    poolTokens: string;
+    direct?: boolean;
+    myPrepaid?: string;
+    myEarmark?: string;
+    queueTotal?: string;
+    coveragePct?: number | null;
+  },
   tokenAmount: string,
   slipPctRaw: number
 ): Promise<string> {
@@ -258,7 +370,21 @@ export async function execSell(
   const slipPct = Math.min(100, Math.max(0, Number.isFinite(slipPctRaw) ? slipPctRaw : 0));
   if (raw <= 0n) throw new Error("enter token amount");
   if (slipPct > 0) {
-    const expected = quoteSell(token.poolXno, token.poolTokens, raw);
+    // Direct tokens guard the ECONOMIC total (instant + queued after the
+    // coverage haircut) — guarding the raw curve quote would fail every sell
+    // that takes any haircut.
+    let expected: bigint;
+    if (token.direct) {
+      const bal = await fetchXnoBalance(keys.address);
+      const p = quoteSellDirect(
+        { poolXno: token.poolXno, poolTokens: token.poolTokens, myPrepaid: token.myPrepaid ?? "0", myEarmark: token.myEarmark ?? "0", queueTotal: token.queueTotal ?? "0", coveragePct: token.coveragePct ?? 0 },
+        bal,
+        raw
+      );
+      expected = p.instant + p.queued;
+    } else {
+      expected = quoteSell(token.poolXno, token.poolTokens, raw);
+    }
     const minXno = (expected * BigInt(Math.round((100 - slipPct) * 100))) / 10000n;
     const [fragA, fragB] = encodeFragLinks(token.tokenId, { kind: "sell", tokens: raw, minXno });
     await submitLink(keys, fragA, 1n);

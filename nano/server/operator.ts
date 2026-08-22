@@ -82,7 +82,9 @@ export async function runSweep(onlyToken: string | null) {
     const credits = creditedBuys(events);
     const { state: replayed } = analyze(events);
 
-    const known = [...idx.getState().keys()];
+    // Direct-Settlement tokens have NO pool account and settle wallet-to-wallet
+    // at sell time — the sweep must never touch them.
+    const known = [...idx.getState().entries()].filter(([, s]) => !s.direct).map(([id]) => id);
     let targets = onlyToken ? (known.includes(onlyToken) ? [onlyToken] : []) : known;
 
     // Custody consistency: the chain-derived pool (what the deterministic

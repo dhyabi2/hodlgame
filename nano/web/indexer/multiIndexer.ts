@@ -84,6 +84,10 @@ export interface IndexedEvent {
    * pairs: [A, B]); absent for single-block ops. Explorer metadata only —
    * never part of consensus state. */
   carriers?: string[];
+  /** Sub-order within one block: 0 (default) = the op itself, 1 = the block's
+   * signed-balance observation. Consensus-relevant tiebreak — the op always
+   * folds before its own block's balance is checked against the floors. */
+  sub?: number;
 }
 
 /**
@@ -97,7 +101,7 @@ export interface IndexedEvent {
  */
 export function canonicalOrder(a: IndexedEvent, b: IndexedEvent): number {
   if (a.height !== b.height) return a.height < b.height ? -1 : 1;
-  if (a.hash === b.hash) return 0;
+  if (a.hash === b.hash) return (a.sub ?? 0) - (b.sub ?? 0);
   return a.hash < b.hash ? -1 : 1;
 }
 
@@ -307,6 +311,12 @@ export class MultiIndexer {
         }
         consumed.add(child.hash);
         const timestamp = child.timestamp ? Number(child.timestamp) : undefined;
+        // Buys/sells carry the SIGNED balance of their completing block —
+        // consensus input for direct-settlement collateral checks and
+        // actual-balance exit netting.
+        if ((d.op.kind === "sell" || d.op.kind === "buy") && child.balance != null) {
+          d.op = { ...d.op, balanceAt: BigInt(child.balance) };
+        }
         // The op completes only at B: height/hash come from B so canonical
         // ordering is identical for every indexer.
         events.push({
@@ -324,7 +334,12 @@ export class MultiIndexer {
         continue;
       }
       const ev = this.decode(block);
-      if (ev) events.push({ ev, prev: block.previous });
+      if (ev) {
+        if ((ev.op.kind === "sell" || ev.op.kind === "buy") && block.balance != null) {
+          ev.op = { ...ev.op, balanceAt: BigInt(block.balance) };
+        }
+        events.push({ ev, prev: block.previous });
+      }
     }
     return { events, byHash, anchors };
   }
@@ -357,6 +372,14 @@ export class MultiIndexer {
     };
 
     this.depositEdges = new Map();
+    // Direct-Settlement tokens (consensus-bound in the launch link, 0x0b):
+    // their buys/seeds bind differently — no pool account exists at all.
+    const directSet = new Set<TokenId>();
+    for (const { events: evs } of decoded.values()) {
+      for (const { ev } of evs) {
+        if (ev.op.kind === "launch" && ev.op.direct) directSet.add(ev.tokenId);
+      }
+    }
     // A deposit may back AT MOST ONE value-bound op. On a linear Nano chain two
     // ops can't share a `previous`, but this guards against a forked/replayed
     // history double-crediting one deposit (defense-in-depth).
@@ -364,7 +387,29 @@ export class MultiIndexer {
     const events: IndexedEvent[] = [];
     for (const { events: evs, byHash } of decoded.values()) {
       for (const { ev, prev } of evs) {
-        if (ev.op.kind === "buy") {
+        if (ev.op.kind === "buy" && directSet.has(ev.tokenId)) {
+          if (ev.op.xno > 0n) {
+            // Frag-declared self-earmark buy: no deposit — the state machine
+            // checks the declared xno against the signed carrier balance
+            // (balanceAt) and the queue-empty rule. depositTo stays unset.
+          } else {
+            // Queue-routed buy: the chained deposit is a real send whose
+            // DESTINATION (a queued seller) is the routing fact — attached
+            // here, validated against the queue by the state machine.
+            const dep = byHash.get(prev);
+            const amount = dep ? BigInt(dep.amount ?? "0") : 0n;
+            if (!dep || amount <= 0n || dep.subtype !== "send" || consumedDeposits.has(dep.hash)) continue;
+            consumedDeposits.add(dep.hash);
+            let payee: string;
+            try {
+              payee = nanocurrency.deriveAddress(dep.link.toLowerCase(), { useNanoPrefix: true });
+            } catch {
+              continue;
+            }
+            ev.op = { ...ev.op, xno: amount, depositTo: payee };
+            this.depositEdges.set(ev.hash, { deposit: dep.hash, amountRaw: amount.toString() });
+          }
+        } else if (ev.op.kind === "buy") {
           // Value-bound buy: the authoritative xno is the native amount of the
           // deposit block the op chains from (previous), not any declared value.
           const dep = byHash.get(prev);
@@ -374,6 +419,10 @@ export class MultiIndexer {
           consumedDeposits.add(dep.hash);
           ev.op = { ...ev.op, xno: amount };
           this.depositEdges.set(ev.hash, { deposit: dep.hash, amountRaw: amount.toString() });
+        } else if ((ev.op.kind === "seedLiq" || ev.op.kind === "addLiq") && directSet.has(ev.tokenId)) {
+          // Direct token liquidity is VIRTUAL: the frag-declared xno passes
+          // through as-is (it claims no real money — see state.ts), and no
+          // deposit is consumed or required.
         } else if (ev.op.kind === "seedLiq" || ev.op.kind === "addLiq") {
           // Value-bound liquidity: pool XNO only ever credits from a real
           // chained deposit send to this token's pool — the deposit's native
@@ -392,6 +441,26 @@ export class MultiIndexer {
           }
         }
         events.push(ev);
+      }
+    }
+    // Signed-balance observations: with any direct token live, every block of
+    // every watched chain contributes its balance as a consensus event (sub 1,
+    // AFTER the block's own op). The multi-state router prorates each account's
+    // observed balance across its floors and voids defected collateral — this
+    // is what makes earmarks trustworthy without locking anything.
+    if (directSet.size > 0) {
+      for (const { byHash } of decoded.values()) {
+        for (const b of byHash.values()) {
+          if (b.balance == null) continue;
+          events.push({
+            tokenId: "",
+            op: { kind: "balance", raw: BigInt(b.balance) },
+            sender: b.account,
+            height: b.height,
+            hash: b.hash,
+            sub: 1,
+          });
+        }
       }
     }
     return events.sort(canonicalOrder);
