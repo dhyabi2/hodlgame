@@ -255,6 +255,7 @@ export async function tokenExplorer(tokenId: string, holderCursor = 0) {
     holderCursor,
     holderNextCursor: holderCursor + 50 < allHolders.length ? holderCursor + 50 : null,
     concentration: { top10Pct, holderCount: allHolders.length },
+    direct: s.direct, // zero-custody v2 coin — no pool account, so no reserves to prove
     reserves,
     ops: enrich(deltas.filter((d) => d.tokenId === tokenId), m).reverse().slice(0, 100),
   };

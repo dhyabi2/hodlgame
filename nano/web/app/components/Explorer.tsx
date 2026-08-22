@@ -481,9 +481,22 @@ function TokenDetailX({ d, go }: { d: any; go: (v: View) => void }) {
         <Row k="bought / sold (24h)">{fmtXno(d.buyVolumeRaw)} / {fmtXno(d.sellVolumeRaw)} XNO</Row>
       </details>
 
-      {d.reserves && (
+      {/* Zero-custody (v2) coins have NO pool account, so there are no reserves
+          to prove — that's the point. Say so, instead of silently omitting it. */}
+      {d.direct ? (
+        <div className={card}>
+          <h3 className="font-black text-sm mb-2">Custody <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-neutral-900/60 text-white">zero</span></h3>
+          <p className="text-[11px] text-neutral-400 leading-relaxed">
+            This is a zero-custody coin: there is <span className="text-white">no pool account</span>, so there are no
+            reserves to prove. Trades settle wallet-to-wallet and each buyer's collateral sits in their own wallet —
+            nobody (including this site) ever holds traders’ money. Verify the balances yourself with the state-root
+            check below.
+          </p>
+        </div>
+      ) : d.reserves && (
         <div className={card}>
           <h3 className="font-black text-sm mb-2">Proof of reserves <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${reservesMatch ? "bg-neutral-900/60 text-white" : "bg-neutral-900/60 text-white"}`}>{reservesMatch ? "backed" : "check"}</span></h3>
+          <p className="text-[11px] text-neutral-500 mb-2">Legacy pooled coin — the XNO this site says is in the pool vs what Nano actually holds.</p>
           <Row k="pool account"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.reserves.poolAddress })}>{short(d.reserves.poolAddress, 12)}</span><Copy text={d.reserves.poolAddress} /></Row>
           <Row k="indexed pool XNO">{fmtXno(d.reserves.indexedPoolXno)} XNO</Row>
           <Row k="on-chain balance">{fmtXno(d.reserves.onchainBalance)} XNO</Row>
@@ -587,9 +600,9 @@ function TrustPanel({ d, go }: { d: any; go: (v: View) => void }) {
         <Row k="verify yourself">your browser re-checks every action and must arrive at the same fingerprint</Row>
         <VerifyButton serverRoot={d.stateRoot} />
       </div>
-      <div className={card}><h3 className="font-black text-sm mb-2">Proof of reserves — all pools</h3>
-        <p className="text-[11px] text-neutral-500 mb-1">For each coin: the XNO this site says is in the pool vs what the Nano blockchain actually holds.</p>
-        {d.pools.length === 0 && <p className="text-xs text-neutral-500">no pools yet</p>}
+      <div className={card}><h3 className="font-black text-sm mb-2">Proof of reserves — legacy pooled coins</h3>
+        <p className="text-[11px] text-neutral-500 mb-1">Only <span className="text-neutral-300">legacy pooled</span> coins have reserves to prove: the XNO this site says is in the pool vs what Nano actually holds. Zero-custody (v2) coins have no pool — nothing is ever custodied.</p>
+        {d.pools.length === 0 && <p className="text-xs text-neutral-500">No pooled coins — every coin here is zero-custody (no reserves to hold).</p>}
         {d.pools.map((p: any) => {
           const backed = BigInt(p.onchainBalance) >= BigInt(p.indexedPoolXno);
           return (
