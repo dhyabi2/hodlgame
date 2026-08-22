@@ -52,6 +52,29 @@ const priceNum = (raw: string) => Number(BigInt(raw)) / 1e30;
 // same convention as the main app, so a live coin is never a blank label.
 const tokSym = (t: { symbol: string; tokenId: string }) => t.symbol || t.tokenId.slice(0, 4).toUpperCase();
 
+/** Bandwidth-friendly poller: self-scheduling (never overlaps), pauses when the
+ * tab is hidden, refreshes on focus. Replaces raw setInterval which hammered
+ * the server regardless of visibility or in-flight requests. */
+function usePoll(fn: () => Promise<void> | void, intervalMs: number, deps: React.DependencyList) {
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const hidden = () => typeof document !== "undefined" && document.hidden;
+    const run = async () => {
+      if (stopped || hidden()) return;
+      try { await fnRef.current(); } catch {}
+      if (!stopped && !hidden()) timer = setTimeout(run, intervalMs);
+    };
+    run();
+    const onVis = () => { if (!hidden()) { clearTimeout(timer); run(); } };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVis);
+    return () => { stopped = true; clearTimeout(timer); if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVis); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+}
+
 export default function ProPage() {
   const [tokens, setTokens] = useState<Token[]>([]);
   const [tokenId, setTokenId] = useState<string | null>(null);
@@ -80,48 +103,25 @@ export default function ProPage() {
   }, []);
 
   // token list (for the picker)
-  useEffect(() => {
-    let live = true;
-    const load = async () => {
-      try {
-        const j = await (await fetch(`/api/state?account=${keys?.address ?? ""}`)).json();
-        if (live) {
-          // Hide imageless pre-fix test launches from the picker too.
-          const list: Token[] = (j.tokens ?? []).filter((t: Token) => t.image || BigInt(t.myBalance || "0") > 0n);
-          setTokens(list);
-          // Functional update so a ?token= already set (via the other effect)
-          // is never clobbered by a stale-closure default to list[0].
-          if (list.length) setTokenId((prev) => prev ?? list[0].tokenId);
-        }
-      } catch {}
-    };
-    load();
-    const t = setInterval(load, 6000);
-    return () => { live = false; clearInterval(t); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keys?.address]);
+  usePoll(async () => {
+    const j = await (await fetch(`/api/state?account=${keys?.address ?? ""}`)).json();
+    // Hide imageless pre-fix test launches from the picker too.
+    const list: Token[] = (j.tokens ?? []).filter((t: Token) => t.image || BigInt(t.myBalance || "0") > 0n);
+    setTokens(list);
+    // Functional update so a ?token= already set is never clobbered.
+    if (list.length) setTokenId((prev) => prev ?? list[0].tokenId);
+  }, 20000, [keys?.address]);
 
-  // selected token detail (live)
-  useEffect(() => {
+  // selected token detail (live) — paused when hidden, 8s.
+  usePoll(async () => {
     if (!tokenId) return;
-    let live = true;
-    const load = async () => {
-      try {
-        const j = await (await fetch(`/api/token?token=${tokenId}&account=${keys?.address ?? ""}`)).json();
-        if (!live) return;
-        if (j.token) setToken(j.token);
-        // Bad/stale ?token= (404 {error}): fall back to the first real token so
-        // a shared Pro link never strands the user on the loading skeleton.
-        else if (j.error && !token) {
-          setTokenId((prev) => (tokens.find((t) => t.tokenId === prev) ? prev : tokens[0]?.tokenId ?? null));
-        }
-      } catch {}
-    };
-    load();
-    const t = setInterval(load, 4000);
-    return () => { live = false; clearInterval(t); };
-  }, [tokenId, keys?.address, tokens]);
-
+    const j = await (await fetch(`/api/token?token=${tokenId}&account=${keys?.address ?? ""}`)).json();
+    if (j.token) setToken(j.token);
+    // Bad/stale ?token= (404 {error}): fall back to the first real token.
+    else if (j.error && !token) {
+      setTokenId((prev) => (tokens.find((t) => t.tokenId === prev) ? prev : tokens[0]?.tokenId ?? null));
+    }
+  }, 8000, [tokenId, keys?.address]);
   useEffect(() => {
     if (!tokenId) return;
     try {
@@ -562,14 +562,8 @@ function OrderTicket({ token, keys, say, orderApiRef }: { token: Token; keys: Ke
   const [xnoBal, setXnoBal] = useState("0");
   const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    if (!keys) { setXnoBal("0"); return; }
-    let live = true;
-    const load = () => fetchXnoBalance(keys.address).then((b) => live && setXnoBal(b));
-    load();
-    const t = setInterval(load, 8000);
-    return () => { live = false; clearInterval(t); };
-  }, [keys?.address, busy]);
+  useEffect(() => { if (!keys) setXnoBal("0"); }, [keys]);
+  usePoll(async () => { if (keys) setXnoBal(await fetchXnoBalance(keys.address)); }, 15000, [keys?.address, busy]);
 
   // hotkeys: B/S switch side, Enter confirm
   useEffect(() => {
@@ -692,7 +686,7 @@ function OrderTicket({ token, keys, say, orderApiRef }: { token: Token; keys: Ke
       <div className="rounded-none border border-neutral-800 bg-neutral-950 p-2.5 text-[11px] space-y-1">
         <Row2 l="you receive ≈" r={quote ? `${quote.out} ${quote.unit}` : "—"} rClass="font-bold text-white" />
         <Row2 l={`min @ ${slip}%`} r={quote ? `${quote.min} ${quote.unit}` : "—"} />
-        <Row2 l="price impact" r={quote ? `${quote.impact.toFixed(2)}%` : "—"} rClass={quote ? (quote.impact >= 5 ? "text-white" : quote.impact >= 1 ? "text-white" : "text-white") : ""} />
+        <Row2 l="price impact" r={quote ? `${quote.impact.toFixed(2)}%` : "—"} rClass={quote ? (quote.impact >= 5 ? "text-red-500" : quote.impact >= 1 ? "text-amber-500" : "text-neutral-300") : ""} />
       </div>
 
       <button

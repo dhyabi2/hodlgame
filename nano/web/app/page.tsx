@@ -272,6 +272,31 @@ function GitHubLink({ className = "" }: { className?: string }) {
   );
 }
 
+/** Bandwidth-friendly poller: self-scheduling (never overlaps — the next fetch
+ * waits for the previous to finish PLUS the interval, so a slow ~4s endpoint
+ * can't pile up), PAUSES entirely when the tab is hidden, and refreshes
+ * immediately when the tab regains focus. Replaces raw setInterval, which fired
+ * regardless of visibility or in-flight requests and hammered the server. */
+function usePoll(fn: () => Promise<void> | void, intervalMs: number, deps: React.DependencyList) {
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+  useEffect(() => {
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const hidden = () => typeof document !== "undefined" && document.hidden;
+    const run = async () => {
+      if (stopped || hidden()) return; // paused while backgrounded; visibilitychange resumes
+      try { await fnRef.current(); } catch {}
+      if (!stopped && !hidden()) timer = setTimeout(run, intervalMs);
+    };
+    run(); // one immediate load
+    const onVis = () => { if (!hidden()) { clearTimeout(timer); run(); } };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVis);
+    return () => { stopped = true; clearTimeout(timer); if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVis); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+}
+
 export default function Home() {
   const [keys, setKeys] = useState<Keys | null>(null);
   const [hasWallet, setHasWallet] = useState(false);
@@ -329,52 +354,30 @@ export default function Home() {
     } catch {}
   }, [selectedId, tab]);
 
-  // Feed — Vercel-safe polling (no SSE), includes my balance when unlocked.
-  useEffect(() => {
+  // Feed — self-scheduling poll: pauses when the tab is hidden, never overlaps,
+  // refreshes on focus. The full-world replay behind /api/state costs ~4s, so a
+  // 15s cadence (was 4s, which ran back-to-back continuously) cuts server load
+  // ~4x per open tab while staying live enough for a memecoin feed.
+  usePoll(async () => {
     const acct = keys?.address ?? "";
-    let live = true;
-    const load = async () => {
-      try {
-        const j = await (await fetch(`/api/state?account=${acct}`)).json();
-        if (live) setTokens(j.tokens ?? []);
-      } catch {}
-    };
-    load();
-    const t = setInterval(load, 4000);
-    return () => {
-      live = false;
-      clearInterval(t);
-    };
-  }, [keys?.address]);
+    const j = await (await fetch(`/api/state?account=${acct}`)).json();
+    setTokens(j.tokens ?? []);
+  }, 15000, [keys?.address]);
 
-  // Detail — polling.
+  // Detail — reset when nothing selected; otherwise poll (paused-when-hidden).
   useEffect(() => {
+    if (!selectedId) { setDetail(null); setDetailMissing(false); }
+    else setDetailMissing(false);
+  }, [selectedId]);
+  usePoll(async () => {
+    if (!selectedId) return; // nothing open → no request
     const acct = keys?.address ?? "";
-    if (!selectedId) {
-      setDetail(null);
-      setDetailMissing(false);
-      return;
-    }
-    setDetailMissing(false);
-    let live = true;
-    const load = async () => {
-      try {
-        const j = await (await fetch(`/api/token?token=${selectedId}&account=${acct}`)).json();
-        if (!live) return;
-        if (j.token) { setDetail(j.token); setDetailMissing(false); }
-        // A successful response with no token (HTTP 404 {error:"unknown token"})
-        // is a CONFIRMED miss — show a not-found card instead of loading forever.
-        // Only mark missing while nothing has loaded yet (don't flip a live coin).
-        else if (j.error && !detail) setDetailMissing(true);
-      } catch {}
-    };
-    load();
-    const t = setInterval(load, 3000);
-    return () => {
-      live = false;
-      clearInterval(t);
-    };
-  }, [selectedId, keys?.address]);
+    const j = await (await fetch(`/api/token?token=${selectedId}&account=${acct}`)).json();
+    if (j.token) { setDetail(j.token); setDetailMissing(false); }
+    // A successful response with no token (HTTP 404 {error:"unknown token"}) is a
+    // CONFIRMED miss — show a not-found card instead of loading forever.
+    else if (j.error && !detail) setDetailMissing(true);
+  }, 8000, [selectedId, keys?.address]);
 
   /** One-time 1-raw hello to the protocol anchor, so any indexer discovers
    * this account from chain data alone (no operator watch-list). Best-effort:
@@ -755,15 +758,10 @@ function ConnectedWallet({
     }
   };
 
-  useEffect(() => {
-    refresh();
-    receiveAll(false); // auto-sweep pending on unlock
-    // Poll also auto-receives (silently) so the balance always reflects deposits
-    // even if the websocket missed one; the guard prevents overlap.
-    const t = setInterval(() => receiveAll(false), 8000);
-    return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keys.address]);
+  useEffect(() => { refresh(); receiveAll(false); /* on unlock */ /* eslint-disable-next-line */ }, [keys.address]);
+  // A live websocket already receives deposits instantly; this poll is only a
+  // safety net for a missed frame, so 30s (was 8s) + pause-when-hidden is plenty.
+  usePoll(() => receiveAll(false), 30000, [keys.address]);
 
   // Live deposit detection: the moment a send to us confirms on the Nano
   // websocket, auto-receive it — no waiting for the 8s poll. (verifyXNO pattern.)
@@ -813,8 +811,10 @@ function ConnectedWallet({
             className="shrink-0 rounded-none border border-neutral-700 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-neutral-200 hover:border-white"
             onClick={async () => {
               // Proof-of-Solvency: a monochrome share card attesting the live
-              // balance with a scannable verify-QR (address + frontier so anyone
-              // can independently confirm on the ledger), address masked.
+              // balance with a scannable QR of the account (address masked in
+              // the text) — a scanner can look the account up on the ledger and
+              // confirm it's real. (Balance is a live snapshot, not pinned to a
+              // frontier — the card shows the amount at mint time.)
               const qrHost = document.getElementById(`solq-${keys.address}`)?.querySelector("svg") as SVGElement | null;
               const qr = await svgQrToCanvas(qrHost, 220);
               const masked = keys.address.slice(0, 12) + "…" + keys.address.slice(-6);
@@ -1104,15 +1104,12 @@ function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddr
   const [lb, setLb] = useState<LB | null>(null);
   const [board, setBoard] = useState<"byVolume" | "byGainers" | "byHolders" | "newest">("byVolume");
 
-  useEffect(() => {
-    let live = true;
-    const load = async () => {
-      try { const j = await (await fetch("/api/leaderboards")).json(); if (live && !j.error) setLb(j); } catch {}
-    };
-    load();
-    const t = setInterval(load, 8000);
-    return () => { live = false; clearInterval(t); };
-  }, []);
+  // Leaderboards runs its OWN full-world replay (~4s) — expensive. Ranks don't
+  // move fast, so poll at 30s (was 8s) and pause when the tab is hidden.
+  usePoll(async () => {
+    const j = await (await fetch("/api/leaderboards")).json();
+    if (!j.error) setLb(j);
+  }, 30000, []);
 
   if (!lb) {
     return <div className="grid gap-3 sm:grid-cols-2"><Skel /><Skel /><Skel /><Skel /></div>;
@@ -1572,7 +1569,6 @@ function trendColor(points: PricePoint[]): string {
 const IPFS_GATEWAYS = [
   "https://ipfs.io/ipfs/",
   "https://dweb.link/ipfs/",
-  "https://cloudflare-ipfs.com/ipfs/",
   "https://gateway.pinata.cloud/ipfs/",
 ];
 
@@ -1659,15 +1655,13 @@ function TokenDetail({
   const [seedTokens, setSeedTokens] = useState("");
   const [xnoBal, setXnoBal] = useState("0");
 
-  // Live XNO balance for the trade/seed MAX buttons.
-  useEffect(() => {
-    if (!keys) { setXnoBal("0"); return; }
-    let live = true;
-    const load = () => rpc("account_info", { account: keys.address }).then((i) => live && setXnoBal(i.balance ?? "0")).catch(() => live && setXnoBal("0"));
-    load();
-    const t = setInterval(load, 8000);
-    return () => { live = false; clearInterval(t); };
-  }, [keys?.address, busy]);
+  // Live XNO balance for the trade/seed MAX buttons — paused when hidden, 15s.
+  useEffect(() => { if (!keys) setXnoBal("0"); }, [keys]);
+  usePoll(async () => {
+    if (!keys) return;
+    try { const i = await rpc("account_info", { account: keys.address }); setXnoBal(i.balance ?? "0"); }
+    catch { setXnoBal("0"); }
+  }, 15000, [keys?.address, busy]);
 
   const myHolding = keys ? token.topHolders.find((h) => h.account === keys.address) : undefined;
   const isCreator = keys?.address === token.creator;
@@ -2009,7 +2003,7 @@ function TokenDetail({
         </div>
         {myEntry.price > 0 && (
           <div className="mb-2 flex items-center gap-2 text-[11px]">
-            <span className="text-neutral-500 uppercase tracking-wide">Your entry</span>
+            <span className="text-neutral-500 uppercase tracking-wide">Your entry <span className="normal-case">(recent buys)</span></span>
             <span className="font-mono text-neutral-300">{fmtNum(myEntry.price)} XNO</span>
             {myEntry.pnl != null && (
               <span className={"font-black tabular-nums " + (myEntry.pnl >= 0 ? "text-green-500" : "text-red-500")}>
@@ -2351,7 +2345,7 @@ function TradePanel({
           )}
           <div className="flex justify-between">
             <span className="text-neutral-500">price impact</span>
-            <span className={quote.impact >= 5 ? "text-white" : quote.impact >= 1 ? "text-white" : "text-white"}>
+            <span className={quote.impact >= 5 ? "text-red-500" : quote.impact >= 1 ? "text-amber-500" : "text-neutral-300"}>
               {quote.impact.toFixed(2)}%
             </span>
           </div>
