@@ -1656,7 +1656,7 @@ function Avatar({ image, symbol, size = 40 }: { image: string; symbol: string; s
 }
 
 function TokenDetail({
-  token,
+  token: rawToken,
   keys,
   busy,
   say,
@@ -1680,6 +1680,20 @@ function TokenDetail({
   onBack: () => void;
   refreshDetail: () => void;
 }) {
+  // Optimistic seed override: the instant the creator sets a starting price, the
+  // coin reads as tradeable in the UI (poolXno/price/mcap reflect the seed) even
+  // before the indexer catches up — so the "set price" banner and buy-guard
+  // clear immediately and the creator never re-seeds (which would double the
+  // reserves). Cleared once the polled token shows real liquidity.
+  const [seedOverride, setSeedOverride] = useState<{ poolXno: string; poolTokens: string } | null>(null);
+  useEffect(() => { if (BigInt(rawToken.poolXno || "0") > 0n) setSeedOverride(null); }, [rawToken.poolXno]);
+  const token: Token = (() => {
+    if (!seedOverride || BigInt(rawToken.poolXno || "0") > 0n) return rawToken;
+    const px = priceOfSeed(BigInt(seedOverride.poolXno), BigInt(seedOverride.poolTokens), rawToken.decimals);
+    const mc = (px * BigInt(rawToken.supply || "0")) / 10n ** BigInt(rawToken.decimals);
+    return { ...rawToken, poolXno: seedOverride.poolXno, poolTokens: seedOverride.poolTokens, price: px.toString(), marketCap: mc.toString() };
+  })();
+
   const [amount, setAmount] = useState("");
   const [tab, setTab] = useState<"trade" | "thread">("trade");
   const [side, setSide] = useState<"buy" | "sell">("buy"); // lifted so the mobile action bar can pick a side
@@ -1901,10 +1915,11 @@ function TokenDetail({
         balance: (BigInt(info.balance) - xnoRaw - 1n).toString(), link: opLink,
       });
       const r2 = await rpc("process", { json_block: "true", block: blk2 });
-      say(`liquidity seeded ✓ — opening trading…`);
+      say(`liquidity seeded ✓ — trading is open`);
+      setSeedOverride({ poolXno: xnoRaw.toString(), poolTokens: tokRaw.toString() });
       setSeedXno(""); setSeedTokens(""); setSeedTouched(true);
       refreshDetail();
-      for (const ms of [3000, 7000, 14000]) setTimeout(refreshDetail, ms);
+      for (const ms of [3000, 7000, 14000, 25000]) setTimeout(refreshDetail, ms);
     } catch (e: any) {
       say("seed failed: " + e.message);
     }
@@ -1926,12 +1941,13 @@ function TokenDetail({
       const [fragA, fragB] = encodeFragLinks(token.tokenId, { kind: "seedLiq", xno: xnoRaw, tokens: tokRaw });
       await submitBlock(fragA, 1n);
       const hash = await submitBlock(fragB, 1n);
-      say(`starting price set ✓ — opening trading…`);
+      say(`starting price set ✓ — trading is open`);
+      // Optimistically mark the coin tradeable NOW so the banner/buy-guard clear
+      // and the creator never re-seeds while the indexer catches up.
+      setSeedOverride({ poolXno: xnoRaw.toString(), poolTokens: tokRaw.toString() });
       setSeedXno(""); setSeedTokens(""); setSeedTouched(true);
-      // Pull the new pool state in the background so Buy works without a manual
-      // refresh; retry a few times to ride out indexer lag on the seed op.
       refreshDetail();
-      for (const ms of [3000, 7000, 14000]) setTimeout(refreshDetail, ms);
+      for (const ms of [3000, 7000, 14000, 25000]) setTimeout(refreshDetail, ms);
     } catch (e: any) {
       say("seed failed: " + e.message);
     }
@@ -2272,6 +2288,10 @@ function TradePanel({
   setSide: (s: "buy" | "sell") => void;
 }) {
   const slip = clampSlippage(slippage);
+  // Is a wallet stored on this device (but locked)? Distinguishes "unlock" from
+  // "create" so a locked user isn't told they're new.
+  const [walletExists, setWalletExists] = useState(false);
+  useEffect(() => { try { setWalletExists(!!loadWallet()); } catch {} }, [address]);
 
   // Live quote preview — mirrors the on-chain constant-product math exactly
   // (buy: 1% swap fee via quoteBuy; sell: no fee). Recomputed as the user types.
@@ -2308,16 +2328,30 @@ function TradePanel({
           then fund it by scanning/tapping straight from their existing XNO
           wallet. Incoming funds auto-receive every few seconds; there is no
           manual receive step and no navigation away from the coin. */}
+      {/* Locked / no wallet: never show a confusing 0 balance — prompt to unlock
+          (existing wallet) or set one up (new user). Clicking Buy/Sell also
+          opens this, but showing it up front avoids the "why is my balance 0"
+          confusion for someone who's just locked. */}
       {!address && (
-        <button
-          className="w-full rounded-none border border-neutral-700 bg-neutral-950 p-3 text-left hover:border-white"
-          onClick={promptUnlock}
-        >
-          <span className="block text-xs font-black uppercase tracking-wide">New here? Start in 30 seconds</span>
-          <span className="mt-1 block text-[11px] text-neutral-500">
-            1. Create a wallet (right here, stays in your browser) · 2. Send it XNO from any wallet · 3. Buy.
-          </span>
-        </button>
+        walletExists ? (
+          <button
+            className="w-full rounded-none border border-white bg-neutral-950 p-3 text-left hover:bg-neutral-900"
+            onClick={promptUnlock}
+          >
+            <span className="block text-xs font-black uppercase tracking-wide">🔒 Unlock your wallet to trade</span>
+            <span className="mt-1 block text-[11px] text-neutral-500">Your balance and holdings are hidden until you unlock.</span>
+          </button>
+        ) : (
+          <button
+            className="w-full rounded-none border border-neutral-700 bg-neutral-950 p-3 text-left hover:border-white"
+            onClick={promptUnlock}
+          >
+            <span className="block text-xs font-black uppercase tracking-wide">New here? Start in 30 seconds</span>
+            <span className="mt-1 block text-[11px] text-neutral-500">
+              1. Create a wallet (right here, stays in your browser) · 2. Send it XNO from any wallet · 3. Buy.
+            </span>
+          </button>
+        )
       )}
       {address && BigInt(xnoBal || "0") <= 0n && (
         <div className="rounded-none border border-neutral-700 bg-neutral-950 p-3">
@@ -2346,7 +2380,7 @@ function TradePanel({
         </div>
       )}
       <div className="flex items-center justify-between text-[11px] text-neutral-500">
-        <span>balance: {side === "buy" ? `${fmtXno(xnoBal)} XNO` : `${fmtTok(token.myBalance, token.decimals)} ${tokSym(token)}`}</span>
+        <span>balance: {!address ? "🔒 unlock to view" : side === "buy" ? `${fmtXno(xnoBal)} XNO` : `${fmtTok(token.myBalance, token.decimals)} ${tokSym(token)}`}</span>
         <label className="flex items-center gap-1.5">
           <span className="text-neutral-500">slippage %</span>
           <input
