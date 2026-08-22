@@ -147,7 +147,7 @@ function Row({ k, children }: { k: any; children: any }) {
 }
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: any }) {
-  return <div className="rounded-none border border-neutral-800 bg-neutral-950 p-3"><p className="text-[10px] uppercase tracking-wider text-neutral-500">{label}</p><p className="text-lg font-black">{value}</p>{sub && <p className="text-[11px] text-neutral-500">{sub}</p>}</div>;
+  return <div className="rounded-none border border-neutral-800 bg-neutral-950 p-3"><p className="text-[10px] uppercase tracking-wider text-neutral-500">{label}</p><p className="text-sm sm:text-lg font-black tabular-nums leading-tight break-words">{value}</p>{sub && <p className="text-[10px] sm:text-[11px] text-neutral-500">{sub}</p>}</div>;
 }
 
 export default function Explorer() {
