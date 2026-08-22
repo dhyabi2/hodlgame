@@ -43,6 +43,9 @@ const TF = [
 ] as const;
 
 const priceNum = (raw: string) => Number(BigInt(raw)) / 1e30;
+// Fallback identity for a coin whose off-chain metadata hasn't loaded/saved —
+// same convention as the main app, so a live coin is never a blank label.
+const tokSym = (t: { symbol: string; tokenId: string }) => t.symbol || t.tokenId.slice(0, 4).toUpperCase();
 
 export default function ProPage() {
   const [tokens, setTokens] = useState<Token[]>([]);
@@ -182,8 +185,8 @@ function TopBar({
             className="flex items-center gap-2 rounded-none border border-neutral-300 bg-neutral-50 px-2.5 py-1.5 hover:border-neutral-400"
             onClick={() => setOpen((v) => !v)}
           >
-            {token ? <Avatar image={token.image} symbol={token.symbol} size={22} /> : <div className="h-[22px] w-[22px] rounded-full bg-neutral-100" />}
-            <span className="text-sm font-black">{token ? token.symbol : "…"}</span>
+            {token ? <Avatar image={token.image} symbol={tokSym(token)} size={22} /> : <div className="h-[22px] w-[22px] rounded-full bg-neutral-100" />}
+            <span className="text-sm font-black">{token ? tokSym(token) : "…"}</span>
             <span className="text-neutral-400 text-xs">▾</span>
           </button>
           {open && (
@@ -194,8 +197,8 @@ function TopBar({
                   className="flex w-full items-center gap-2 rounded-none px-2 py-1.5 text-left hover:bg-white"
                   onClick={() => { onPick(t.tokenId); setOpen(false); }}
                 >
-                  <Avatar image={t.image} symbol={t.symbol} size={20} />
-                  <span className="flex-1 truncate text-sm font-bold">{t.symbol}</span>
+                  <Avatar image={t.image} symbol={tokSym(t)} size={20} />
+                  <span className="flex-1 truncate text-sm font-bold">{tokSym(t)}</span>
                   <span className="text-[11px] text-neutral-500">{fmtXno(t.price)}</span>
                   <span className={"text-[11px] w-14 text-right " + chColor(t.change24h)}>{pctStr(t.change24h)}</span>
                 </button>
@@ -296,7 +299,7 @@ function ChartPanel({ token }: { token: Token }) {
     <div className="flex h-full flex-col">
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-bold text-neutral-700">{token.symbol || token.tokenId.slice(0, 4).toUpperCase()}/XNO</span>
+          <span className="text-sm font-bold text-neutral-700">{tokSym(token)}/XNO</span>
           <span className="text-xs text-neutral-500">{fmtXno(token.price)} XNO</span>
           <span className={"text-xs " + chColor(token.change24h)}>{pctStr(token.change24h)}</span>
         </div>
@@ -491,7 +494,7 @@ function OrderTicket({ token, keys, say }: { token: Token; keys: Keys | null; sa
       const ideal = (raw * pt) / px;
       const impact = ideal > 0n ? Math.max(0, Number((ideal - out) * 10000n / ideal) / 100) : 0;
       const min = (out * BigInt(Math.round((100 - slip) * 100))) / 10000n;
-      return { out: fmtTok(out.toString(), token.decimals), unit: token.symbol, min: fmtTok(min.toString(), token.decimals), impact };
+      return { out: fmtTok(out.toString(), token.decimals), unit: tokSym(token), min: fmtTok(min.toString(), token.decimals), impact };
     }
     const raw = BigInt(Math.floor(n * 10 ** token.decimals)); if (raw <= 0n) return null;
     const out = quoteSell(token.poolXno, token.poolTokens, raw); if (out <= 0n) return null;
@@ -541,7 +544,7 @@ function OrderTicket({ token, keys, say }: { token: Token; keys: Keys | null; sa
 
       <div>
         <div className="mb-1 flex items-center justify-between text-[11px] text-neutral-500">
-          <span>{side === "buy" ? "you pay (XNO)" : `you sell (${token.symbol})`}</span>
+          <span>{side === "buy" ? "you pay (XNO)" : `you sell (${tokSym(token)})`}</span>
           <span>bal {side === "buy" ? fmtXno(xnoBal) : fmtTok(token.myBalance, token.decimals)}</span>
         </div>
         <input
@@ -581,7 +584,7 @@ function OrderTicket({ token, keys, say }: { token: Token; keys: Keys | null; sa
         disabled={busy || noPool}
         onClick={confirm}
       >
-        {noPool ? "no liquidity yet" : busy ? "submitting…" : side === "buy" ? `Buy ${token.symbol}` : `Sell ${token.symbol}`}
+        {noPool ? "no liquidity yet" : busy ? "submitting…" : side === "buy" ? `Buy ${tokSym(token)}` : `Sell ${tokSym(token)}`}
       </button>
       <p className="text-center text-[10px] text-neutral-400">hotkeys: <kbd className="text-neutral-600">B</kbd> buy · <kbd className="text-neutral-600">S</kbd> sell · <kbd className="text-neutral-600">Enter</kbd> confirm</p>
 
@@ -701,7 +704,7 @@ function DepthCurve({ token }: { token: Token }) {
       </svg>
       <div className="mt-1 grid grid-cols-2 gap-2 text-[11px] text-neutral-500">
         <span>reserve XNO {fmtCompact(px)}</span>
-        <span className="text-right">reserve {token.symbol} {fmtCompact(pt)}</span>
+        <span className="text-right">reserve {tokSym(token)} {fmtCompact(pt)}</span>
       </div>
     </div>
   );

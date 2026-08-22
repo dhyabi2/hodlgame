@@ -937,8 +937,8 @@ function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddr
                 <span className={"w-5 text-center text-xs font-black " + medal(i)}>{i + 1}</span>
                 <Avatar image={t.image} symbol={tokSym(t)} size={30} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-bold truncate">{tokSym(t)} <span className="text-[11px] font-normal text-neutral-500">{t.name}</span></p>
-                  <p className="text-[11px] text-neutral-500 truncate">mc {fmtXno(t.marketCap)} · {t.holders} hodl · vol {fmtXno(t.volume)}</p>
+                  <p className="text-sm font-bold truncate">{tokSym(t)} <span className="text-[11px] font-normal text-neutral-500">{tokName(t)}</span></p>
+                  <p className="text-[11px] text-neutral-500 truncate">mc {fmtXno(t.marketCap)} XNO · {t.holders} holder{t.holders === 1 ? "" : "s"} · vol {fmtXno(t.volume)} XNO</p>
                 </div>
                 <span className={"text-xs font-bold tabular-nums shrink-0 " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-black" : "text-black")}>{pctStr(t.change24h)}</span>
               </button>
@@ -1528,7 +1528,7 @@ function TradePanel({
       const ideal = (raw * pt) / px; // output with zero price impact
       const impact = ideal > 0n ? Math.max(0, Number((ideal - out) * 10000n / ideal) / 100) : 0;
       const min = (out * BigInt(Math.round((100 - slip) * 100))) / 10000n;
-      return { outStr: fmtTok(out.toString(), token.decimals), unit: token.symbol, minStr: fmtTok(min.toString(), token.decimals), impact };
+      return { outStr: fmtTok(out.toString(), token.decimals), unit: tokSym(token), minStr: fmtTok(min.toString(), token.decimals), impact };
     }
     const raw = BigInt(Math.floor(n * 10 ** token.decimals));
     if (raw <= 0n) return null;
@@ -1687,7 +1687,7 @@ function StakeBox({
     <div className="rounded-none border border-neutral-300 bg-neutral-50 p-3 space-y-3">
       <div className="flex items-center justify-between text-[11px]">
         <span className="text-neutral-600 font-bold">Stake · earn XNO rebates</span>
-        <span className="text-neutral-500">staked {fmtTok(token.myStaked, token.decimals)} {token.symbol}</span>
+        <span className="text-neutral-500">staked {fmtTok(token.myStaked, token.decimals)} {tokSym(token)}</span>
       </div>
 
       <div className="flex gap-2">
@@ -2135,10 +2135,10 @@ function Portfolio({ tokens, onSelect, account }: { tokens: Token[]; onSelect: (
               onClick={() => onSelect(t.tokenId)}
               className="w-full rounded-none border border-neutral-300 bg-white p-3 flex items-center gap-3 text-left hover:border-black"
             >
-              <Avatar image={t.image} symbol={t.symbol} size={40} />
+              <Avatar image={t.image} symbol={tokSym(t)} size={40} />
               <div className="min-w-0 flex-1">
-                <p className="font-bold text-sm truncate">{t.symbol}</p>
-                <p className="text-[11px] text-neutral-500">{fmtTok(t.myBalance, t.decimals)}</p>
+                <p className="font-bold text-sm truncate">{tokName(t)} <span className="text-[11px] font-normal text-neutral-500">${tokSym(t)}</span></p>
+                <p className="text-[11px] text-neutral-500">{fmtTok(t.myBalance, t.decimals)} {tokSym(t)}</p>
               </div>
               <div className="text-right">
                 <p className="text-sm font-bold">{fmtXno(valueRaw.toString())} XNO</p>

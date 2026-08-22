@@ -119,9 +119,16 @@ export function computeLeaderboards(tokens: TokenView[], nowMs: number, limit = 
     .sort((a, b) => ((b.change24h ?? -1e9) - (a.change24h ?? -1e9)) || (a.tokenId < b.tokenId ? -1 : 1))
     .slice(0, limit)
     .map(toRank);
-  // "New" lists recent FUNDED launches only — an unseeded (zero-pool) token is
-  // untradeable and free to spam, so it must not occupy discovery space either.
-  const newest = [...funded].sort((a, b) => (b.createdAt - a.createdAt) || (a.tokenId < b.tokenId ? -1 : 1)).slice(0, limit).map(toRank);
+  // "New" lists recent FUNDED launches plus unfunded ones with COMPLETE
+  // metadata (name AND symbol AND image — exactly what the signed /api/tokens
+  // route requires, so publishing it costs an on-chain launch plus a
+  // creator-signed update). A freshly-created, fully-named coin whose creator
+  // hasn't seeded liquidity yet must still be discoverable (creators kept
+  // reporting their own just-launched coin as "missing"), while a bare-symbol
+  // dust launch still can't occupy discovery space. The ECONOMIC boards above
+  // stay funded-only — an empty pool ranks nowhere on volume/holders/gainers.
+  const discoverable = live.filter((t) => BigInt(t.poolXno) > 0n || (t.name && t.symbol && t.image));
+  const newest = [...discoverable].sort((a, b) => (b.createdAt - a.createdAt) || (a.tokenId < b.tokenId ? -1 : 1)).slice(0, limit).map(toRank);
 
   // ── creators: aggregate every token a launcher created ────────────────────
   // Sized by REAL pooled XNO (capital that actually exists), never mark-to-market
