@@ -25,7 +25,17 @@ export async function rpc(action: string, params: Record<string, unknown>) {
     body: JSON.stringify({ action, ...params }),
   });
   const j = await res.json();
-  if (j.error) throw new Error(typeof j.error === "string" ? j.error : JSON.stringify(j.error));
+  if (j.error) {
+    // A Nano account that has never received funds does not exist on the ledger,
+    // so account_info returns "Account not found". That is NOT an error — it's an
+    // UNFUNDED account. Return a zero/unopened shape so callers show a "fund it
+    // first" prompt (via the existing !info.frontier checks) instead of leaking
+    // a scary raw RPC error to the user.
+    if (action === "account_info" && /account not found|account not opened|not found/i.test(String(j.error))) {
+      return { frontier: null, balance: "0", unopened: true };
+    }
+    throw new Error(typeof j.error === "string" ? j.error : JSON.stringify(j.error));
+  }
   return j;
 }
 
@@ -186,7 +196,7 @@ async function ensureHello(keys: Keys): Promise<void> {
 export async function submitLink(keys: Keys, link: string, delta: bigint): Promise<string> {
   await ensureHello(keys);
   const info = await rpc("account_info", { account: keys.address, representative: "true" });
-  if (!info.frontier) throw new Error("account not opened — fund it first");
+  if (!info.frontier) throw new Error("fund your wallet first — send XNO to your address, then try again");
   const work = (await rpc("work_generate", { hash: info.frontier, difficulty: WORK_DIFF })).work;
   const blk = buildBlock(keys.secretKey, {
     work,
@@ -216,7 +226,7 @@ export async function execBuy(
   const slipPct = Math.min(100, Math.max(0, Number.isFinite(slipPctRaw) ? slipPctRaw : 0));
   if (raw <= 0n) throw new Error("enter XNO amount");
   const info = await rpc("account_info", { account: keys.address, representative: "true" });
-  if (!info.frontier) throw new Error("account not opened — fund it first");
+  if (!info.frontier) throw new Error("fund your wallet first — send XNO to your address, then try again");
 
   const w1 = (await rpc("work_generate", { hash: info.frontier, difficulty: WORK_DIFF })).work;
   const blk1 = buildBlock(keys.secretKey, {
@@ -268,7 +278,7 @@ export async function execBuyDirect(
   const slipPct = Math.min(100, Math.max(0, Number.isFinite(slipPctRaw) ? slipPctRaw : 0));
   if (raw <= 0n) throw new Error("enter XNO amount");
   const info = await rpc("account_info", { account: keys.address, representative: "true" });
-  if (!info.frontier) throw new Error("account not opened — fund it first");
+  if (!info.frontier) throw new Error("fund your wallet first — send XNO to your address, then try again");
 
   const head = token.queueHead;
   if (head) {

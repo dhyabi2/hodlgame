@@ -161,7 +161,15 @@ async function rpc(action: string, params: Record<string, unknown>) {
     body: JSON.stringify({ action, ...params }),
   });
   const j = await res.json();
-  if (j.error) throw new Error(typeof j.error === "string" ? j.error : JSON.stringify(j.error));
+  if (j.error) {
+    // An unfunded Nano account doesn't exist on the ledger yet, so account_info
+    // returns "Account not found". Treat that as unopened/zero (callers show a
+    // "fund it first" prompt) rather than surfacing a raw RPC error.
+    if (action === "account_info" && /account not found|account not opened|not found/i.test(String(j.error))) {
+      return { frontier: null, balance: "0", unopened: true };
+    }
+    throw new Error(typeof j.error === "string" ? j.error : JSON.stringify(j.error));
+  }
   return j;
 }
 
@@ -414,7 +422,7 @@ export default function Home() {
     if (!keys) { promptUnlock(); throw new Error("unlock your wallet"); }
     await ensureHello();
     const info = await rpc("account_info", { account: keys.address, representative: "true" });
-    if (!info.frontier) throw new Error("account not opened — fund it first");
+    if (!info.frontier) throw new Error("fund your wallet first — send XNO to your address, then try again");
     const work = (await rpc("work_generate", { hash: info.frontier, difficulty: "fffffff800000000" })).work;
     const balance = (BigInt(info.balance) - balanceDelta).toString();
     const blk = buildBlock(keys.secretKey, {
@@ -1681,7 +1689,7 @@ function TokenDetail({
       // hello advances the frontier.
       await ensureHello();
       const info = await rpc("account_info", { account: keys.address, representative: "true" });
-      if (!info.frontier) return say("account not opened — fund it first");
+      if (!info.frontier) return say("fund your wallet first — send XNO to your address, then try again");
 
       // 1. deposit: send XNO to the token's pool (the authoritative value).
       const w1 = (await rpc("work_generate", { hash: info.frontier, difficulty: "fffffff800000000" })).work;
@@ -1731,7 +1739,7 @@ function TokenDetail({
     try {
       await ensureHello();
       const info = await rpc("account_info", { account: keys.address, representative: "true" });
-      if (!info.frontier) return say("account not opened — fund it first");
+      if (!info.frontier) return say("fund your wallet first — send XNO to your address, then try again");
       if (token.queueHead) {
         const owed = BigInt(token.queueHead.owedRaw);
         const pay = raw < owed ? raw : owed;
@@ -1832,7 +1840,7 @@ function TokenDetail({
     if (tokRaw > BigInt(token.treasury)) return say("token amount exceeds treasury");
     try {
       const info = await rpc("account_info", { account: keys.address, representative: "true" });
-      if (!info.frontier) return say("account not opened — fund it first");
+      if (!info.frontier) return say("fund your wallet first — send XNO to your address, then try again");
       const w1 = (await rpc("work_generate", { hash: info.frontier, difficulty: "fffffff800000000" })).work;
       const blk1 = buildBlock(keys.secretKey, {
         work: w1, previous: info.frontier, representative: info.representative,
