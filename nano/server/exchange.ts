@@ -104,8 +104,10 @@ export interface BalanceProofInfo {
 /** A Merkle inclusion proof of one holding against the balance root. Lets a
  * light exchange verify this balance in O(log N) with core/merkle
  * verifyMerkleProof — no full replay — after it has established the balance
- * root once (recompute it from a periodic replay, or trust its on-chain
- * anchor). */
+ * root once by RECOMPUTING it from its own periodic replay. The balance root
+ * has NO on-chain anchor and is not committed by the state root, so an exchange
+ * must never accept a server-supplied root at face value (see core/merkle.ts
+ * trust model). */
 export async function balanceProof(tokenId: string, account: string): Promise<BalanceProofInfo> {
   const m = await raw();
   const s = m.state.get(tokenId);

@@ -17,6 +17,7 @@ import { NanoRpcSource } from "../indexer/blockSource";
 import { commitResolver } from "../server/commits";
 import { loadRegistry } from "../server/tokens";
 import { stateRoot } from "../core/canonical";
+import { balanceRoot } from "../core/merkle";
 import { loadNanoRpcKey } from "../lib/rpc";
 
 function arg(name: string): string | null {
@@ -48,7 +49,11 @@ async function main() {
       `  ${tokenId.slice(0, 12)}…  supply=${s.supply}  poolXno=${s.poolXno}  poolTokens=${s.poolTokens}  holders=${s.balances.size}`
     );
   }
-  console.log(`state root: ${root}`);
+  console.log(`state root:   ${root}`);
+  // Establish the balance root from YOUR OWN replay so light Merkle balance
+  // proofs (exchange kit) verify against a root you derived, never a
+  // server-supplied one (see core/merkle.ts trust model).
+  console.log(`balance root: ${balanceRoot(state)}`);
 
   const url = arg("--url");
   if (url) {

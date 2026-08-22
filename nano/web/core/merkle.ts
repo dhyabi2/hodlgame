@@ -1,10 +1,17 @@
 // Binary Merkle tree over the ledger's balances (exchange kit E1). Lets a
 // light verifier confirm ONE account's token balance in O(log N) against a
-// committed balance root, instead of replaying the whole ledger for every
-// balance. The balance root is itself included in the consensus state
-// projection, so it is authenticated by the state root (which anyone
-// reproduces from chain via verify.ts) — establish the root once, then verify
-// many balances cheaply. Browser-safe (blakejs only).
+// balance root, instead of replaying the whole ledger for every balance.
+//
+// TRUST MODEL (read carefully): the balance root is a PURE FUNCTION of the
+// replayed balances. Those balances ARE in the consensus state projection
+// (canonical.ts), but the root itself is NOT a separate consensus value and is
+// NOT committed by the state root. So a balance root is only trustworthy when
+// YOU recompute it from YOUR OWN replay (verify.ts prints it alongside the
+// state root for exactly this). NEVER accept a server-supplied balance root at
+// face value and verify inclusion proofs against it — a dishonest operator
+// could publish a fabricated root that "proves" any inflated balance. The
+// security is: replay chain -> derive balances -> compute this root yourself ->
+// then O(log N) inclusion proofs are cheap and sound. Browser-safe (blakejs).
 
 import { blake2bHex } from "blakejs";
 import type { MultiState } from "./multi";
