@@ -6,6 +6,11 @@
 > in the buyer's own wallet; sells settle principal instantly from the seller's own
 > collateral. Everything below applies **only to legacy pooled tokens** (launched
 > with opcode `0x01` before v2). See `../SPEC.md` §8.
+>
+> **Status for honesty's sake:** this runbook was never executed — production
+> legacy pools have always been signed by the single `POOL_SEED` key. The FROST
+> path is implemented (`server/frostSigner.ts`; sweeps prefer it when
+> `FROST_COORDINATOR_URL` is set) but has never been active in production.
 
 
 Goal: retire the single `POOL_SEED` (one key that can drain every pool) for a

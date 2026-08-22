@@ -6,8 +6,11 @@ Since **Direct-Settlement v2**, new tokens are **zero-custody**: no pool account
 exists, buys pay queued sellers wallet-to-wallet or self-collateralize in the
 buyer's own wallet, and sells settle principal instantly from the seller's own
 collateral (only realized appreciation queues, paid by future buys). Legacy pooled
-tokens (pre-v2 launches) still replay under the old rules; FROST 2-of-3 threshold
-custody remains only as tooling for those legacy pools.
+tokens (pre-v2 launches) still replay under the old rules; their pools are held
+by a single operator key (`POOL_SEED`). FROST 2-of-3 threshold signing exists in
+the codebase (sweeps prefer it when `FROST_COORDINATOR_URL` is set) but was never
+activated in production — v2 supersedes the whole question by having no pool key
+at all.
 
 See [`./SPEC.md`](./SPEC.md) (encoding + state machine) and
 [`../MIGRATION-XNO.md`](../MIGRATION-XNO.md) (the Solana → Nano proposal). The
@@ -75,7 +78,7 @@ npm run live-smoke    # reads real Nano blocks from a public node (network)
 - [x] Slippage-protected trades on-chain (fragment links)
 - [x] Signed metadata + on-chain authority anchors; signed comments
 - [x] **Direct-Settlement v2 (zero-custody)** — no pool account for new tokens; wallet-to-wallet settlement, live-verified on mainnet
-- [x] FROST 2-of-3 threshold custody + key rotation (legacy pooled tokens only)
+- [x] FROST 2-of-3 threshold signing + key rotation — implemented, **never activated in prod** (legacy pools run on the single `POOL_SEED`)
 - [x] Market/Explorer/Exchange APIs + full Next.js UI (explore · trade · create · scan · wallet · /pro)
 - [x] In-browser trustless verification (browser recomputes the state root)
 - [x] Merkle balance proofs · epoch snapshots anchored on-chain · Shamir seed splitting
