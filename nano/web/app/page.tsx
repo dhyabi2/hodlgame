@@ -1023,8 +1023,10 @@ function Feed({ tokens, onSelect, myAddress, usd, onCreate }: { tokens: Token[];
 
   // "Live" coins: named, funded, held by you, or traded. Hides only
   // fully-abandoned launches you don't hold.
+  // A coin must carry an image to be shown (pre-image-fix test launches are
+  // hidden everywhere) — unless YOU hold it, so owners can always reach it.
   const live = tokens.filter(
-    (t) => Boolean(t.name || t.symbol) || BigInt(t.poolXno) > 0n || BigInt(t.myBalance) > 0n || BigInt(t.buyVolume) > 0n
+    (t) => (Boolean(t.image) && (Boolean(t.name || t.symbol) || BigInt(t.poolXno) > 0n || BigInt(t.buyVolume) > 0n)) || BigInt(t.myBalance) > 0n
   );
 
   // Search matches ANY identifying field (name / symbol / tokenId) across all

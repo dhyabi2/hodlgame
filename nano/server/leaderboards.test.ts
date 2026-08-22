@@ -4,7 +4,7 @@ import type { TokenView } from "./market";
 
 function tv(p: Partial<TokenView>): TokenView {
   return {
-    tokenId: "t", name: "N", symbol: "S", decimals: 6, image: "", description: "",
+    tokenId: "t", name: "N", symbol: "S", decimals: 6, image: "/api/image/00000000000000000000000000000000", description: "",
     website: "", twitter: "", telegram: "", creator: "", creatorShare: "0",
     supply: "0", treasury: "0", poolXno: "0", poolTokens: "0", price: "0",
     marketCap: "0", change1h: null, change24h: null, createdAt: 0, myBalance: "0",
@@ -29,7 +29,7 @@ const tokens: TokenView[] = [
        topHolders: [{ account: "nano_h2", balanceRaw: TOK(9), pct: 90 }, { account: "nano_poolcc", balanceRaw: TOK(100), pct: 0 }] }),
   // Zero-liquidity spam token: must NEVER appear on economic boards or inflate
   // its creator, even with a huge fake mark price and a dust-sybil holder crowd.
-  tv({ tokenId: "dd", symbol: "SPAM", creator: "nano_attacker", poolXno: "0", poolTokens: "0", price: (10n ** 40n).toString(), holders: 9999, change24h: 999999, createdAt: 999, decimals: 6,
+  tv({ tokenId: "dd", symbol: "SPAM", image: "", creator: "nano_attacker", poolXno: "0", poolTokens: "0", price: (10n ** 40n).toString(), holders: 9999, change24h: 999999, createdAt: 999, decimals: 6,
        topHolders: [{ account: "nano_attacker", balanceRaw: TOK(1_000_000), pct: 100 }] }),
 ];
 

@@ -71,7 +71,8 @@ export default function ProPage() {
       try {
         const j = await (await fetch(`/api/state?account=${keys?.address ?? ""}`)).json();
         if (live) {
-          const list: Token[] = j.tokens ?? [];
+          // Hide imageless pre-fix test launches from the picker too.
+          const list: Token[] = (j.tokens ?? []).filter((t: Token) => t.image || BigInt(t.myBalance || "0") > 0n);
           setTokens(list);
           // Functional update so a ?token= already set (via the other effect)
           // is never clobbered by a stale-closure default to list[0].

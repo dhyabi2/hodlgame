@@ -101,7 +101,8 @@ export function computeLeaderboards(tokens: TokenView[], nowMs: number, limit = 
   // A token counts as live if it has metadata OR real liquidity — so a seeded,
   // tradeable coin still ranks even before its name/image finishes propagating
   // (the UI shows a tokenId-based fallback label).
-  const live = tokens.filter((t) => t.symbol || t.name || BigInt(t.poolXno) > 0n);
+  // Image required: pre-image-fix test launches never rank anywhere.
+  const live = tokens.filter((t) => t.image && (t.symbol || t.name || BigInt(t.poolXno) > 0n));
   // Economic boards rank only tokens with real liquidity — a token with an empty
   // pool is free to spin up and dust-inflate, so it must not be rankable. Its
   // holdings also redeem to ~0, which the value math already reflects.
