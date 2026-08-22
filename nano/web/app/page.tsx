@@ -252,7 +252,7 @@ const btn =
 function GitHubLink({ className = "" }: { className?: string }) {
   return (
     <a
-      href="https://github.com/dhyabi2/holdergame"
+      href="https://github.com/dhyabi2/hodlgame"
       target="_blank"
       rel="noreferrer"
       title="Open source on GitHub — verify the code yourself"

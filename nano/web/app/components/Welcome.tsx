@@ -110,7 +110,7 @@ export default function Welcome({ onAccept }: { onAccept: () => void }) {
             <LogoWord height={44} className="w-full max-w-[560px] h-auto text-white" />
           </h1>
           <a
-            href="https://github.com/dhyabi2/holdergame"
+            href="https://github.com/dhyabi2/hodlgame"
             target="_blank"
             rel="noreferrer"
             title="Open source on GitHub — verify the code yourself"
