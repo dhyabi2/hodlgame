@@ -57,6 +57,8 @@ export class MemorySource implements BlockSource {
 const FRONTIER_CACHE = new Map<string, NanoBlock[]>(); // `${account}|${frontier}` → blocks
 const FRONTIER_CACHE_MAX = 5000;
 
+type RpcCall = (body: Record<string, unknown>) => Promise<any>;
+
 /** Direct call to the FALLBACK endpoint (keyless, per the strict RPC rule —
  * the key is never sent there). nanoRpc only falls over on TRANSPORT failure,
  * but a stale-yet-responsive primary needs its answers CROSS-CHECKED, so
@@ -106,14 +108,14 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
    * 3 attempts converge on the full set; anything still missing after that is
    * genuinely unknown to both endpoints and is returned unresolved.
    */
-  private async fetchBlocksInfo(apiKey: string, hashes: string[]): Promise<Map<string, any>> {
+  private async fetchBlocksInfo(call: RpcCall, hashes: string[]): Promise<Map<string, any>> {
     const infos = new Map<string, any>();
     let missing = hashes;
     for (let attempt = 0; attempt < 3 && missing.length > 0; attempt++) {
       const next: string[] = [];
       for (let i = 0; i < missing.length; i += 200) {
         const chunk = missing.slice(i, i + 200);
-        const info = (await nanoRpc(apiKey, { action: "blocks_info", hashes: chunk, json_block: true }).catch(() => ({}))) as any;
+        const info = (await call({ action: "blocks_info", hashes: chunk, json_block: true }).catch(() => ({}))) as any;
         for (const h of chunk) {
           const b = info.blocks?.[h];
           if (b?.block_account) infos.set(h, b);
@@ -159,7 +161,7 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
     const all = [...new Set([...sourceHashes, ...pending])];
 
     const inbound: HelloInfo[] = [];
-    for (const [h, b] of await this.fetchBlocksInfo(this.apiKey, all)) {
+    for (const [h, b] of await this.fetchBlocksInfo((body) => nanoRpc(this.apiKey, body), all)) {
       if (!verifyFetchedBlock(h, b)) continue; // never trust unverified senders
       inbound.push({ sender: b.block_account, representative: b.contents?.representative ?? "" });
     }
@@ -209,11 +211,17 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
     const best = views.reduce((a, b) => (b.height > a.height ? b : a));
     if (!best.frontier) return []; // unopened / unknown everywhere
 
+    // Three walk sources: nano.to keyed, nano.to keyless, and the FALLBACK
+    // endpoint — the last one matters when BOTH nano.to regional tiers lag
+    // (observed live: a wallet's fresh blocks visible via nano-gpt minutes
+    // before nano.to's US cluster served them), since nanoRpc only fails over
+    // on transport errors, never on stale-but-successful answers.
     const walks: { blocks: NanoBlock[]; complete: boolean }[] = [];
     for (let round = 0; round < 2; round++) {
       const settled = await Promise.allSettled([
-        this.fetchChain(this.apiKey, account, limit, best.frontier),
-        this.fetchChain("", account, limit, best.frontier),
+        this.fetchChain((body) => nanoRpc(this.apiKey, body), account, limit, best.frontier),
+        this.fetchChain((body) => nanoRpc("", body), account, limit, best.frontier),
+        this.fetchChain((body) => fallbackRpc(body), account, limit, best.frontier),
       ]);
       for (const r of settled) if (r.status === "fulfilled") walks.push(r.value);
       const complete = walks.filter((w) => w.complete);
@@ -223,7 +231,7 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
     return walks.reduce((a, b) => (b.blocks.length > a.blocks.length ? b : a)).blocks;
   }
 
-  private async fetchChain(apiKey: string, account: string, limit: number, frontier: string): Promise<{ blocks: NanoBlock[]; complete: boolean }> {
+  private async fetchChain(call: RpcCall, account: string, limit: number, frontier: string): Promise<{ blocks: NanoBlock[]; complete: boolean }> {
     // H2 fast path: if the account's frontier is unchanged, its verified block
     // list is unchanged — skip the whole history pull. Only COMPLETE chains
     // are ever cached (see below), so a hit is always frontier-consistent.
@@ -242,7 +250,7 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
     while (raw.length < limit) {
       const params: Record<string, unknown> = { action: "account_history", account, count: 500, raw: true };
       if (head) params.head = head;
-      const hist = (await nanoRpc(apiKey, params)) as {
+      const hist = (await call(params)) as {
         history?: { hash: string; height: string }[];
         previous?: string;
       };
@@ -251,7 +259,7 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
       const hashes = history.map((h) => h.hash).filter((h) => !seen.has(h));
       if (hashes.length === 0) break;
 
-      const infos = await this.fetchBlocksInfo(apiKey, hashes);
+      const infos = await this.fetchBlocksInfo(call, hashes);
       for (const hash of hashes) {
         const b = infos.get(hash);
         if (!b) continue;
