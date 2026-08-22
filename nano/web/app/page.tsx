@@ -2423,9 +2423,18 @@ function TradePanel({
       {side === "sell" && (
         <>
           <div className="flex items-center justify-between text-[11px] text-neutral-500">
-            <span>your {tokSym(token)}</span>
-            <span className="tabular-nums text-neutral-300">{fmtTok(token.myBalance, token.decimals)} {tokSym(token)}</span>
+            <span>{address ? `your ${tokSym(token)}` : "sell"}</span>
+            <span className="tabular-nums text-neutral-300">
+              {!address ? "unlock wallet to sell" : <>{fmtTok(token.myBalance, token.decimals)} {tokSym(token)}</>}
+            </span>
           </div>
+          {/* Staked tokens aren't sellable until unstaked — say so instead of a
+              bare "0" when the balance is all staked, so a holder isn't confused. */}
+          {address && BigInt(token.myBalance || "0") <= 0n && BigInt(token.myStaked || "0") > 0n && (
+            <p className="text-[11px] text-neutral-500">
+              You have {fmtTok(token.myStaked, token.decimals)} {tokSym(token)} <span className="text-neutral-400">staked</span> — unstake it first to sell (staking earns rewards; a 20% exit tax applies).
+            </p>
+          )}
           <div className="grid grid-cols-4 gap-2">
             {[10, 25, 50, 100].map((p) => {
               const bal = BigInt(token.myBalance || "0");
