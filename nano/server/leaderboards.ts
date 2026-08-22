@@ -46,6 +46,7 @@ export interface Leaderboards {
   };
   creators: CreatorRank[];
   holders: HolderRank[];
+  holderCount: number; // total distinct value-holding accounts (for percentile rarity bands)
 }
 
 const vol = (t: TokenView) => BigInt(t.buyVolume) + BigInt(t.sellVolume);
@@ -177,7 +178,7 @@ export function computeLeaderboards(tokens: TokenView[], nowMs: number, limit = 
     return { account, tokensHeld: e.tokens, value: e.value.toString(), badges };
   });
 
-  return { updatedAt: nowMs, tokens: { byVolume, byGainers, byHolders, newest }, creators, holders };
+  return { updatedAt: nowMs, tokens: { byVolume, byGainers, byHolders, newest }, creators, holders, holderCount: holderArr.length };
 }
 
 /** Reputation score + badges for one creator (surfaced on a token page). Same

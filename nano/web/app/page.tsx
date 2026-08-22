@@ -14,6 +14,7 @@ import { sanitizeMeta } from "../server/validate";
 import type { Op } from "../core/ops";
 import { Sparkline } from "./components/Sparkline";
 import Explorer from "./components/Explorer";
+import HalftoneGenome from "./components/HalftoneGenome";
 import { loadWallet, saveWallet, removeWallet, encryptSeed, decryptSeed } from "./lib/wallet";
 import { useNanoWebsocket } from "./lib/nano-ws";
 import { QRCodeSVG } from "qrcode.react";
@@ -1039,7 +1040,20 @@ function WalletPanel({
 interface TokenRank { tokenId: string; name: string; symbol: string; image: string; price: string; marketCap: string; change24h: number | null; holders: number; volume: string; createdAt: number }
 interface CreatorRank { account: string; tokenCount: number; holders: number; marketCap: string; volume: string; score: number; badges: string[]; topSymbols: string[] }
 interface HolderRank { account: string; tokensHeld: number; value: string; badges: string[] }
-interface LB { updatedAt: number; tokens: { byVolume: TokenRank[]; byGainers: TokenRank[]; byHolders: TokenRank[]; newest: TokenRank[] }; creators: CreatorRank[]; holders: HolderRank[] }
+interface LB { updatedAt: number; tokens: { byVolume: TokenRank[]; byGainers: TokenRank[]; byHolders: TokenRank[]; newest: TokenRank[] }; creators: CreatorRank[]; holders: HolderRank[]; holderCount?: number }
+
+/** Privacy-preserving rarity tier from a holder's absolute rank in the full
+ * population — status without exposing a raw balance. */
+function rarityBand(rank: number, total: number): string {
+  if (total <= 0) return "Holder";
+  const p = (rank + 1) / total;
+  if (p <= 0.001) return "Top 0.1%";
+  if (p <= 0.01) return "Top 1%";
+  if (p <= 0.1) return "Top 10%";
+  if (p <= 0.25) return "Top 25%";
+  if (p <= 0.5) return "Top 50%";
+  return "Holder";
+}
 
 /** Nemesis Card — collapses the whole holders board into one personal chase:
  * the rival directly above you, the exact XNO gap + % you must gain to overtake,
@@ -1172,26 +1186,81 @@ function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddr
         </section>
       </div>
 
-      {/* holders */}
+      {/* holders — privacy-preserving rarity bands instead of raw balances */}
       <section className="rounded-none border border-neutral-800 bg-neutral-950 p-4">
-        <p className="text-sm font-bold text-neutral-300 mb-3">Top holders</p>
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-sm font-bold text-neutral-300">Top holders</p>
+          <p className="text-[10px] text-neutral-600">by rarity tier · {lb.holderCount ?? lb.holders.length} ranked</p>
+        </div>
         <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
-          {lb.holders.map((h, i) => (
-            <div key={h.account} className={"flex items-center gap-3 rounded-none px-2 py-1.5 " + (h.account === myAddress ? "bg-neutral-900" : "")}>
-              <span className={"w-5 text-center text-xs font-black " + medal(i)}>{i + 1}</span>
-              <p className="min-w-0 flex-1 text-sm font-mono text-neutral-300 truncate">{short(h.account)}{h.account === myAddress && <span className="text-white"> · you</span>}</p>
-              <span className="text-[10px] shrink-0">{h.badges.join(" ")}</span>
-              <span className="text-xs font-bold tabular-nums shrink-0">{fmtXno(h.value)} XNO</span>
-            </div>
-          ))}
+          {lb.holders.map((h, i) => {
+            const band = rarityBand(i, lb.holderCount ?? lb.holders.length);
+            const isMe = h.account === myAddress;
+            return (
+              <div key={h.account} className={"flex items-center gap-3 rounded-none px-2 py-1.5 " + (isMe ? "bg-neutral-900" : "")}>
+                <span className={"w-5 text-center text-xs font-black " + medal(i)}>{i + 1}</span>
+                <p className="min-w-0 flex-1 text-sm font-mono text-neutral-300 truncate">{short(h.account)}{isMe && <span className="text-white"> · you</span>}</p>
+                {h.badges.length > 0 && <span className="text-[10px] shrink-0">{h.badges.join(" ")}</span>}
+                <span className={"shrink-0 rounded-none border px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wide " + (band.startsWith("Top 0") || band === "Top 1%" ? "border-white text-white" : "border-neutral-700 text-neutral-400")}>{band}</span>
+              </div>
+            );
+          })}
           {lb.holders.length === 0 && <p className="text-xs text-neutral-500 py-4 text-center">no holders yet</p>}
         </div>
+        <p className="mt-2 text-[10px] text-neutral-600">Ranked by tier, not raw balance — status without doxxing your bag.</p>
       </section>
     </div>
   );
 }
 const medal = (i: number) => (i === 0 ? "text-white" : i === 1 ? "text-neutral-300" : i === 2 ? "text-white" : "text-neutral-500");
 function Skel() { return <div className="h-40 rounded-none bg-neutral-900 animate-pulse" />; }
+
+/** The Unavoidable Pick — one coin surfaced per UTC day, chosen by a public,
+ * future-unknowable seed = SHA-256(UTC-date · your address) indexed into the
+ * eligible set. Nobody (us included) can curate or rig it toward/against you,
+ * and anyone can recompute it. Provably-fair serendipity, not an opaque feed. */
+function UnavoidablePick({ coins, myAddress, onSelect }: { coins: Token[]; myAddress?: string; onSelect: (id: string) => void }) {
+  const [pick, setPick] = useState<Token | null>(null);
+  const [show, setShow] = useState(false);
+  const day = new Date().toISOString().slice(0, 10); // UTC date
+  const seedStr = `${day}·${myAddress ?? "anon"}`;
+  useEffect(() => {
+    let live = true;
+    if (coins.length === 0) { setPick(null); return; }
+    (async () => {
+      try {
+        const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(seedStr));
+        const n = new DataView(buf).getUint32(0);
+        const sorted = [...coins].sort((a, b) => (a.tokenId < b.tokenId ? -1 : 1)); // deterministic order
+        if (live) setPick(sorted[n % sorted.length]);
+      } catch { if (live) setPick(coins[0]); }
+    })();
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedStr, coins.length]);
+  if (!pick) return null;
+  return (
+    <div className="rounded-none border border-neutral-700 bg-neutral-950 p-3">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">Today’s unavoidable pick</p>
+        <button className="text-[10px] text-neutral-500 hover:text-white" onClick={() => setShow((v) => !v)}>{show ? "hide" : "verify"}</button>
+      </div>
+      <button onClick={() => onSelect(pick.tokenId)} className="mt-2 flex w-full items-center gap-3 text-left group">
+        <Avatar image={pick.image} symbol={tokSym(pick)} size={40} />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-black truncate group-hover:underline">{tokSym(pick)} <span className="text-[11px] font-normal text-neutral-500">{tokName(pick)}</span></p>
+          <p className="text-[11px] text-neutral-500">mc {fmtXno(pick.marketCap)} XNO · chosen for you, not by us</p>
+        </div>
+        <span className="text-neutral-600 group-hover:text-white">→</span>
+      </button>
+      {show && (
+        <p className="mt-2 border-t border-neutral-800 pt-2 text-[10px] font-mono text-neutral-500 break-all">
+          pick = SHA256("{seedStr}") mod {coins.length}. Public seed, changes daily, recomputable by anyone — we can’t rig it.
+        </p>
+      )}
+    </div>
+  );
+}
 
 function Feed({ tokens, onSelect, myAddress, usd, onCreate }: { tokens: Token[]; onSelect: (id: string) => void; myAddress?: string; usd: number | null; onCreate?: () => void }) {
   const [query, setQuery] = useState("");
@@ -1288,6 +1357,7 @@ function Feed({ tokens, onSelect, myAddress, usd, onCreate }: { tokens: Token[];
         </div>
       ) : (
         <>
+          <UnavoidablePick coins={live} myAddress={myAddress} onSelect={onSelect} />
           {featured && <HeroCard t={featured} usd={usd} onSelect={onSelect} />}
           {mine.length > 0 && <FeedRow title="Your Coins" tokens={mine} usd={usd} onSelect={onSelect} />}
           {trending.length > 0 && <FeedRow title="Trending Now" tokens={trending} usd={usd} onSelect={onSelect} onSeeAll={() => seeAll("vol")} />}
@@ -1341,12 +1411,14 @@ function PosterImage({ t, className }: { t: Token; className: string }) {
   if (candidates.length > 0 && idx < candidates.length) {
     return <img src={candidates[idx]} alt="" className={className + " object-cover"} onError={() => setIdx((i) => i + 1)} />;
   }
-  // Monogram fallback: never a dead black hole on the black canvas — a
-  // neutral-900 tile with the symbol plus an oversized ghost for poster depth.
+  // Imageless fallback: a Halftone Genome — a deterministic B&W portrait unique
+  // to this coin (never shown for coins that HAVE an uploaded image). The symbol
+  // sits over it. A livelier coin (more volume) reads denser.
+  const metric = Math.min(1, Math.log10(1 + Number(BigInt(t.buyVolume || "0")) / 1e28) / 3);
   return (
-    <div className={className + " relative overflow-hidden bg-neutral-900 flex items-center justify-center"}>
-      <span aria-hidden className="absolute text-[7rem] font-black leading-none text-white/5 select-none">{tokSym(t).slice(0, 3)}</span>
-      <span className="relative font-black text-white text-3xl tracking-tight">{tokSym(t).slice(0, 3)}</span>
+    <div className={className + " relative overflow-hidden bg-neutral-950 flex items-center justify-center"}>
+      <div className="absolute inset-0"><HalftoneGenome tokenId={t.tokenId} size={300} metric={metric} className="h-full w-full opacity-70" /></div>
+      <span className="relative font-black text-white text-3xl tracking-tight drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">{tokSym(t).slice(0, 3)}</span>
     </div>
   );
 }
