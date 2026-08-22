@@ -217,6 +217,22 @@ const inputC =
 const btn =
   "w-full rounded-none bg-white px-4 py-3 text-sm font-black uppercase tracking-wide text-black hover:bg-neutral-200 disabled:opacity-40 transition duration-200 motion-reduce:transition-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-white focus-visible:outline-offset-2";
 
+function GitHubLink({ className = "" }: { className?: string }) {
+  return (
+    <a
+      href="https://github.com/dhyabi2/holdergame"
+      target="_blank"
+      rel="noreferrer"
+      title="Open source on GitHub — verify the code yourself"
+      className={"text-neutral-400 hover:text-white " + className}
+    >
+      <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-label="GitHub">
+        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
+      </svg>
+    </a>
+  );
+}
+
 export default function Home() {
   const [keys, setKeys] = useState<Keys | null>(null);
   const [hasWallet, setHasWallet] = useState(false);
@@ -393,6 +409,7 @@ export default function Home() {
             <a className="hover:text-white whitespace-nowrap" href="/pro">Chart / Trade ↗</a>
           </nav>
           <div className="ml-auto flex items-center gap-3 shrink-0">
+            <GitHubLink />
             <button
               className="rounded-none bg-white px-3 py-1.5 text-xs font-black uppercase tracking-wide text-black hover:bg-neutral-200"
               onClick={() => { setSelectedId(null); setTab("create"); }}
@@ -1238,11 +1255,11 @@ function FeedRow({ title, tokens, usd, onSelect, onSeeAll, ranked }: { title: st
 function HeroCard({ t, usd, onSelect }: { t: Token; usd: number | null; onSelect: (id: string) => void }) {
   const ch = t.change24h;
   return (
-    <div className="relative w-full overflow-hidden rounded-none bg-black min-h-[320px] sm:aspect-[21/9]">
+    <div className="relative w-full overflow-hidden rounded-none bg-black">
       {/* Ambient layer only — blur + dim means text sits on effectively solid black. */}
       <PosterImage t={t} className="absolute inset-0 w-full h-full scale-110 blur-2xl opacity-30" />
-      <div className="relative flex h-full min-h-[320px] flex-col sm:flex-row items-stretch gap-4">
-        <div className="flex-1 min-w-0 flex flex-col justify-end p-6 sm:p-10">
+      <div className="relative flex flex-col sm:flex-row items-stretch gap-4">
+        <div className="flex-1 min-w-0 flex flex-col justify-center p-6 sm:p-8">
           <p className="text-[10px] font-black uppercase tracking-[0.3em] text-neutral-400">Featured</p>
           <div className="mt-1 flex items-baseline gap-3 min-w-0">
             <h2 className="text-4xl sm:text-6xl font-black tracking-tight text-white leading-none truncate">{tokName(t)}</h2>
