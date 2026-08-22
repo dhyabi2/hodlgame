@@ -70,11 +70,15 @@ export default function PriceChart({
   trades = [],
   decimals = 6,
   symbol = "",
+  entryPrice = 0,
 }: {
   series: Point[];
   trades?: Trade[];
   decimals?: number;
   symbol?: string;
+  /** The viewer's own avg-buy price (XNO per whole token, as priceNum units).
+   * When > 0, a dashed "YOUR ENTRY" line is drawn — only this viewer sees it. */
+  entryPrice?: number;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -162,6 +166,29 @@ export default function PriceChart({
 
   // update DATA only (no teardown) whenever the polled series/trades change.
   useEffect(() => { applyData(false); /* eslint-disable-next-line */ }, [series, trades]);
+
+  // "Your Entry Line": a dashed horizontal marker at the viewer's own avg buy
+  // price. Recreated when the price changes or the chart is rebuilt (type/tf).
+  // Fed in the same SCALED units as the series (priceNum × scaleRef).
+  const entryLineRef = useRef<any>(null);
+  useEffect(() => {
+    const p = priceRef.current;
+    if (!p) return;
+    if (entryLineRef.current) { try { p.removePriceLine(entryLineRef.current); } catch {} entryLineRef.current = null; }
+    if (entryPrice > 0) {
+      try {
+        entryLineRef.current = (p as any).createPriceLine({
+          price: entryPrice * scaleRef.current,
+          color: "#ffffff",
+          lineWidth: 1,
+          lineStyle: 2, // dashed
+          axisLabelVisible: true,
+          title: "YOUR ENTRY",
+        });
+      } catch {}
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entryPrice, type, tf, series]);
 
   function applyData(fit: boolean) {
     const { series, trades, decimals } = dataRef.current;

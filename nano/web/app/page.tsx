@@ -18,6 +18,7 @@ import { loadWallet, saveWallet, removeWallet, encryptSeed, decryptSeed } from "
 import { useNanoWebsocket } from "./lib/nano-ws";
 import { QRCodeSVG } from "qrcode.react";
 import { toRaw, clampSlippage, isNanoAddr, fmtNum, fmtXno, fmtXnoPlain } from "./lib/trade";
+import { shareCard, svgQrToCanvas } from "./lib/sharecard";
 import { useXnoUsd, fmtUsd } from "./lib/usd";
 import Welcome, { useTermsAccepted } from "./components/Welcome";
 import { LogoWord, LogoMark } from "./components/Logo";
@@ -801,9 +802,43 @@ function ConnectedWallet({
 
   return (
     <div className="rounded-none border border-neutral-800 bg-neutral-950 p-5 space-y-4">
-      <div>
-        <p className="text-[11px] text-neutral-500 mb-1">balance</p>
-        <p className="text-3xl font-black">{balance == null ? "…" : fmtXno(balance)} <span className="text-lg text-neutral-500">XNO</span></p>
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <p className="text-[11px] text-neutral-500 mb-1">balance</p>
+          <p className="text-3xl font-black">{balance == null ? "…" : fmtXno(balance)} <span className="text-lg text-neutral-500">XNO</span></p>
+        </div>
+        {balance != null && BigInt(balance) > 0n && (
+          <button
+            className="shrink-0 rounded-none border border-neutral-700 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-neutral-200 hover:border-white"
+            onClick={async () => {
+              // Proof-of-Solvency: a monochrome share card attesting the live
+              // balance with a scannable verify-QR (address + frontier so anyone
+              // can independently confirm on the ledger), address masked.
+              const qrHost = document.getElementById(`solq-${keys.address}`)?.querySelector("svg") as SVGElement | null;
+              const qr = await svgQrToCanvas(qrHost, 220);
+              const masked = keys.address.slice(0, 12) + "…" + keys.address.slice(-6);
+              await shareCard({
+                filename: "hodlgame-proof-of-solvency.png",
+                title: "Proof of Solvency",
+                headline: `${fmtXno(balance)} XNO`,
+                subline: "verified on Nano — no custody, no IOU",
+                rows: [
+                  { label: "account", value: masked },
+                  { label: "network", value: "Nano (XNO)" },
+                ],
+                footer: "scan to verify · hodlgame.fun",
+                qr,
+              });
+            }}
+          >
+            Share proof
+          </button>
+        )}
+      </div>
+      {/* Hidden verify-QR (address only — never the seed) used to render the
+          share card; scanning it lets anyone query the ledger independently. */}
+      <div id={`solq-${keys.address}`} className="hidden">
+        <QRCodeSVG value={`nano:${keys.address}`} size={220} bgColor="#ffffff" fgColor="#000000" level="M" />
       </div>
 
       <div className="rounded-none border border-neutral-800 bg-neutral-950 p-3">
@@ -1006,6 +1041,51 @@ interface CreatorRank { account: string; tokenCount: number; holders: number; ma
 interface HolderRank { account: string; tokensHeld: number; value: string; badges: string[] }
 interface LB { updatedAt: number; tokens: { byVolume: TokenRank[]; byGainers: TokenRank[]; byHolders: TokenRank[]; newest: TokenRank[] }; creators: CreatorRank[]; holders: HolderRank[] }
 
+/** Nemesis Card — collapses the whole holders board into one personal chase:
+ * the rival directly above you, the exact XNO gap + % you must gain to overtake,
+ * and who is closing from below. Pure read off the already-computed rank ledger,
+ * no new state. Turns an intimidating list into a rivalry you check back on. */
+function NemesisCard({ holders, myAddress }: { holders: HolderRank[]; myAddress?: string }) {
+  if (!myAddress) return null;
+  const me = holders.findIndex((h) => h.account === myAddress);
+  if (me < 0) return null; // not ranked yet
+  const rival = me > 0 ? holders[me - 1] : null;
+  const chaser = me < holders.length - 1 ? holders[me + 1] : null;
+  const myVal = BigInt(holders[me].value);
+  const gapPct = (target: bigint) => {
+    if (myVal <= 0n) return null;
+    const bps = ((target - myVal) * 10000n) / myVal;
+    return Number(bps) / 100;
+  };
+  return (
+    <div className="rounded-none border border-neutral-700 bg-neutral-950 p-4">
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">Your nemesis</p>
+        <p className="text-[10px] font-mono text-neutral-500">rank #{me + 1}</p>
+      </div>
+      {rival ? (
+        <div className="mt-2">
+          <p className="text-sm">
+            <span className="font-mono text-neutral-300">{short(rival.account)}</span>
+            <span className="text-neutral-500"> is one rank above you.</span>
+          </p>
+          {(() => { const g = gapPct(BigInt(rival.value)); return g != null ? (
+            <p className="mt-1 text-lg font-black tabular-nums text-white">+{fmtNum(g)}% <span className="text-xs font-normal text-neutral-500">to overtake</span></p>
+          ) : null; })()}
+          <p className="mt-0.5 text-[11px] text-neutral-500 tabular-nums">gap: {fmtXno((BigInt(rival.value) - myVal).toString())} XNO</p>
+        </div>
+      ) : (
+        <p className="mt-2 text-lg font-black text-white">You’re #1. Defend the throne. 👑</p>
+      )}
+      {chaser && (() => { const g = gapPct(BigInt(chaser.value)); return (
+        <p className="mt-3 border-t border-neutral-800 pt-2 text-[11px] text-neutral-500">
+          <span className="font-mono text-neutral-400">{short(chaser.account)}</span> is closing from below{g != null ? <> — {fmtNum(-g)}% behind</> : null}
+        </p>
+      ); })()}
+    </div>
+  );
+}
+
 function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddress?: string }) {
   const [lb, setLb] = useState<LB | null>(null);
   const [board, setBoard] = useState<"byVolume" | "byGainers" | "byHolders" | "newest">("byVolume");
@@ -1043,6 +1123,7 @@ function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddr
 
   return (
     <div className="space-y-4">
+      <NemesisCard holders={lb.holders} myAddress={myAddress} />
       <div className="grid gap-4 lg:grid-cols-2">
         {/* token leaderboard */}
         <section className="rounded-none border border-neutral-800 bg-neutral-950 p-4">
@@ -1757,6 +1838,26 @@ function TokenDetail({
 
   const volumeRaw = (BigInt(token.buyVolume || "0") + BigInt(token.sellVolume || "0")).toString();
 
+  // "Your Entry Line": the viewer's volume-weighted avg BUY price over their
+  // own recent buy trades (token.trades stores buy size in TOKENS + priceRaw).
+  // Purely client-side from data already on the token view — nobody else sees
+  // it. Current price → live P&L delta.
+  const myEntry = (() => {
+    if (!keys) return { price: 0, pnl: null as number | null };
+    let tok = 0, weighted = 0;
+    for (const tr of token.trades) {
+      if (tr.kind !== "buy" || tr.account !== keys.address) continue;
+      const t = Number(BigInt(tr.amountRaw)) / 10 ** token.decimals;
+      const px = Number(BigInt(tr.priceRaw)) / 1e30;
+      if (t > 0 && Number.isFinite(px)) { tok += t; weighted += t * px; }
+    }
+    if (tok <= 0) return { price: 0, pnl: null };
+    const price = weighted / tok;
+    const cur = Number(BigInt(token.price || "0")) / 1e30;
+    const pnl = price > 0 ? ((cur - price) / price) * 100 : null;
+    return { price, pnl };
+  })();
+
   return (
     <div className="space-y-4 pb-16 sm:pb-0">
       <div className="flex items-center justify-between">
@@ -1834,8 +1935,20 @@ function TokenDetail({
             <span>pool {fmtNum(Number(BigInt(token.poolTokens)) / 10 ** token.decimals)} {tokSym(token)}</span>
           </div>
         </div>
+        {myEntry.price > 0 && (
+          <div className="mb-2 flex items-center gap-2 text-[11px]">
+            <span className="text-neutral-500 uppercase tracking-wide">Your entry</span>
+            <span className="font-mono text-neutral-300">{fmtNum(myEntry.price)} XNO</span>
+            {myEntry.pnl != null && (
+              <span className={"font-black tabular-nums " + (myEntry.pnl >= 0 ? "text-green-500" : "text-red-500")}>
+                {myEntry.pnl >= 0 ? "+" : ""}{myEntry.pnl.toFixed(1)}%
+              </span>
+            )}
+            <span className="text-neutral-600">· only you see this line</span>
+          </div>
+        )}
         {token.series.length >= 2 ? (
-          <PriceChart series={token.series} trades={token.trades} decimals={token.decimals} symbol={tokSym(token)} />
+          <PriceChart series={token.series} trades={token.trades} decimals={token.decimals} symbol={tokSym(token)} entryPrice={myEntry.price} />
         ) : (
           <div className="h-40 flex items-center justify-center text-neutral-500 text-sm">no trades yet — the chart appears after the first buy</div>
         )}
