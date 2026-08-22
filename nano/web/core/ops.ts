@@ -8,6 +8,7 @@ export type Op =
   | { kind: "stake"; amount: bigint }
   | { kind: "unstake"; amount: bigint }
   | { kind: "claim" }
+  | { kind: "withdraw" }
   | { kind: "seedLiq"; xno: bigint; tokens: bigint }
   | { kind: "addLiq"; xno: bigint; tokens: bigint };
 
@@ -19,6 +20,7 @@ export const OP_CODE: Record<Op["kind"], number> = {
   stake: 0x05,
   unstake: 0x06,
   claim: 0x07,
+  withdraw: 0x0a,
   seedLiq: 0x08,
   addLiq: 0x09,
 };

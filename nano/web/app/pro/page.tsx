@@ -30,7 +30,7 @@ interface Token {
   creator: string; supply: string; treasury: string;
   poolXno: string; poolTokens: string; price: string; marketCap: string;
   change1h: number | null; change24h: number | null; createdAt: number;
-  myBalance: string; myStaked: string; myClaimable: string; totalStaked: string;
+  myBalance: string; myCredit: string; myStaked: string; myClaimable: string; totalStaked: string;
   buyVolume: string; sellVolume: string; holders: number; pool: string | null;
   series: PricePoint[]; trades: Trade[]; topHolders: Holder[];
 }
@@ -528,7 +528,7 @@ function OrderTicket({ token, keys, say }: { token: Token; keys: Keys | null; sa
         say(`bought ✓ ${h.slice(0, 10)}…`);
       } else {
         const h = await execSell(keys, token, amount, slip);
-        say(`sold ✓ ${h.slice(0, 10)}…`);
+        say(`sold ✓ — XNO credited to your game balance. Withdraw any time.`);
       }
       setAmount("");
     } catch (e: any) {
@@ -633,6 +633,7 @@ function PositionCard({ token, keys, busy, setBusy, say }: { token: Token; keys:
         <Row2 l="value" r={`${fmtXno(valueRaw.toString())} XNO`} />
         <Row2 l="staked" r={`${fmtTok(token.myStaked, token.decimals)}`} />
         <Row2 l="claimable" r={`${fmtXno(token.myClaimable)} XNO`} rClass="text-white" />
+        <Row2 l="game balance" r={`${fmtXno(token.myCredit)} XNO`} />
       </div>
       <div className="flex gap-1">
         <input className={inpSm} placeholder="stake" inputMode="decimal" value={stakeAmt} onChange={(e) => setStakeAmt(e.target.value)} />
@@ -656,6 +657,13 @@ function PositionCard({ token, keys, busy, setBusy, say }: { token: Token; keys:
         onClick={() => keys && run(() => sendOp(keys, token.tokenId, { kind: "claim" }), "claim")}
       >
         Claim {fmtXno(token.myClaimable)} XNO
+      </button>
+      <button
+        className="w-full rounded-none bg-white py-1.5 text-[11px] font-black uppercase text-black hover:bg-neutral-200 disabled:opacity-40"
+        disabled={busy || BigInt(token.myCredit || "0") <= 0n || !keys}
+        onClick={() => keys && run(() => sendOp(keys, token.tokenId, { kind: "withdraw" }), "withdraw")}
+      >
+        Withdraw {fmtXno(token.myCredit)} XNO
       </button>
     </div>
   );

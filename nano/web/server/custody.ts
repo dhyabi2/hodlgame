@@ -9,6 +9,7 @@ import * as nanocurrency from "nanocurrency";
 import { blake2bHex } from "blakejs";
 import { keysFromSeed } from "../client/nano";
 import { nanoRpc } from "../lib/rpc";
+import { cachedWork } from "./workcache";
 
 export interface PoolKeys {
   address: string;
@@ -100,7 +101,7 @@ export async function signPayout(
   const poolSig = (nanocurrency as any).signBlock({ hash, secretKey: pool.secretKey });
 
   if (cosignerSeeds.length === 0) {
-    const work = (await nanoRpc(rpcKey, { action: "work_generate", hash: payout.frontier, difficulty: "fffffff800000000" })).work;
+    const work = await cachedWork(rpcKey, payout.frontier);
     const blk = build(work);
     blk.signature = poolSig;
     return blk;
@@ -112,7 +113,7 @@ export async function signPayout(
     const c = keysFromSeed(seed);
     signatures.push((nanocurrency as any).signBlock({ hash, secretKey: c.secretKey }));
   }
-  const work = (await nanoRpc(rpcKey, { action: "work_generate", hash: payout.frontier, difficulty: "fffffff800000000" })).work;
+  const work = await cachedWork(rpcKey, payout.frontier);
   const blk = build(work);
   delete blk.signature;
   blk.signatures = signatures;
@@ -155,7 +156,7 @@ export async function signPayoutWithSignatures(
   const newBalance = (BigInt(payout.balance) - BigInt(payout.amountRaw)).toString();
   const hash = payoutBlockHash(pool, payout);
   const poolSig = cosignHash(pool.secretKey, hash);
-  const work = (await nanoRpc(rpcKey, { action: "work_generate", hash: payout.frontier, difficulty: "fffffff800000000" })).work;
+  const work = await cachedWork(rpcKey, payout.frontier);
 
   const b = nanocurrency.createBlock(pool.secretKey, {
     work,

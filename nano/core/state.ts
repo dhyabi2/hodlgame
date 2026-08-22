@@ -45,6 +45,17 @@ export interface State {
   treasury: bigint;
   poolXno: bigint;
   poolTokens: bigint;
+  // Exit-only settlement (viral-PoW design): a sell no longer entitles an
+  // immediate on-chain payout. Its XNO proceeds accrue here as an in-game
+  // credit — a pure replay quantity, zero blocks, zero PoW — and only an
+  // explicit `withdraw` op moves credit into xnoWithdrawn, the CUMULATIVE
+  // withdrawal total per account that the settlement layer pays against
+  // (owed = withdrawn − chain-sent). Cumulative-vs-cumulative netting makes
+  // era transitions safe by construction: pre-feature sells replay as credit,
+  // and any XNO the pool already sent a recipient counts against their first
+  // withdrawal, so nothing can ever be double-paid or clawed back.
+  xnoCredit: Map<string, bigint>;
+  xnoWithdrawn: Map<string, bigint>;
   height: bigint;
 }
 
@@ -69,6 +80,8 @@ export function emptyState(): State {
     treasury: 0n,
     poolXno: 0n,
     poolTokens: 0n,
+    xnoCredit: new Map(),
+    xnoWithdrawn: new Map(),
     height: 0n,
   };
 }
@@ -129,6 +142,8 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint): Stat
     staked: new Map(s0.staked),
     banked: new Map(s0.banked),
     rewardDebt: new Map(s0.rewardDebt),
+    xnoCredit: new Map(s0.xnoCredit),
+    xnoWithdrawn: new Map(s0.xnoWithdrawn),
   };
 
   switch (op.kind) {
@@ -186,6 +201,19 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint): Stat
       set(s.balances, sender, bal - op.tokens);
       s.poolTokens += op.tokens;
       s.poolXno -= out;
+      // Proceeds become in-game credit (see State.xnoCredit) — the real XNO
+      // stays in the pool account until the seller explicitly withdraws.
+      set(s.xnoCredit, sender, get(s.xnoCredit, sender) + out);
+      s.height = height;
+      return s;
+    }
+
+    case "withdraw": {
+      if (!s.launched) throw new InvalidOp("not launched");
+      const credit = get(s.xnoCredit, sender);
+      if (credit <= 0n) throw new InvalidOp("nothing to withdraw");
+      set(s.xnoWithdrawn, sender, get(s.xnoWithdrawn, sender) + credit);
+      set(s.xnoCredit, sender, 0n);
       s.height = height;
       return s;
     }

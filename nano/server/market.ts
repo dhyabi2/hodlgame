@@ -37,6 +37,7 @@ export interface TokenView {
   change24h: number | null;
   createdAt: number;
   myBalance: string;
+  myCredit: string; // in-game XNO credit from sells (raw) — withdrawable
   myStaked: string;
   myClaimable: string;
   totalStaked: string;
@@ -183,6 +184,7 @@ async function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, accoun
     change24h: changePct(a.series, 86400),
     createdAt: a.launchTime,
     myBalance: account ? (a.holders.find((h) => h.account === account)?.balanceRaw ?? "0") : "0",
+    myCredit: account && s ? (s.xnoCredit.get(account) ?? 0n).toString() : "0",
     myStaked: account && s ? (s.staked.get(account)?.toString() ?? "0") : "0",
     myClaimable: account && s ? claimableReward(s, account).toString() : "0",
     totalStaked: s?.totalStaked.toString() ?? "0",

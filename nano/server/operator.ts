@@ -80,7 +80,7 @@ export async function runSweep(onlyToken: string | null) {
     const idx = await indexer();
     const events = await idx.collectEvents(await watchedAccounts());
     const credits = creditedBuys(events);
-    const { sellPayouts } = analyze(events);
+    const { state: replayed } = analyze(events);
 
     const known = [...idx.getState().keys()];
     let targets = onlyToken ? (known.includes(onlyToken) ? [onlyToken] : []) : known;
@@ -111,7 +111,7 @@ export async function runSweep(onlyToken: string | null) {
     let skipped = 0;
     for (const tokenId of targets) {
       const pool = tokenPoolKeys(masterSeed, tokenId);
-      const r = await settlePoolNetted(key, pool, tokenId, sellPayouts, credits.get(tokenId) ?? new Map());
+      const r = await settlePoolNetted(key, pool, tokenId, replayed.get(tokenId)?.xnoWithdrawn ?? new Map(), credits.get(tokenId) ?? new Map());
       paid.push(...r.paid);
       skipped += r.queued;
     }

@@ -79,6 +79,7 @@ interface Token {
   change24h: number | null;
   createdAt: number;
   myBalance: string;
+  myCredit: string;
   myStaked: string;
   myClaimable: string;
   totalStaked: string;
@@ -483,7 +484,7 @@ export default function Home() {
         ) : (
           <div className="w-full max-w-xl mx-auto space-y-4">
             <WalletPanel keys={keys} hasWallet={hasWallet} unlock={unlock} lock={lock} remove={remove} say={say} />
-            {keys && <Portfolio tokens={tokens} onSelect={(id) => setSelectedId(id)} account={keys.address} />}
+            {keys && <Portfolio tokens={tokens} onSelect={(id) => setSelectedId(id)} account={keys.address} sendOp={sendOp} busy={busy} usd={usd} />}
           </div>
         )}
 
@@ -1483,7 +1484,7 @@ function TokenDetail({
         const [fragA, fragB] = encodeFragLinks(token.tokenId, { kind: "sell", tokens: raw, minXno });
         await submitBlock(fragA, 1n);
         await submitBlock(fragB, 1n);
-        say("sell ✓");
+        say("sold ✓ — XNO credited to your game balance. Withdraw any time.");
       } else {
         await sendOp(token.tokenId, { kind: "sell", tokens: raw, minXno: 0n }, "sell");
       }
@@ -1911,6 +1912,24 @@ function TradePanel({
       </button>
 
       <StakeBox token={token} busy={busy} sendOp={sendOp} />
+
+      {/* Exit-only settlement: sell proceeds accrue here instantly (zero
+          waiting, zero PoW); one Withdraw click settles real XNO on-chain. */}
+      {BigInt(token.myCredit || "0") > 0n && (
+        <div className="rounded-none border border-neutral-700 bg-neutral-950 p-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">Game balance</p>
+            <p className="text-sm font-black tabular-nums">{fmtXno(token.myCredit)} XNO <span className="text-[10px] font-normal text-neutral-500">from your sells — yours to withdraw</span></p>
+          </div>
+          <button
+            className="shrink-0 rounded-none bg-white px-4 py-2 text-xs font-black uppercase tracking-wide text-black hover:bg-neutral-200 disabled:opacity-40"
+            disabled={busy}
+            onClick={() => sendOp(token.tokenId, { kind: "withdraw" }, "withdraw")}
+          >
+            Withdraw
+          </button>
+        </div>
+      )}
 
       {token.pool && (
         <p className="text-[11px] text-neutral-500">
@@ -2388,8 +2407,21 @@ function CreateToken({
   );
 }
 
-function Portfolio({ tokens, onSelect, account }: { tokens: Token[]; onSelect: (id: string) => void; account?: string }) {
+function Portfolio({ tokens, onSelect, account, sendOp, busy, usd }: { tokens: Token[]; onSelect: (id: string) => void; account?: string; sendOp: (tokenId: string, op: Op, label: string) => Promise<void>; busy: boolean; usd: number | null }) {
   const mine = tokens.filter((t) => BigInt(t.myBalance) > 0n);
+  // Every token game where this wallet has withdrawable in-game XNO — scanned
+  // from the whole replayed ledger so forgotten coins are never left behind.
+  const credited = tokens.filter((t) => BigInt(t.myCredit || "0") > 0n);
+  const totalCredit = credited.reduce((a, t) => a + BigInt(t.myCredit), 0n);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const withdrawAll = async () => {
+    setWithdrawing(true);
+    try {
+      // One cheap self-signed block per token — the user pays their own tiny
+      // PoW; the operator pays none until the netted settle.
+      for (const t of credited) await sendOp(t.tokenId, { kind: "withdraw" }, `withdraw ${tokSym(t)}`);
+    } finally { setWithdrawing(false); }
+  };
   if (!account) {
     return (
       <div className="rounded-none border border-neutral-800 bg-neutral-950 p-10 text-center text-neutral-500">
@@ -2408,6 +2440,22 @@ function Portfolio({ tokens, onSelect, account }: { tokens: Token[]; onSelect: (
   }
   return (
     <div className="space-y-2">
+      {totalCredit > 0n && (
+        <div className="rounded-none border border-neutral-700 bg-neutral-950 p-4 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">Game balance — all coins</p>
+            <p className="text-base font-black tabular-nums truncate">{fmtXno(totalCredit.toString())} XNO{usd != null && <span className="text-sm font-bold text-neutral-500"> ({fmtUsd(totalCredit.toString(), usd)})</span>}</p>
+            <p className="text-[10px] text-neutral-500">across {credited.length} coin{credited.length === 1 ? "" : "s"} — sells you may have forgotten included</p>
+          </div>
+          <button
+            className="shrink-0 rounded-none bg-white px-4 py-2.5 text-xs font-black uppercase tracking-wide text-black hover:bg-neutral-200 disabled:opacity-40"
+            disabled={busy || withdrawing}
+            onClick={withdrawAll}
+          >
+            {withdrawing ? "Withdrawing…" : "Withdraw all"}
+          </button>
+        </div>
+      )}
       <h2 className="text-sm font-bold text-neutral-400">Your holdings</h2>
       <div className="space-y-2">
         {mine.map((t) => {

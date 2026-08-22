@@ -2,7 +2,6 @@ import { strict as assert } from "node:assert";
 import * as nanocurrency from "nanocurrency";
 import { poolOutgoingByRecipient, entitlementsFor, netObligations } from "./settled";
 import type { NanoBlock } from "../indexer/blockSource";
-import type { SellPayout } from "./analytics";
 
 function addr(seedChar: string): { address: string; pub: string } {
   const sk = nanocurrency.deriveSecretKey(seedChar.repeat(64), 0);
@@ -32,17 +31,18 @@ async function main() {
     assert.equal(out.size, 2);
   }
 
-  // 2. Entitlements: sells + refunds net together per recipient; other tokens excluded.
+  // 2. Entitlements: cumulative WITHDRAWN credit + refunds net per recipient.
+  //    (Sells alone entitle nothing — only an explicit withdraw op does.)
   {
-    const sells: SellPayout[] = [
-      { tokenId: TOKEN, to: ALICE.address, amountRaw: 100n, hash: "s1" },
-      { tokenId: TOKEN, to: ALICE.address, amountRaw: 30n, hash: "s2" },
-      { tokenId: "cd".repeat(16), to: ALICE.address, amountRaw: 999n, hash: "s3" }, // other token
-    ];
+    const withdrawn = new Map([
+      [ALICE.address, 130n], // withdrew credit from two sells
+      ["nano_zero", 0n],     // zero entries are ignored
+    ]);
     const refunds = new Map([[ALICE.address, 20n], [BOB.address, 5n]]);
-    const ent = entitlementsFor(TOKEN, sells, refunds);
-    assert.equal(ent.get(ALICE.address), 150n, "sells + refund combined");
-    assert.equal(ent.get(BOB.address), 5n);
+    const ent = entitlementsFor(withdrawn, refunds);
+    assert.equal(ent.get(ALICE.address), 150n, "withdrawn + refund combined");
+    assert.equal(ent.get(BOB.address), 5n, "refund-only recipient entitled");
+    assert.equal(ent.has("nano_zero"), false, "zero withdrawn entitles nothing");
   }
 
   // 3. Netting: partially paid pays the delta; fully paid pays nothing;

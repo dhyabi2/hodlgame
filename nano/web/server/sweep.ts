@@ -17,6 +17,7 @@ import { nanoRpc, SEND_DIFFICULTY } from "../lib/rpc";
 import { ANCHOR_PUB, poolHelloRepAddress } from "../core/anchor";
 import { NanoRpcSource, verifyFetchedBlock, type NanoBlock } from "../indexer/blockSource";
 import { poolOutgoingByRecipient, entitlementsFor, netObligations } from "./settled";
+import { precomputeWork } from "./workcache";
 
 async function loadPaid(): Promise<Set<string>> {
   return new Set((await loadJson<string[]>("paid")) ?? []);
@@ -173,6 +174,9 @@ export async function payoutSellsMulti(
       const block = await signGuardedPayout(rpcKey, pool, p.tokenId, payout, cosignerSeeds);
       const hash = await broadcastPayout(rpcKey, block);
       paidOut.push(hash);
+      // Pipeline the NEXT block's work now — the pool chain is single-writer,
+      // so this hash IS the next frontier. Next payout broadcasts instantly.
+      await precomputeWork(rpcKey, hash);
     } catch (e) {
       paid.delete(p.hash);
       await savePaid(paid);
@@ -374,14 +378,14 @@ export async function settlePoolNetted(
   rpcKey: string,
   pool: PoolKeys,
   tokenId: string,
-  sells: SellPayout[],
+  withdrawn: Map<string, bigint>,
   credits: Map<string, bigint>
 ): Promise<{ paid: string[]; queued: number }> {
   const src = new NanoRpcSource(rpcKey);
   const poolBlocks = await src.listBlocks(pool.address);
   const poolReceived = await readPoolDepositsFromChain(rpcKey, pool, poolBlocks);
   const refunds = computeRefunds(poolReceived, credits);
-  const entitled = entitlementsFor(tokenId, sells, refunds);
+  const entitled = entitlementsFor(withdrawn, refunds);
   const obligations = netObligations(entitled, poolOutgoingByRecipient(poolBlocks));
 
   const paid: string[] = [];

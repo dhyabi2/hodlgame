@@ -139,3 +139,36 @@ function expectThrow(fn: () => unknown) {
 }
 
 console.log("✅ All Nano L2 state-machine tests passed");
+
+// ── exit-only settlement: sell credits, withdraw moves credit → withdrawn ────
+{
+  let s = applyOp(emptyState(), { kind: "launch", supply: 1_000_000_000n, name: "W", symbol: "W", decimals: 6, image: "" }, "nano_creator", 1n);
+  s = applyOp(s, { kind: "seedLiq", xno: 1_000_000n, tokens: 500_000_000n }, "nano_creator", 2n);
+  s = applyOp(s, { kind: "buy", xno: 100_000n, minTokens: 0n }, "nano_alice", 3n);
+  const before = { ...s, xnoCredit: new Map(s.xnoCredit), xnoWithdrawn: new Map(s.xnoWithdrawn) };
+  const poolBefore = s.poolXno;
+  s = applyOp(s, { kind: "sell", tokens: 10_000_000n, minXno: 0n }, "nano_alice", 4n);
+  const credit = s.xnoCredit.get("nano_alice") ?? 0n;
+  assert.ok(credit > 0n, "sell accrues in-game XNO credit");
+  assert.equal(poolBefore - s.poolXno, credit, "credit equals exactly what left the AMM pool");
+  assert.equal(before.xnoCredit.get("nano_alice"), undefined, "applyOp does not mutate the input state's credit map");
+
+  // withdraw moves the FULL credit into cumulative withdrawn and zeroes credit
+  s = applyOp(s, { kind: "withdraw" }, "nano_alice", 5n);
+  assert.equal(s.xnoCredit.get("nano_alice"), undefined, "credit zeroed after withdraw");
+  assert.equal(s.xnoWithdrawn.get("nano_alice"), credit, "withdrawn accumulates the credit");
+
+  // double-withdraw with nothing left is invalid (deterministic rejection)
+  assert.throws(() => applyOp(s, { kind: "withdraw" }, "nano_alice", 6n), /nothing to withdraw/, "empty withdraw rejected");
+
+  // second sell → new credit → second withdraw ACCUMULATES (never overwrites)
+  s = applyOp(s, { kind: "sell", tokens: 5_000_000n, minXno: 0n }, "nano_alice", 7n);
+  const credit2 = s.xnoCredit.get("nano_alice") ?? 0n;
+  assert.ok(credit2 > 0n, "second sell accrues fresh credit");
+  s = applyOp(s, { kind: "withdraw" }, "nano_alice", 8n);
+  assert.equal(s.xnoWithdrawn.get("nano_alice"), credit + credit2, "withdrawn is cumulative across withdrawals");
+
+  // an account with no sells can never withdraw
+  assert.throws(() => applyOp(s, { kind: "withdraw" }, "nano_stranger", 9n), /nothing to withdraw/, "stranger cannot withdraw");
+}
+console.log("✅ exit-only settlement (credit/withdraw) tests passed");

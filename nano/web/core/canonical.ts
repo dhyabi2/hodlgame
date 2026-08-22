@@ -41,6 +41,8 @@ function consensusView(s: State) {
     treasury: s.treasury,
     poolXno: s.poolXno,
     poolTokens: s.poolTokens,
+    xnoCredit: s.xnoCredit,
+    xnoWithdrawn: s.xnoWithdrawn,
     height: s.height,
   };
 }

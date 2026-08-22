@@ -13,7 +13,6 @@
 
 import * as nanocurrency from "nanocurrency";
 import type { NanoBlock } from "../indexer/blockSource";
-import type { SellPayout } from "./analytics";
 
 export interface Obligation {
   recipient: string;
@@ -35,18 +34,21 @@ export function poolOutgoingByRecipient(blocks: NanoBlock[]): Map<string, bigint
   return out;
 }
 
-/** Per-recipient entitlement for one token: Σ sell payouts + refund owed.
- * Sells and refunds NET together per recipient, which is what makes
- * chain-derived dedupe unambiguous (no per-send classification needed). */
+/** Per-recipient entitlement for one token: cumulative WITHDRAWN XNO (the
+ * replay's xnoWithdrawn — sells accrue in-game credit and only an explicit
+ * withdraw op makes it payable; see core/state.ts) + refund owed. Withdrawals
+ * and refunds NET together per recipient, which is what makes chain-derived
+ * dedupe unambiguous (no per-send classification needed). Era-safe by
+ * construction: pre-feature sells replay as credit (withdrawn 0), and any XNO
+ * the pool already sent a recipient under the old auto-payout rule counts
+ * against their first withdrawal — never a double-pay, never a clawback. */
 export function entitlementsFor(
-  tokenId: string,
-  sells: SellPayout[],
+  withdrawn: Map<string, bigint>,
   refunds: Map<string, bigint>
 ): Map<string, bigint> {
   const ent = new Map<string, bigint>();
-  for (const p of sells) {
-    if (p.tokenId !== tokenId) continue;
-    ent.set(p.to, (ent.get(p.to) ?? 0n) + p.amountRaw);
+  for (const [to, w] of withdrawn) {
+    if (w > 0n) ent.set(to, (ent.get(to) ?? 0n) + w);
   }
   for (const [to, owed] of refunds) ent.set(to, (ent.get(to) ?? 0n) + owed);
   return ent;

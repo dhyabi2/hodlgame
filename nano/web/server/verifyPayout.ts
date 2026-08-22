@@ -55,12 +55,12 @@ export async function verifyPayout(req: PayoutRequest): Promise<VerifyVerdict> {
     return { ok: false, reason: "pool mismatch (non-custody or unseeded token)" };
   }
 
-  const { sellPayouts } = analyze(events);
+  const { state: replayed } = analyze(events);
   const credits = creditedBuys(events).get(req.tokenId) ?? new Map<string, bigint>();
   const poolBlocks = await new NanoRpcSource(key).listBlocks(custodyPool.address);
   const poolReceived = await readPoolDepositsFromChain(key, custodyPool, poolBlocks);
   const refunds = computeRefunds(poolReceived, credits);
-  const entitled = entitlementsFor(req.tokenId, sellPayouts, refunds);
+  const entitled = entitlementsFor(replayed.get(req.tokenId)?.xnoWithdrawn ?? new Map(), refunds);
   const obligations = netObligations(entitled, poolOutgoingByRecipient(poolBlocks));
 
   const owed = obligations.find((o) => o.recipient === req.to)?.amountRaw ?? 0n;

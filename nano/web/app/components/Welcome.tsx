@@ -34,16 +34,21 @@ const MECHANISMS: { n: string; title: string; body: string }[] = [
   },
   {
     n: "03",
+    title: "Sell instantly — settle when YOU choose",
+    body: "Selling credits your game balance with XNO the moment the trade lands — no waiting on anyone. The real coins move on-chain only when you press Withdraw: one click collects everything you're owed, across every coin you've ever traded, including the ones you forgot. It's also what keeps the game fast when it's crowded: payouts can never clog, because they only happen when a player actually wants out.",
+  },
+  {
+    n: "04",
     title: "The pool can't be emptied",
     body: "Liquidity is mathematically protected: no trade can drain the pool — not a whale, not the creator, not anyone. Every XNO paid in stays in the pool, backing the price for everyone who remains. Anyone trying to buy it all only makes the remaining holders richer.",
   },
   {
-    n: "04",
+    n: "05",
     title: "Zero fees eat zero profit",
     body: "The game settles on a feeless, sub-second network. No gas. No cut taken out of your trade on the way in or the way out. What the math says you get is what you get.",
   },
   {
-    n: "05",
+    n: "06",
     title: "Don't trust — verify",
     body: "One click in the Explorer re-computes the entire game inside your browser and compares fingerprints with the site. If we ever lied about a single balance, you could prove it in seconds. That's the standard everything here is held to.",
   },
@@ -60,7 +65,7 @@ const TERMS: { h: string; p: string }[] = [
   },
   {
     h: "3. Nature of the platform",
-    p: "HodlGame is a self-custodial interface to a public, deterministic ledger game. Coins launched here are community game tokens created by users, not by us. They have no intrinsic value, represent no ownership, equity, debt, or claim against anyone, and are not offered as securities or investments of any kind.",
+    p: "HodlGame is a self-custodial interface to a public, deterministic ledger game. Coins launched here are community game tokens created by users, not by us. They have no intrinsic value, represent no ownership, equity, debt, or claim against anyone, and are not offered as securities or investments of any kind. Sell proceeds accrue as an in-game XNO balance derived from the public ledger and settle on-chain when you choose to withdraw.",
   },
   {
     h: "4. Risk disclosure",

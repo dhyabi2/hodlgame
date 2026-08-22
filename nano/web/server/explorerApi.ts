@@ -279,7 +279,7 @@ export async function trustDashboard() {
       const poolBlocks = await src.listBlocks(address);
       const poolReceived = await readPoolDepositsFromChain(key, { address, publicKey: pub, secretKey: "" } as any, poolBlocks);
       const refunds = computeRefunds(poolReceived, credits.get(tokenId) ?? new Map());
-      const entitled = entitlementsFor(tokenId, m.sellPayouts, refunds);
+      const entitled = entitlementsFor(m.state.get(tokenId)?.xnoWithdrawn ?? new Map(), refunds);
       const obligations = netObligations(entitled, poolOutgoingByRecipient(poolBlocks));
       outstanding = obligations.reduce((x, o) => x + o.amountRaw, 0n).toString();
     } catch {

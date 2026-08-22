@@ -7,7 +7,7 @@ function tv(p: Partial<TokenView>): TokenView {
     tokenId: "t", name: "N", symbol: "S", decimals: 6, image: "/api/image/00000000000000000000000000000000", description: "",
     website: "", twitter: "", telegram: "", creator: "", creatorShare: "0",
     supply: "0", treasury: "0", poolXno: "0", poolTokens: "0", price: "0",
-    marketCap: "0", change1h: null, change24h: null, createdAt: 0, myBalance: "0",
+    marketCap: "0", change1h: null, change24h: null, createdAt: 0, myBalance: "0", myCredit: "0",
     myStaked: "0", myClaimable: "0", totalStaked: "0", buyVolume: "0", sellVolume: "0",
     holders: 0, pool: null, spark: [], series: [], trades: [], topHolders: [], comments: [],
     ...p,
