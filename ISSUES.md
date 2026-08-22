@@ -1,6 +1,6 @@
 # HodlGame — Open Issues
 
-Running log of findings to fix. Populated from three audits:
+Running log of findings to fix. Populated from these audits:
 - **Security break audit** (13 targets) — task `w08x1y5df` ✓ complete (§B)
 - **Calculation-correctness audit** (7 targets) — task `w08x1y5df` ✓ complete (§C)
 - **Page-load performance audit** (7 targets) — task `wftx9aj4z` ✓ complete (§D)
@@ -388,3 +388,196 @@ cross-request) dedupe, or removing discarded work. All byte-accurate, no cache.
 3. **collectChains bounded Promise.all** (input-order rebuild) — PERF-1, biggest win, a few lines.
 4. **Promise.all the discovery counterparties** — PERF-6 (`discovery.ts:33`) + PERF-3 dedupe (`market.ts:103–109`).
 5. **detail(): start `commentsFor(tokenId)` in parallel with compute()** via Promise.all instead of awaiting after the replay — hides one ~100–300ms blob round-trip on the 3s token poll.
+
+---
+
+## E. Broken links & flows audit — task w65cwo085 ✓ (29 issues, 8 pages)
+
+### [ ] FLOW-1 (high, missing-state) — Image-required filter can blank the whole feed with no empty state
+- **Where:** `app/page.tsx:1097`
+- **Symptom:** The empty-state ("No coins yet") only fires when tokens.length===0 (line 1142). But the `live` filter (lines 1097-1099) drops any coin that has no image unless you personally hold it. If the backend returns coins but none carry an image (e.g. seeded coins without metadata, which the codebase explicitly keeps in state per the 'Ranks includ…
+- **Fix:** After computing `live`, add a dedicated empty-after-filter branch: if `tokens.length>0 && live.length===0 && !searched`, render an empty state (e.g. 'No coins with images yet — launch one' reusing the onCreate CTA) instead of the shelves+grid. Alternatively relax the filter to keep monogram-fallback coins visible (PosterImage already rend…
+
+### [ ] FLOW-2 (high, broken-flow) — Top holders board is ALWAYS empty in production
+- **Where:** `server/market.ts:239`
+- **Symptom:** The 'Top holders' section of the Ranks tab permanently shows 'no holders yet', regardless of how many funded tokens with real holders exist. /api/leaderboards calls feed("") (app/api/leaderboards/route.ts:12), and feed() blanks v.topHolders = [] (market.ts:239) and v.trades = [] (market.ts:238) on every TokenView. computeLeaderboards then…
+- **Fix:** Feed the leaderboard computation from a token source that retains topHolders/trades. Either add a feed variant (e.g. feedFull() / feedForRanks()) that skips the market.ts:237-240 stripping, or have /api/leaderboards build TokenViews via the same path as detail() (which keeps topHolders). computeLeaderboards already needs topHolders for bo…
+
+### [ ] FLOW-3 (high, broken-flow) — Bad ?token= deep-link strands user on skeleton forever
+- **Where:** `nano/web/app/pro/page.tsx:99`
+- **Symptom:** Opening /pro?token=<unknown-or-invalid-id> (a shared/stale Pro link) sets tokenId from the URL (lines 63-68), but /api/token returns 404 so j.token is undefined and `token` stays null. The list effect never overrides it because `setTokenId((prev) => prev ?? list[0].tokenId)` (line 82) keeps the already-set invalid prev. The render gate `!…
+- **Fix:** In the detail effect (93-105), when the fetch returns no token (404/500), fall back: e.g. if the requested tokenId isn't in `tokens`, reset tokenId to tokens[0]?.tokenId ?? null, or surface an error state instead of the infinite skeleton. Alternatively validate ?token= against the loaded list before committing it.
+
+### [ ] FLOW-4 (high, dead-handler) — Mobile bottom TabBar is dead while a coin detail is open
+- **Where:** `nano/web/app/page.tsx:2803`
+- **Symptom:** When a user drills into a coin (selectedId set) on mobile and taps any item in the bottom TabBar (Explore/Ranks/Launch/Explorer/Wallet), nothing visibly changes — the coin detail stays on screen. The render at line 470 gives `selectedId ?` top priority, but TabBar's button onClick only calls `setTab(t.id)` and never clears selectedId. Eve…
+- **Fix:** Clear selectedId when switching tabs from the TabBar. Either change line 2803 to `onClick={() => { onNavigate?.(); setTab(t.id); }}` wiring a prop that runs `setSelectedId(null)`, or pass a combined setter: at line 531 render `<TabBar tab={tab} setTab={(t) => { setSelectedId(null); setTab(t); }} />`.
+
+### [ ] FLOW-5 (high, missing-state) — Invalid/stale #t=<tokenId> deep-link stalls on infinite 'loading coin…'
+- **Where:** `nano/web/app/page.tsx:486`
+- **Symptom:** A shared or stale coin link like https://hodlgame.fun/#t=<badId> sets selectedId on mount (line 308), but /api/token returns HTTP 404 `{error:"unknown token"}` (app/api/token/route.ts:16) with no `token` field, so the detail effect's `if (live && j.token)` (line 353) never fires and `detail` stays null forever. The UI then renders the pul…
+- **Fix:** Track a not-found/error state in the detail effect: when the response has `j.error` or no `j.token` after a fetch that succeeded, render a 'coin not found' card with the '← all coins' action instead of the infinite loading pulse. Distinguish 'still loading' from 'confirmed missing'.
+
+### [ ] FLOW-6 (medium, broken-link) — PosterCard/HeroCard defeat the multi-gateway IPFS fallback — only the first gateway is ever tried
+- **Where:** `app/page.tsx:1228`
+- **Symptom:** imageCandidates() returns an ordered list of IPFS gateways (ipfs.io, dweb.link, cloudflare-ipfs, pinata) so a failed gateway can fall through to the next. But PosterImage only ever renders `candidates[0]` and, onError, jumps straight to the monogram (lines 1227-1230) — it never advances to candidates[1..]. Avatar (line 1414-1427) DOES ite…
+- **Fix:** Give PosterImage the same index-advancing behavior as Avatar: track an `idx` state, render `candidates[idx]`, and `onError={() => setIdx(i => i+1)}`, falling to the monogram only when `idx >= candidates.length`.
+
+### [ ] FLOW-7 (medium, broken-flow) — Mobile "Sell" action-bar button opens the Buy form, never Sell
+- **Where:** `app/page.tsx:1895`
+- **Symptom:** On mobile the fixed bottom action bar has separate Buy and Sell buttons, but both call goTrade() (line 1719), which only sets tab='trade' and scrolls. The buy/sell `side` state lives inside TradePanel (line 1970, defaults to 'buy') and is unreachable from TokenDetail, so tapping 'Sell' scrolls to a panel still showing the Buy side. The tw…
+- **Fix:** Lift `side` into TokenDetail (or pass a setter into TradePanel) and have goTrade accept a side argument: onClick={() => goTrade('buy')} / goTrade('sell'), where goTrade sets the side before scrolling. Alternatively expose a ref/callback from TradePanel to switch side.
+
+### [ ] FLOW-8 (medium, dead-handler) — Comment post silently fails on rate-limit / bad-signature
+- **Where:** `app/page.tsx:2402`
+- **Symptom:** CommentThread.post() reads j.comment and only adds it locally when present; on any error response (POST /api/comments returns {error} with 401 for bad signature or 429 for rate limit — routes at api/comments/route.ts lines 20 & 41) the code clears the input (setText('')) and shows nothing. The user's typed comment vanishes with zero feedb…
+- **Fix:** Pass `say` into CommentThread and, in post(), check res.ok / j.error and surface it (e.g. say('comment failed: ' + (j.error ?? res.status))); do not clear the input on failure so the text can be retried.
+
+### [ ] FLOW-9 (medium, api-mismatch) — Volume and Holders boards lose their manipulation-resistant sort order
+- **Where:** `server/leaderboards.ts:87`
+- **Symptom:** byVolume is meant to rank by DISTINCT traders first (wash-resistant), and byHolders by significant/redeemable holders first. Because feed() strips t.trades (market.ts:238) and t.topHolders (market.ts:239), traders(t) (leaderboards.ts:87) and sigHolders(t) (leaderboards.ts:96) both always return 0. The primary sort keys collapse, so byVolu…
+- **Fix:** Same root cause as the empty-holders bug: give computeLeaderboards TokenViews that still carry trades and topHolders. Once the leaderboards route stops using the stripped feed() output, traders() and sigHolders() produce real values and the intended ordering returns.
+
+### [ ] FLOW-10 (medium, broken-flow) — Live 5s poll wipes out "Load more" feed pages
+- **Where:** `app/components/Explorer.tsx:181`
+- **Symptom:** In the Activity feed with no kind filter, an interval fires every 5s (line 181) calling load(false). The polling request uses the effect's captured `params` which has NO cursor (view:'feed', limit:'50'), so it always returns page 1. load() then unconditionally runs setFeedItems(j.items) and setFeedNext(j.nextCursor) at line 178. Any older…
+- **Fix:** Make the poll refresh only the head without clobbering paginated state: in load(), only apply setFeedItems/setFeedNext for the first (non-poll) load, or when the user is still on page 1 (feedNext===50/first page). Better: on poll, merge only genuinely-new newest items ahead of the existing list and leave feedNext untouched, or disable the…
+
+### [ ] FLOW-11 (medium, dead-handler) — "Remove wallet" is impossible while unlocked — remove prop threaded to ConnectedWallet but never rendered
+- **Where:** `app/page.tsx:655`
+- **Symptom:** The `remove` callback is passed page -> WalletPanel (line 857) -> ConnectedWallet (line 928) and destructured at line 655, but ConnectedWallet's only bottom action is the "Lock" button (line 845). There is no "Remove/Delete wallet" button in the connected (unlocked) card. A user who is unlocked and wants to wipe the wallet from this devic…
+- **Fix:** Add a destructive "Remove wallet" button in ConnectedWallet (near Lock, ideally behind a confirm) wired to `remove`, e.g. `<button onClick={() => { if (confirm('Delete this wallet from this device? Make sure your seed is backed up.')) remove(); }}>Remove wallet</button>`. Removing while unlocked already resets state safely (page.remove cl…
+
+### [ ] FLOW-12 (medium, broken-flow) — Metadata double-failure navigates away, stranding a nameless/imageless coin with no retry
+- **Where:** `/Users/mac/holdergame/nano/web/app/page.tsx:2616`
+- **Symptom:** The compact 32-byte launch link encodes ONLY opcode+decimals+supply — encodeOpLink (core/oplink.ts:85-88) ignores the name/symbol/image passed at page.tsx:2590. So name, symbol AND image live exclusively in the off-chain /api/tokens metadata. When that POST fails both attempts (2608-2609: e.g. the meta:ip rate limit returns 429, or any tr…
+- **Fix:** On metadata failure do NOT call onCreated — keep the user on the form. Move onCreated(tokenId) into the success (else) branch only, and on failure surface a 'Retry publish' action that re-POSTs the same signed {tokenId, ...meta, signature, seq} to /api/tokens (a metadata-only republish for the existing token), never a fresh launch().
+
+### [ ] FLOW-13 (medium, missing-state) — http:// image URL renders an Avatar preview but is silently stripped, blocking launch as 'image required'
+- **Where:** `/Users/mac/holdergame/nano/web/app/page.tsx:2638`
+- **Symptom:** The Avatar preview at 2638 is fed the raw `image` string, while the required-field check uses reqMeta.image = sanitizeMeta(...).image, which drops http:// and other unsafe URLs via safeImageUrl (server/validate.ts:84). If a user pastes an http:// (or otherwise unsupported) image URL, they see a valid-looking avatar preview, yet launch() r…
+- **Fix:** Drive the preview from the sanitized value (Avatar image={reqMeta.image}) so the preview only shows what will actually be accepted, and/or show a live inline hint ('use an https or ipfs image URL') whenever `image` is non-empty but reqMeta.image is '' — before submit, not only after.
+
+### [ ] FLOW-14 (medium, missing-state) — No empty state when there are zero tokens
+- **Where:** `nano/web/app/pro/page.tsx:126`
+- **Symptom:** If /api/state returns an empty tokens array, tokenId is never set (line 82 guarded by `if (list.length)`) and `token` stays null, so the main grid renders the skeleton placeholders forever. Only the picker dropdown shows 'no tokens yet' (line 212); the page body looks perpetually broken/loading.
+- **Fix:** Track a 'loaded' flag from the state fetch and, when the list is empty (or the detail genuinely has no token), render an explicit empty state in place of the skeleton grid (e.g. 'No tokens yet — create one in the app').
+
+### [ ] FLOW-15 (medium, api-mismatch) — Order ticket quote is wrong for direct (zero-custody) tokens
+- **Where:** `nano/web/app/pro/page.tsx:492`
+- **Symptom:** The `quote` useMemo (492-511) always uses the raw AMM quoteBuy/quoteSell on poolXno/poolTokens, ignoring the direct branch. For a direct token: (a) buys are capped to queueHead.owed inside execBuyDirect, and (b) sells are settled via quoteSellDirect — prepaid netting + own-collateral release + a coverage-haircut queue (core/state.ts sell…
+- **Fix:** When token.direct, compute the displayed quote with quoteSellDirect (and cap the buy quote to queueHead.owed) so 'you receive ≈' and 'min @ slip' reflect the real instant+queued settlement, ideally splitting instant vs queued in the summary rows.
+
+### [ ] FLOW-16 (low, broken-link) — Stale/dead IPFS gateway in the fallback list (cloudflare-ipfs.com)
+- **Where:** `app/page.tsx:1390`
+- **Symptom:** IPFS_GATEWAYS includes 'https://cloudflare-ipfs.com/ipfs/', which Cloudflare shut down in 2024; requests to it fail. It wastes an onError hop for IPFS images (and, combined with the PosterImage single-candidate bug above, is one of the reasons art can silently fall to a monogram). Not user-fatal because other gateways precede/follow it.
+- **Fix:** Remove the cloudflare-ipfs.com entry and, if desired, replace it with a currently-working public gateway (e.g. https://nftstorage.link/ipfs/ or https://4everland.io/ipfs/).
+
+### [ ] FLOW-17 (low, missing-state) — Just-posted comment renders twice after the next detail poll
+- **Where:** `app/page.tsx:2407`
+- **Symptom:** After a successful post, the comment is appended to `local` state (line 2403). The detail poll (3s) refetches token.comments which now also contains that same comment (detail() includes commentsFor, server/market.ts line 227). The render does `all = [...local, ...comments]` with no dedupe by id, so the user's own comment shows twice, pers…
+- **Fix:** Dedupe by id when merging, e.g. build a Map keyed by c.id over [...local, ...comments], or clear the matching entry from `local` once it appears in the server-provided comments prop.
+
+### [ ] FLOW-18 (low, missing-state) — Empty-state guard keys off byVolume only, hiding a populated 'New' board
+- **Where:** `app/page.tsx:1000`
+- **Symptom:** The empty check is `const empty = lb.tokens.byVolume.length === 0;` (app/page.tsx:1000). All economic boards (byVolume/byGainers/byHolders) are funded-only, but 'newest' also includes discoverable unfunded coins with complete metadata (leaderboards.ts discoverable set). When coins exist that are named+imaged but not yet seeded with liquid…
+- **Fix:** Base the empty state on whether ANY board has rows, e.g. `const empty = boards.every(b => lb.tokens[b.k].length === 0) && lb.creators.length === 0 && lb.holders.length === 0;`, or specifically also check lb.tokens.newest so newly-launched-but-unfunded coins keep the board reachable.
+
+### [ ] FLOW-19 (low, missing-state) — feedNext not reset on feed entry / kind-filter change → stale Load-more
+- **Where:** `app/components/Explorer.tsx:169`
+- **Symptom:** The feed effect resets feedItems=[] and feedCursor=0 when entering the feed or changing kindFilter (line 169), but never resets feedNext to null. Between the reset and the load(true) response, a stale feedNext from the previous feed session leaves the "Load more" button visible; clicking it (loadMoreFeed, line 187) fires a page-2 request…
+- **Fix:** Reset setFeedNext(null) alongside setFeedItems([]) at line 169, and drop the unused feedCursor state.
+
+### [ ] FLOW-20 (low, missing-state) — Load-more handlers swallow API errors, silently stranding pagination
+- **Where:** `app/components/Explorer.tsx:187`
+- **Symptom:** loadMoreFeed (line 187), AccountDetail.more (line 367) and TokenDetailX.moreHolders (line 398) do `...(j.items ?? [])` and then setNext(j.nextCursor) without checking j.error. If the paginated /api/explorer call returns {error} (500) or fails, nothing is appended and nextCursor becomes undefined, so the "Load more" button silently disappe…
+- **Fix:** In each load-more handler, check j.error and surface it (e.g. a small inline error line or keep the cursor so the button stays clickable) instead of treating an errored response as "no more results".
+
+### [ ] FLOW-21 (low, broken-link) — #tab=portfolio deep-link silently lands on the Wallet view with no active tab
+- **Where:** `app/page.tsx:308`
+- **Symptom:** "portfolio" is still in the tab type union and in the deep-link allow-list (line 308: `[...].includes(tb)`), so `#tab=portfolio` sets tab='portfolio'. But the render switch (lines 495-521) has no `portfolio` branch — it falls through to the final else, which renders the Wallet panel — and TABS/TabBar (lines 2788-2794) has no portfolio ent…
+- **Fix:** Drop 'portfolio' from the deep-link allow-list at line 308 (and ideally from the type union) since Portfolio is now embedded under the wallet tab; or normalize it to 'wallet' on restore so the hash and the highlighted tab agree.
+
+### [ ] FLOW-22 (low, missing-state) — No walletSupported() guard — wallet create/unlock shows a misleading error on insecure/unsupported contexts
+- **Where:** `app/page.tsx:874`
+- **Symptom:** wallet.ts exports `walletSupported()` (checks crypto.subtle) but it is never imported or called anywhere. On a context where `crypto.subtle` is undefined (e.g. the app served over plain http on a non-localhost host, or an old/embedded webview), `encryptSeed`/`decryptSeed` throw and the catch blocks surface generic "encryption failed" (cre…
+- **Fix:** Call `walletSupported()` on mount / before showing WalletPanel and UnlockModal; when false, render an explicit "Your browser can't securely store a wallet here (requires a secure https context with WebCrypto)" state instead of the password forms, so the failure isn't misattributed to a bad password.
+
+### [ ] FLOW-23 (low, missing-state) — Launch button not disabled during image upload
+- **Where:** `/Users/mac/holdergame/nano/web/app/page.tsx:2703`
+- **Symptom:** The Launch button is `disabled={busy}` only, not `busy || uploading`. While an image upload is in flight the button stays enabled; clicking it just hits the `if (uploading) return say('wait for the image to finish uploading')` guard at 2574 and no-ops. The button looks active but does nothing, which reads as a dead button.
+- **Fix:** Set disabled={busy || uploading} and show 'uploading…' or keep the guard's toast, so the primary action visibly reflects that it is temporarily unavailable.
+
+### [ ] FLOW-24 (low, api-mismatch) — Launch button cost label (0.000002 XNO) does not match the charged amount (1 raw)
+- **Where:** `/Users/mac/holdergame/nano/web/app/page.tsx:2704`
+- **Symptom:** The button reads 'Launch Token (0.000002 XNO)' but launch() calls submitBlock(link, 1n) at 2589-2592, and submitBlock reduces balance by balanceDelta=1n = 1 raw (395-401). 1 raw is not 0.000002 XNO (0.000002 XNO = 2e24 raw). The helper text at 2706 correctly says '1 raw data fee per op', contradicting the button. Users are shown a wrong,…
+- **Fix:** Make the button label reflect the actual 1-raw data fee (or remove the numeric amount), matching the '1 raw data fee per op' copy.
+
+### [ ] FLOW-25 (low, dead-handler) — Withdraw button permanently dead for direct tokens
+- **Where:** `nano/web/app/pro/page.tsx:677`
+- **Symptom:** PositionCard always renders the 'Withdraw {myCredit} XNO' button. Direct tokens never accrue xnoCredit (core/state.ts line 366 is gated by `if (!s.direct)`), so token.myCredit is always '0' and the button is permanently disabled, showing 'Withdraw 0.00 XNO'. The underlying withdraw op also throws InvalidOp('direct tokens settle at sell')…
+- **Fix:** Hide the Withdraw button (and the 'game balance' concept) when token.direct is true; for direct tokens surface the queued payout (myQueueOwed) instead, which is how they actually get paid.
+
+### [ ] FLOW-26 (low, dead-handler) — Footer advertises 'Enter confirm' hotkey the global handler doesn't bind
+- **Where:** `nano/web/app/pro/page.tsx:480`
+- **Symptom:** The help line (601) says 'B buy · S sell · Enter confirm', but the window keydown handler (480-489) only binds B and S. Enter only confirms while focus is inside the amount input (onKeyDown line 569); pressing Enter while focused in the slippage input or anywhere else does nothing, contradicting the advertised global hotkey.
+- **Fix:** Either add Enter handling to the window keydown listener (calling confirm when not busy and a quote exists) or reword the footer to reflect that Enter confirms only from the amount field.
+
+### [ ] FLOW-27 (low, broken-link) — #tab=portfolio deep-link resolves to wallet view with no active nav item
+- **Where:** `nano/web/app/page.tsx:308`
+- **Symptom:** The restore whitelist accepts 'portfolio' (`[..."portfolio"...].includes(tb)`) and the tab type includes it, so `#tab=portfolio` sets tab='portfolio'. The render has no explicit 'portfolio' branch — it falls through the else to the Wallet panel (line 516). Neither the desktop nav (only explore/ranks/scan/wallet) nor the TABS array (explor…
+- **Fix:** Remove 'portfolio' from the deep-link whitelist at line 308 (and ideally from the tab union), or explicitly map it to 'wallet' so the hash normalizes and a nav item highlights.
+
+### [ ] FLOW-28 (low, missing-state) — Missing Open Graph / Twitter preview image on shared links
+- **Where:** `nano/web/app/layout.tsx:14`
+- **Symptom:** openGraph has no `images` and the twitter card is `summary` with no image, so every shared HodlGame link (the app is share-driven — coins are shared) renders with a blank/placeholder preview in Slack/X/iMessage. The only image asset is app/icon.svg (favicon), which is not referenced as an OG image.
+- **Fix:** Add `openGraph.images` (and `twitter.images`, or bump twitter card to `summary_large_image`) pointing at a static OG image, e.g. an app/opengraph-image file (Next.js convention) or a /public asset URL under metadataBase.
+
+### [ ] FLOW-29 (low, dead-handler) — Unlocked wallet cannot be deleted — remove() prop is passed but never wired
+- **Where:** `nano/web/app/page.tsx:928`
+- **Symptom:** WalletPanel forwards `remove` to ConnectedWallet (line 928), but ConnectedWallet (definition 646-850) never renders a delete/reset control — it only offers Lock (line 845). A user who is unlocked has no way to remove the stored wallet; they must first Lock, then use the 'Delete' button that only appears in the locked WalletPanel (line 941…
+- **Fix:** Either add a password-guarded 'Delete wallet' action to ConnectedWallet using the passed `remove`, or drop the unused prop to make the intent clear.
+
+---
+
+## F. Comments subsystem security audit — task wqaeblfpi ✓ (8 confirmed, 2 refuted; NO stored XSS — React auto-escapes)
+
+### [ ] CMT-1 (medium, CONFIRMED) — GET /api/comments is unauthenticated, unthrottled, and loads the ENTIRE comment store per request (read amplification DoS)
+- **Where:** `web/app/api/comments/route.ts:9`
+- **Impact:** The POST path is rate-limited (route.ts:18-19) but GET has NO rateLimit() and no clientIp() call at all. Every read pulls and parses the whole global comments blob (server/comments.ts:25-34, loadComments at :25 has no per-token key). At scale this is unbounded Vercel Blob egress/read cost plus O(N log N) CPU per reques…
+- **Fix:** Add rate limiting to GET, e.g. `if (!rateLimit(`cmtGET:${clientIp(req)}`, 60, 60_000) || !rateLimit("cmtGET:global", 600, 60_000)) return 429;`. Additionally, partition the store per token (kv/comments/<tokenId>.json) so a read loads only that thread instead of the entire corpus, and cache the parsed result briefly to…
+
+### [ ] CMT-2 (medium, CONFIRMED) — No request-body size cap before req.json() — a single large POST is buffered fully into memory before any validation
+- **Where:** `web/app/api/comments/route.ts:24`
+- **Impact:** The 280-char cap only applies AFTER the entire body is parsed. There is no Content-Length guard in the route or httpguard. On self-host / local (server/store.ts explicitly supports DATA_DIR filesystem mode) there is no platform body limit, so 30 concurrent oversized bodies per IP (the per-ip allowance) buffer simultane…
+- **Fix:** Add a Content-Length precheck at the top of the POST handler in web/app/api/comments/route.ts, before req.json(), mirroring the existing guard in web/app/api/upload/route.ts:82-86. A comment JSON is tiny, so cap it explicitly, e.g.: const declared = Number(req.headers.get('content-length') ?? 0); if (Number.isFinite(de…
+
+### [ ] CMT-3 (medium, CONFIRMED) — Global MAX_COMMENTS trim is shared across ALL tokens — a flooder evicts everyone's comments
+- **Where:** `server/comments.ts:63`
+- **Impact:** The signature gate does not stop this: any attacker can mint unlimited valid nano keypairs and sign their own spam, so 'authorship is cryptographic' provides no abuse resistance here. Because MAX_COMMENTS is a single global bound (not per-token), one spammer censors/erases the comment history of every token on the plat…
+- **Fix:** Bound comment storage per token instead of globally: keep the last N comments per tokenId, or store one blob per token (e.g. key `comments:{tokenId}`) so trimming one token's thread cannot evict another's. Additionally gate posting with a token-holding requirement or a proof-of-work so free keypair-spray is not a viabl…
+
+### [ ] CMT-4 (low, CONFIRMED) — Comment text is not server-normalized: bidi/control/invisible chars survive into the rendered DOM text node (display spoofing, NOT script ex…
+- **Where:** `server/comments.ts:46`
+- **Impact:** NOT XSS — React escapes the value at page.tsx:2415 so no markup/script executes. The only effect is visual: bidi-override characters can reorder/reverse the displayed comment text to impersonate a URL or another user's words, and control chars render as garbage. This is the same spoofing class that sanitizeInline's INV…
+- **Fix:** Add a shared deterministic sanitizeComment = sanitizeInline(v, 280, true) (multiline true if newlines are desired, else false). In CommentThread.post (page.tsx:2391) run text through it BEFORE computing commentSignDigest so the client signs the cleaned value. In addComment (server/comments.ts:46) re-derive the same san…
+
+### [ ] CMT-5 (low, CONFIRMED) — Comment text stored & rendered without bidi/invisible-character stripping (impersonation / text-reordering spoof)
+- **Where:** `server/comments.ts:46`
+- **Impact:** Text-integrity / impersonation attack: a signed comment can visually reverse or reorder its own text, conceal a real URL's spelling, mimic an official/moderator announcement, or hide content from moderation — the precise threat validate.ts INVISIBLE regex (bidi overrides U+202A-202E/U+2066-2069, zero-width, BOM) is mea…
+- **Fix:** Fold sanitizeInline into the signed comment value so client and server agree byte-for-byte. Client (web/app/page.tsx:2390,2395): replace `const clean = text.trim().slice(0,280)` with `const clean = sanitizeInline(text, MAX_COMMENT_LEN)` and sign/send that. Server (server/comments.ts:46-60): recompute `const cleaned = s…
+
+### [ ] CMT-6 (low, CONFIRMED) — Ed25519 signature malleability defeats id-based dedup — forge duplicate comments under a victim's account
+- **Where:** `core/commentAuth.ts:21`
+- **Impact:** The 'ids derive from the signature, so re-posting a captured comment is idempotent, never a spoof or a replay' invariant (comments.ts:5-7) is false. An attacker can mint multiple authentic-looking comments cryptographically attributed to any other account (spam/harassment under a victim's identity, store bloat toward t…
+- **Fix:** In core/commentAuth.ts, derive the dedup id from the signed content instead of the malleable signature:  export function commentId(tokenId: string, account: string, time: number, text: string): string {   return blake2bHex(new TextEncoder().encode([tokenId.toLowerCase(), account, String(time), text].join(" ")), undefin…
+
+### [ ] CMT-7 (low, PARTIAL) — Comment text is stored and rendered WITHOUT sanitization — bidi-override / zero-width / control-char spoof & spam
+- **Where:** `web/app/api/comments/route.ts:36`
+- **Impact:** Unlike sanitizeMeta (server/validate.ts:119) which runs sanitizeInline on name/description, the comments route passes String(body.text) straight through (route.ts:36) and addComment only checks non-empty and length<=280 (server/comments.ts:46) — sanitizeInline/INVISIBLE/CONTROL stripping is never applied. The client re…
+- **Fix:** Make sanitizeInline(text, 280) the canonical form on BOTH sides: client sanitizes before commentSignDigest/sign (page.tsx post()), server sanitizes then verifies the digest of the sanitized text (server/comments.ts addComment). Then signature and stored/rendered bytes agree and invisible/bidi/control chars can never re…
+
+### [ ] CMT-8 (low, PARTIAL) — Rate-limit key trusts spoofable x-real-ip / last x-forwarded-for hop, and the limiter is per-process
+- **Where:** `server/httpguard.ts:24`
+- **Impact:** x-real-ip is only trustworthy if a trusted proxy overwrites it; any request that reaches the app without that (direct-to-origin, self-host behind a proxy that doesn't set it, or a misconfigured edge) lets the client set it freely — identical spoofability to the x-forwarded-for it was meant to replace. Rotating it bypas…
+- **Fix:** Two independent fixes. (1) IP source: derive the client IP from the platform's trusted signal — on Vercel use @vercel/functions ipAddress(req) / request.ip, or the last x-forwarded-for hop the edge appends — and never trust an inbound x-real-ip unless a trusted-proxy invariant guarantees the edge overwrites it. This ha…
