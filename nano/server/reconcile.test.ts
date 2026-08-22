@@ -60,4 +60,22 @@ const credits = creditedBuys(events);
   assert.ok(!refunds.has(CREATOR), "seed deposit never refunded");
 }
 
+// 6. REGRESSION (deferred-but-valid buy): a buy that sorts BEFORE its token's
+//    seed is deferred by the consensus fixpoint and applied once liquidity
+//    exists. Reconciliation must credit it exactly as consensus does — a naive
+//    single pass would treat it as rejected and refund its XNO even though the
+//    buyer already holds the minted tokens (double-pay / pool drain).
+{
+  const deferred: IndexedEvent[] = [
+    ev(TA, { kind: "launch", supply: 1_000_000_000_000n, name: "A", symbol: "A", decimals: 6, image: "" }, CREATOR, 1n),
+    // buy at height 2 sorts BEFORE the seed at height 3 → deferred until seeded
+    ev(TA, { kind: "buy", xno: 50_000_000n, minTokens: 0n }, ALICE, 2n),
+    ev(TA, { kind: "seedLiq", xno: 1_000_000_000n, tokens: 950_000_000_000n }, CREATOR, 3n),
+  ];
+  const cr = creditedBuys(deferred).get(TA)!;
+  assert.equal(cr.get(ALICE), 50_000_000n, "deferred-but-valid buy is credited (no phantom refund)");
+  const got = new Map<string, bigint>([[ALICE, 50_000_000n]]);
+  assert.equal(computeRefunds(got, cr).size, 0, "a deferred-then-applied buy is never refunded");
+}
+
 console.log("✅ buy reconciliation tests passed");

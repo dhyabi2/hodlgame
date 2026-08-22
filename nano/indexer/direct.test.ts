@@ -150,6 +150,36 @@ async function main() {
     console.log("5 ok: fixpoint anchors deferred ops — appending events never rewrites history");
   }
 
+  // ── 6. REGRESSION (deferred-buy defection): a self-earmark buy sorted BEFORE
+  //    its token's seed is deferred, then a strip drops the buyer's balance
+  //    below the floor the deferred buy establishes. A per-block observation
+  //    taken before the floor existed is a no-op; the HEAD observation (folded
+  //    after every event) must still catch the shortfall and void the position.
+  {
+    const src2 = new MemorySource();
+    // creator launches + seeds at HIGHER lamport than the attacker's shallow,
+    // externally-funded chain, so the attacker's buy sorts before the seed.
+    const l2 = blk(CR.address, encodeOpLink("", { kind: "launch", supply: 1_000_000_000_000n, name: "", symbol: "", decimals: 6, image: "", direct: true }), 1n, { balance: "1000" });
+    const T6 = tokenIdFromLaunchHash(l2.hash);
+    const [s2a, s2b] = encodeFragLinks(T6, { kind: "seedLiq", xno: 100_000_000n, tokens: 1_000_000_000n });
+    const sa = blk(CR.address, s2a, 2n, { previous: l2.hash, balance: "999" });
+    const sb = blk(CR.address, s2b, 3n, { previous: sa.hash, balance: "998" });
+    // attacker X: open (funded 200M externally) -> frag buy 100M -> strip to 40M
+    const xOpen = blk(BOB.address, "cc".repeat(32), 1n, { balance: "200000000", subtype: "receive", amount: "200000000" });
+    const [xb1, xb2] = encodeFragLinks(T6, { kind: "buy", xno: 100_000_000n, minTokens: 0n });
+    const xa = blk(BOB.address, xb1, 2n, { previous: xOpen.hash, balance: "200000000" });
+    const xbk = blk(BOB.address, xb2, 3n, { previous: xa.hash, balance: "200000000" });
+    const xStrip = blk(BOB.address, "dd".repeat(32), 4n, { previous: xbk.hash, amount: "160000000", balance: "40000000", subtype: "send" });
+    for (const b of [l2, sa, sb, xOpen, xa, xbk, xStrip]) src2.push(b);
+
+    const idx = new MultiIndexer(src2);
+    await idx.sync([CR.address, BOB.address]);
+    const s = idx.getState().get(T6)!;
+    const floor = s.earmarkFloor.get(BOB.address) ?? 0n;
+    assert(floor <= 40_000_000n, `deferred-buy floor must be re-checked against head balance (got ${floor})`);
+    console.log("6 ok: head observation voids a deferred-buy defection (floor=" + floor + ")");
+  }
+
   console.log("✅ direct-settlement indexer tests passed");
 }
 

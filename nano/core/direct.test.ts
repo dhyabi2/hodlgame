@@ -163,6 +163,32 @@ const queueTotal = (s: State) => s.queue.reduce((t, e) => t + e.owed, 0n);
   console.log("4 ok: actual-balance netting kills ratchet leakage; defectors self-punish");
 }
 
+// ── 4b. coverage headroom: queueTotal never exceeds floorTotal (no phantom claims) ──
+{
+  // Two earmarked buyers appreciate; A exits (queues), routed buys drain A's
+  // queue while adding NO collateral, then B exits into the now-non-empty
+  // queue. The credited claim must clamp to remaining coverage, never stack.
+  let s = freshDirect();
+  s = buyEarmark(s, A, 40_000_000n, 100_000_000n);
+  const aTok = s.balances.get(A)!;
+  s = buyEarmark(s, B, 40_000_000n, 100_000_000n);
+  const bTok = s.balances.get(B)!;
+  s = buyEarmark(s, C, 80_000_000n, 200_000_000n);
+  s = buyEarmark(s, D, 80_000_000n, 200_000_000n);
+
+  s = sell(s, A, aTok, 100_000_000n); // empty queue → A queues its appreciation
+  // routed buys pay A directly (drain A's queue), re-pump price, add NO floor
+  const head = () => s.queue.find((e) => e.owed > 0n);
+  for (let i = 0; i < 3 && head(); i++) {
+    s = buyRouted(s, A, 30_000_000n, A);
+  }
+  s = sell(s, B, bTok, 0n); // queue non-empty → headroom clamp must bind
+
+  const floorTotal = [...s.earmarkFloor.values()].reduce((t, v) => t + v, 0n);
+  assert(queueTotal(s) <= floorTotal, `queueTotal ${queueTotal(s)} must not exceed floorTotal ${floorTotal}`);
+  console.log("4b ok: queue clamped to coverage headroom, never exceeds collateral");
+}
+
 // ── 5. creator with no earmark dumping into virtual liquidity gets NOTHING ──
 {
   let s = freshDirect();

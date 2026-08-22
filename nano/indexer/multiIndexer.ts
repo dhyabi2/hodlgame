@@ -497,7 +497,22 @@ export class MultiIndexer {
     // observed balance across its floors and voids defected collateral — this
     // is what makes earmarks trustworthy without locking anything.
     if (directSet.size > 0) {
+      // A HEAD observation must fold strictly AFTER every real event so it can
+      // re-check a floor an op anchored late. Consensus replay defers an op
+      // that is invalid in canonical order (e.g. a self-earmark buy sorted
+      // before its token's seed) and drains it once it becomes valid — which
+      // can be after that account's own last balance block. A point-in-time
+      // per-block observation taken before the floor exists is a no-op, so the
+      // established floor would escape all checks. The head observation, pinned
+      // to lam = maxLam + 1 (greater than any real event), guarantees each
+      // account's real current balance is validated against whatever floor it
+      // ends up carrying. Deterministic: maxLam is a pure function of the block
+      // set, and head selection ties on (height, hash) like every other event.
+      let maxLam = 0n;
+      for (const v of lamMap.values()) if (v > maxLam) maxLam = v;
+      const headLam = maxLam + 1n;
       for (const { byHash } of decoded.values()) {
+        let head: NanoBlock | null = null;
         for (const b of byHash.values()) {
           if (b.balance == null) continue;
           events.push({
@@ -508,6 +523,18 @@ export class MultiIndexer {
             hash: b.hash,
             sub: 1,
             lam: lamMap.get(b.hash) ?? 0n,
+          });
+          if (!head || b.height > head.height) head = b;
+        }
+        if (head) {
+          events.push({
+            tokenId: "",
+            op: { kind: "balance", raw: BigInt(head.balance!) },
+            sender: head.account,
+            height: head.height,
+            hash: head.hash,
+            sub: 2,
+            lam: headLam,
           });
         }
       }

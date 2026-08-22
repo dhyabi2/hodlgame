@@ -10,23 +10,24 @@
 // rejected buys (declared == sent) therefore refund exactly what arrived; a
 // sender who never sent XNO has poolReceived 0 and can never drain the pool.
 
-import { applyBlock, multiEmpty, type MultiState } from "../core/multi";
 import type { IndexedEvent } from "../indexer/multiIndexer";
+import { fixpointOrder } from "../indexer/replay";
 
 /** tokenId → (sender → xno credited by valid buy / seedLiq / addLiq ops). */
 export type TokenCredits = Map<string, Map<string, bigint>>;
 
 export function creditedBuys(events: IndexedEvent[]): TokenCredits {
-  let s: MultiState = multiEmpty();
   const credits: TokenCredits = new Map();
-  for (const ev of events) {
-    let next;
-    try {
-      next = applyBlock(s, ev);
-    } catch {
-      continue; // rejected op → not credited
-    }
-    s = next;
+  // Credit EXACTLY the ops consensus applies. analyze() folds events with the
+  // deterministic fixpoint (indexer/replay.ts) — an op that throws in canonical
+  // order (e.g. a buy sorted before its token's seed) is DEFERRED and retried,
+  // then applied. A naive single pass would treat that deferred-but-valid buy
+  // as rejected and never credit it, so the sweep would refund its XNO even
+  // though consensus already minted the buyer's tokens and added the XNO to the
+  // pool — paying twice. Reconciliation must use the SAME application decision
+  // as consensus, so we credit from fixpointOrder's `applied` set.
+  const { applied } = fixpointOrder(events);
+  for (const ev of applied) {
     // seedLiq/addLiq deposits are value-bound like buys (the op chains from a
     // real pool send), so they must credit too — otherwise the sweep would see
     // the creator's seed as uncredited pool XNO and refund it, draining the

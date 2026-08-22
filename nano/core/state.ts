@@ -395,9 +395,18 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint): Stat
       rem -= net;
       let credited = 0n;
       if (rem > 0n) {
+        // Coverage headroom, not a ratio-of-the-whole. The flow queue is backed
+        // ONLY by everyone-else's floored collateral (num); the EXISTING queue
+        // has already consumed part of that backing. Crediting rem·num/(Q+rem)
+        // on top of a non-empty queue Q can push queueTotal past num — booking
+        // uncollateralized (phantom) appreciation. Clamp to what backing is
+        // actually left: credited = min(rem, max(0, num − Q)). This keeps the
+        // invariant queueTotal ≤ floorTotal at all times, and is identical to
+        // the old min(rem, num) whenever the queue is empty (Q = 0).
         const num = floorTotalExcept(s, sender);
-        const den = queueTotal(s) + rem;
-        credited = num >= den ? rem : (rem * num) / den;
+        const q = queueTotal(s);
+        const headroom = num > q ? num - q : 0n;
+        credited = rem < headroom ? rem : headroom;
         if (credited > 0n) s.queue = [...s.queue, { account: sender, owed: credited }];
         s.poolXno += rem - credited; // the shaved part backs the remaining holders
       }
