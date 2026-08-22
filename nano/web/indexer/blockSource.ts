@@ -70,8 +70,10 @@ async function fallbackRpc(body: Record<string, unknown>): Promise<any> {
   try {
     const res = await fetch(FALLBACK_RPC, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json", "Cache-Control": "no-cache", Pragma: "no-cache" },
+      // Same cache-buster as lib/rpc.ts callEndpoint — identical POST bodies
+      // were served frozen from some regions; a nonce defeats any edge cache.
+      body: JSON.stringify({ ...body, _nb: Date.now().toString(36) + Math.random().toString(36).slice(2, 10) }),
       signal: ctl.signal,
     });
     return (await res.json()) as any;

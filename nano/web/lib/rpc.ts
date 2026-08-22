@@ -43,6 +43,12 @@ async function callEndpoint(
   // The API key belongs to rpc.nano.to ONLY — never sent to the fallback.
   const useKey = key && url === NANO_RPC;
   if (useKey) (payload as any).key = key;
+  // Cache-buster: identical POST bodies were observed served FROZEN for 15+
+  // minutes from some regions (Vercel iad1 saw account heights days old while
+  // other regions saw live data — on BOTH endpoints, which share a CDN). Nano
+  // nodes ignore unknown fields, so a per-request nonce makes every body
+  // unique and no edge cache can ever key on it. Root-cause fix, not a retry.
+  (payload as any)._nb = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
@@ -50,6 +56,8 @@ async function callEndpoint(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
         ...(useKey ? { Authorization: key } : {}),
       },
       body: JSON.stringify(payload),
