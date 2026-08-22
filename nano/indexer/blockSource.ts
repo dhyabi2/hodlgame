@@ -65,6 +65,36 @@ const FRONTIER_CACHE_MAX = 5000;
 export class NanoRpcSource implements BlockSource, CounterpartyReader {
   constructor(private apiKey: string) {}
 
+  /**
+   * blocks_info with RETRIES for silently-omitted entries. Root-caused live
+   * (2026-08-22): rpc.nano.to's batch blocks_info randomly OMITS some of the
+   * requested hashes depending on which backend node answers — the same
+   * request, seconds apart, resolves a different subset. A dropped entry made
+   * discovery silently lose a real hello sender (a freshly-launched coin's
+   * creator vanished from the index) and could leave a gap mid-chain in
+   * listBlocks. Each retry very likely lands on a different backend, so up to
+   * 3 attempts converge on the full set; anything still missing after that is
+   * genuinely unknown to both endpoints and is returned unresolved.
+   */
+  private async fetchBlocksInfo(apiKey: string, hashes: string[]): Promise<Map<string, any>> {
+    const infos = new Map<string, any>();
+    let missing = hashes;
+    for (let attempt = 0; attempt < 3 && missing.length > 0; attempt++) {
+      const next: string[] = [];
+      for (let i = 0; i < missing.length; i += 200) {
+        const chunk = missing.slice(i, i + 200);
+        const info = (await nanoRpc(apiKey, { action: "blocks_info", hashes: chunk, json_block: true }).catch(() => ({}))) as any;
+        for (const h of chunk) {
+          const b = info.blocks?.[h];
+          if (b?.block_account) infos.set(h, b);
+          else next.push(h);
+        }
+      }
+      missing = next;
+    }
+    return infos;
+  }
+
   /** Discovery primitive: who sent into / received from this account. Inbound
    * covers both confirmed receives and STILL-PENDING sends (a hello counts
    * even if the anchor never pockets it). */
@@ -78,15 +108,9 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
     const all = [...new Set([...sourceHashes, ...pending])];
 
     const inbound: HelloInfo[] = [];
-    for (let i = 0; i < all.length; i += 200) {
-      const chunk = all.slice(i, i + 200);
-      const info = (await nanoRpc(this.apiKey, { action: "blocks_info", hashes: chunk, json_block: true })) as any;
-      for (const h of chunk) {
-        const b = info.blocks?.[h];
-        if (!b?.block_account) continue;
-        if (!verifyFetchedBlock(h, b)) continue; // never trust unverified senders
-        inbound.push({ sender: b.block_account, representative: b.contents?.representative ?? "" });
-      }
+    for (const [h, b] of await this.fetchBlocksInfo(this.apiKey, all)) {
+      if (!verifyFetchedBlock(h, b)) continue; // never trust unverified senders
+      inbound.push({ sender: b.block_account, representative: b.contents?.representative ?? "" });
     }
     const outbound = blocks
       .filter((b) => b.subtype === "send" && /^[0-9a-fA-F]{64}$/.test(b.link))
@@ -154,14 +178,9 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
       const hashes = history.map((h) => h.hash).filter((h) => !seen.has(h));
       if (hashes.length === 0) break;
 
-      const info = (await nanoRpc(apiKey, {
-        action: "blocks_info",
-        hashes,
-        json_block: true,
-      })) as { blocks?: Record<string, { block_account: string; contents: any; height: string; local_timestamp?: string }> };
-
+      const infos = await this.fetchBlocksInfo(apiKey, hashes);
       for (const hash of hashes) {
-        const b = info.blocks?.[hash];
+        const b = infos.get(hash);
         if (!b) continue;
         seen.add(hash);
         raw.push({ hash, block_account: b.block_account, contents: b.contents, height: b.height, local_timestamp: b.local_timestamp });

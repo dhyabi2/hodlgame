@@ -997,90 +997,178 @@ function Feed({ tokens, onSelect, myAddress, usd }: { tokens: Token[]; onSelect:
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"mc" | "price" | "change" | "vol" | "new">("mc");
 
-  const filtered = tokens
-    .filter((t) => {
-      const q = query.trim().toLowerCase();
-      // Search matches ANY identifying field (name / symbol / tokenId) across all
-      // tokens, so a coin is findable even before its metadata loads.
-      if (q) {
-        return t.name.toLowerCase().includes(q) || t.symbol.toLowerCase().includes(q) || t.tokenId.toLowerCase().includes(q);
-      }
-      // No query → "live" coins: has a name/symbol, real liquidity, OR you hold
-      // it (so a creator always sees their own coin even before naming/seeding).
-      // Hides only fully-abandoned launches you don't hold.
-      return Boolean(t.name || t.symbol) || BigInt(t.poolXno) > 0n || BigInt(t.myBalance) > 0n || BigInt(t.buyVolume) > 0n;
-    })
-    .slice()
-    .sort((a, b) => {
-      switch (sort) {
-        case "price": return BigInt(b.price) > BigInt(a.price) ? 1 : -1;
-        case "change": return (b.change24h ?? -1e9) - (a.change24h ?? -1e9);
-        case "vol": return BigInt(b.buyVolume) > BigInt(a.buyVolume) ? 1 : -1;
-        case "new": return b.createdAt - a.createdAt;
-        default: return BigInt(b.marketCap) > BigInt(a.marketCap) ? 1 : -1;
-      }
-    });
+  // "Live" coins: named, funded, held by you, or traded. Hides only
+  // fully-abandoned launches you don't hold.
+  const live = tokens.filter(
+    (t) => Boolean(t.name || t.symbol) || BigInt(t.poolXno) > 0n || BigInt(t.myBalance) > 0n || BigInt(t.buyVolume) > 0n
+  );
+
+  // Search matches ANY identifying field (name / symbol / tokenId) across all
+  // tokens, so a coin is findable even before its metadata loads.
+  const q = query.trim().toLowerCase();
+  const searched = q
+    ? tokens.filter((t) => t.name.toLowerCase().includes(q) || t.symbol.toLowerCase().includes(q) || t.tokenId.toLowerCase().includes(q))
+    : null;
+
+  const sorted = [...live].sort((a, b) => {
+    switch (sort) {
+      case "price": return BigInt(b.price) > BigInt(a.price) ? 1 : -1;
+      case "change": return (b.change24h ?? -1e9) - (a.change24h ?? -1e9);
+      case "vol": return BigInt(b.buyVolume) > BigInt(a.buyVolume) ? 1 : -1;
+      case "new": return b.createdAt - a.createdAt;
+      default: return BigInt(b.marketCap) > BigInt(a.marketCap) ? 1 : -1;
+    }
+  });
+
+  // Browse rows (Netflix-style shelves, still minimal): trending by volume,
+  // fresh launches, and biggest movers. The hero is the most-traded coin.
+  const byVol = [...live].sort((a, b) => (BigInt(b.buyVolume) > BigInt(a.buyVolume) ? 1 : -1));
+  const featured = byVol.find((t) => BigInt(t.buyVolume) > 0n) ?? sorted[0];
+  const trending = byVol.filter((t) => BigInt(t.buyVolume) > 0n).slice(0, 12);
+  const fresh = [...live].sort((a, b) => b.createdAt - a.createdAt).slice(0, 12);
+  const movers = live.filter((t) => t.change24h != null).sort((a, b) => (b.change24h ?? 0) - (a.change24h ?? 0)).slice(0, 12);
 
   if (tokens.length === 0) {
     return (
       <div className="rounded-none border border-neutral-300 bg-white p-10 text-center text-neutral-500">
         <p className="font-bold text-neutral-700">No coins yet</p>
-        <p className="text-sm mt-1">Start a new coin to launch the first one on Nano.</p>
+        <p className="text-sm mt-1">Launch the first one on Nano.</p>
       </div>
     );
   }
+
   return (
-    <div className="space-y-3">
-      <div className="flex items-center gap-2">
-        <h2 className="text-sm font-bold text-neutral-600 shrink-0">Coins</h2>
-        <input
-          className={inputC + " py-2"}
-          placeholder="search name / symbol"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <select
-          className="rounded-none border border-neutral-300 bg-white px-3 py-2 text-xs text-neutral-700 shrink-0"
-          value={sort}
-          onChange={(e) => setSort(e.target.value as any)}
-        >
-          <option value="mc">market cap</option>
-          <option value="price">price</option>
-          <option value="change">24h change</option>
-          <option value="vol">volume</option>
-          <option value="new">newest</option>
-        </select>
+    <div className="space-y-6">
+      <input
+        className={inputC + " py-2.5"}
+        placeholder="Search coins…"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+      />
+
+      {searched ? (
+        <div>
+          {searched.length === 0 && <p className="text-sm text-neutral-400 py-6 text-center">No coins match.</p>}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+            {searched.map((t) => <PosterCard key={t.tokenId} t={t} usd={usd} onSelect={onSelect} />)}
+          </div>
+        </div>
+      ) : (
+        <>
+          {featured && <HeroCard t={featured} usd={usd} onSelect={onSelect} />}
+          {trending.length > 0 && <FeedRow title="Trending" tokens={trending} usd={usd} onSelect={onSelect} />}
+          {movers.length > 0 && <FeedRow title="Top movers" tokens={movers} usd={usd} onSelect={onSelect} />}
+          {fresh.length > 0 && <FeedRow title="New launches" tokens={fresh} usd={usd} onSelect={onSelect} />}
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-black uppercase tracking-wide">All coins</h2>
+              <select
+                className="rounded-none border border-neutral-300 bg-white px-3 py-1.5 text-xs text-neutral-700"
+                value={sort}
+                onChange={(e) => setSort(e.target.value as any)}
+              >
+                <option value="mc">market cap</option>
+                <option value="price">price</option>
+                <option value="change">24h change</option>
+                <option value="vol">volume</option>
+                <option value="new">newest</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+              {sorted.map((t) => <PosterCard key={t.tokenId} t={t} usd={usd} onSelect={onSelect} />)}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Big cover image (or a bold monogram when the coin has none). */
+function PosterImage({ t, className }: { t: Token; className: string }) {
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [t.image]);
+  const candidates = t.image ? imageCandidates(t.image) : [];
+  if (candidates.length > 0 && !broken) {
+    return <img src={candidates[0]} alt="" className={className + " object-cover"} onError={() => setBroken(true)} />;
+  }
+  return (
+    <div className={className + " bg-black flex items-center justify-center"}>
+      <span className="font-black text-white text-3xl tracking-tight">{tokSym(t).slice(0, 3)}</span>
+    </div>
+  );
+}
+
+/** Netflix-style poster: image-led card, identity + price on a clean footer. */
+function PosterCard({ t, usd, onSelect }: { t: Token; usd: number | null; onSelect: (id: string) => void }) {
+  return (
+    <button
+      onClick={() => onSelect(t.tokenId)}
+      className="group text-left rounded-none border border-neutral-200 bg-white overflow-hidden hover:border-black hover:shadow-lg transition-all"
+    >
+      <div className="relative aspect-square w-full overflow-hidden">
+        <PosterImage t={t} className="w-full h-full transition-transform duration-300 group-hover:scale-105" />
+        <span className={"absolute top-2 right-2 px-1.5 py-0.5 text-[10px] font-black bg-white/90 " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-green-600" : "text-red-600")}>
+          {pctStr(t.change24h)}
+        </span>
       </div>
-      {filtered.length === 0 && <p className="text-sm text-neutral-400 py-6 text-center">No coins match.</p>}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-        {filtered.map((t) => (
-          <button
-            key={t.tokenId}
-            onClick={() => onSelect(t.tokenId)}
-            className="rounded-none border border-neutral-300 bg-white p-4 text-left hover:border-black transition group"
-          >
-            <div className="flex items-center gap-3">
-              <Avatar image={t.image} symbol={tokSym(t)} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <p className="font-bold text-sm truncate">{tokName(t)}</p>
-                  <p className="text-[11px] text-neutral-500 shrink-0">${tokSym(t)}</p>
-                </div>
-                <p className="text-[11px] text-neutral-500 truncate">mc {fmtXno(t.marketCap)} XNO{usd != null && <> ({fmtUsd(t.marketCap, usd)})</>}</p>
-              </div>
-              <Sparkline points={t.spark} width={64} height={26} color={trendColor(t.spark)} />
-            </div>
-            <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-neutral-500">
-              <span className={"font-bold shrink-0 " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-green-600" : "text-red-600")}>
-                {pctStr(t.change24h)}
-              </span>
-              <span className="truncate text-neutral-600">{fmtXno(t.price)} XNO</span>
-              <span className="shrink-0">{t.holders} holder{t.holders === 1 ? "" : "s"} · {timeAgo(t.createdAt)}</span>
-            </div>
-          </button>
+      <div className="p-2.5">
+        <div className="flex items-baseline justify-between gap-1">
+          <p className="font-bold text-sm truncate">{tokName(t)}</p>
+          <p className="text-[10px] text-neutral-400 shrink-0">${tokSym(t)}</p>
+        </div>
+        <p className="text-[11px] text-neutral-600 truncate">{fmtXno(t.price)} XNO{usd != null && <span className="text-neutral-400"> · {fmtUsd(t.price, usd)}</span>}</p>
+        <p className="text-[10px] text-neutral-400 truncate">mc {fmtXno(t.marketCap)}{usd != null && <> ({fmtUsd(t.marketCap, usd)})</>} · {t.holders} holder{t.holders === 1 ? "" : "s"}</p>
+      </div>
+    </button>
+  );
+}
+
+/** Horizontally-scrolling shelf of posters. */
+function FeedRow({ title, tokens, usd, onSelect }: { title: string; tokens: Token[]; usd: number | null; onSelect: (id: string) => void }) {
+  return (
+    <div className="space-y-2">
+      <h2 className="text-sm font-black uppercase tracking-wide">{title}</h2>
+      <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 snap-x">
+        {tokens.map((t) => (
+          <div key={t.tokenId} className="w-36 sm:w-40 shrink-0 snap-start">
+            <PosterCard t={t} usd={usd} onSelect={onSelect} />
+          </div>
         ))}
       </div>
     </div>
+  );
+}
+
+/** Featured coin banner: big image, identity, live stats, one clear action. */
+function HeroCard({ t, usd, onSelect }: { t: Token; usd: number | null; onSelect: (id: string) => void }) {
+  return (
+    <button
+      onClick={() => onSelect(t.tokenId)}
+      className="group w-full text-left rounded-none border border-neutral-300 bg-white overflow-hidden hover:border-black transition flex flex-col sm:flex-row"
+    >
+      <div className="sm:w-56 sm:h-56 w-full h-40 shrink-0 overflow-hidden">
+        <PosterImage t={t} className="w-full h-full transition-transform duration-300 group-hover:scale-105" />
+      </div>
+      <div className="flex-1 p-5 flex flex-col justify-center min-w-0">
+        <p className="text-[10px] font-black uppercase tracking-widest text-neutral-400 mb-1">Featured</p>
+        <div className="flex items-baseline gap-2 min-w-0">
+          <h2 className="text-2xl font-black truncate">{tokName(t)}</h2>
+          <span className="text-sm text-neutral-500 shrink-0">${tokSym(t)}</span>
+        </div>
+        {t.description && <p className="text-sm text-neutral-600 mt-1 line-clamp-2">{t.description}</p>}
+        <div className="flex items-center gap-4 mt-3 text-sm flex-wrap">
+          <span className="font-bold">{fmtXno(t.price)} XNO{usd != null && <span className="font-normal text-neutral-500"> ({fmtUsd(t.price, usd)})</span>}</span>
+          <span className={"font-black " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-green-600" : "text-red-600")}>{pctStr(t.change24h)}</span>
+          <span className="text-neutral-500">mc {fmtXno(t.marketCap)} XNO{usd != null && <> ({fmtUsd(t.marketCap, usd)})</>}</span>
+          <span className="text-neutral-400 text-xs">{t.holders} holder{t.holders === 1 ? "" : "s"}</span>
+        </div>
+        <span className="mt-4 inline-block w-fit rounded-none bg-black px-4 py-2 text-xs font-black uppercase tracking-wide text-white group-hover:bg-neutral-800">
+          Trade →
+        </span>
+      </div>
+    </button>
   );
 }
 
