@@ -147,6 +147,17 @@ export default function Welcome({ onAccept }: { onAccept: () => void }) {
               </div>
             ))}
           </div>
+          {/* The one place red is used for something other than a price:
+              the user-mandated, impossible-to-miss loss disclaimer. */}
+          <div className="mt-4 rounded-none border border-red-900 bg-red-950/40 p-4">
+            <p className="text-sm font-black uppercase tracking-wide text-red-500">This is a game. Not an investment.</p>
+            <p className="mt-1.5 text-xs text-red-400 leading-relaxed">
+              Treat every coin here as a game piece, never as an asset, a security, or savings.
+              Anything you put in can be lost — completely and irreversibly — and HodlGame
+              bears no responsibility for any loss, of any kind, ever. Play only with money
+              you could burn without blinking.
+            </p>
+          </div>
           <button
             className="mt-6 w-full rounded-none bg-white py-4 text-sm font-black uppercase tracking-wide text-black hover:bg-neutral-200"
             onClick={onAccept}
