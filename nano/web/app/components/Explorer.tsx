@@ -54,23 +54,23 @@ const fmtTok = (raw: string, dec: number) => {
   return `${neg ? "-" : ""}${whole}${frac ? "." + frac : ""}`;
 };
 const pctStr = (n: number | null | undefined) => (n == null ? "·" : `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`);
-const pctColor = (n: number | null | undefined) => (n == null ? "text-neutral-500" : n >= 0 ? "text-green-700" : "text-red-600");
+const pctColor = (n: number | null | undefined) => (n == null ? "text-neutral-500" : n >= 0 ? "text-green-500" : "text-red-500");
 
 const KIND_COLOR: Record<string, string> = {
-  launch: "bg-purple-900/60 text-purple-300", buy: "bg-neutral-100/60 text-black", sell: "bg-neutral-100/60 text-black",
-  transfer: "bg-blue-900/60 text-blue-300", seedLiq: "bg-teal-900/60 text-teal-300", addLiq: "bg-teal-900/60 text-teal-300",
-  stake: "bg-neutral-100/60 text-black", unstake: "bg-neutral-100/60 text-black", claim: "bg-neutral-100 text-neutral-700",
+  launch: "bg-neutral-800 text-neutral-200", buy: "bg-neutral-900 text-green-500", sell: "bg-neutral-900 text-red-500",
+  transfer: "bg-neutral-800 text-neutral-200", seedLiq: "bg-neutral-800 text-neutral-200", addLiq: "bg-neutral-800 text-neutral-200",
+  stake: "bg-neutral-900/60 text-white", unstake: "bg-neutral-900/60 text-white", claim: "bg-neutral-900 text-neutral-300",
 };
 const ALL_KINDS = ["launch", "buy", "sell", "transfer", "seedLiq", "addLiq", "stake", "unstake", "claim"];
 const KIND_LABEL: Record<string, string> = { launch: "launch", buy: "buy", sell: "sell", transfer: "send", seedLiq: "seed liquidity", addLiq: "add liquidity", stake: "stake", unstake: "unstake", claim: "claim" };
 const FIELD_XNO = new Set(["poolXno"]);
 const FIELD_LABEL: Record<string, string> = { supply: "total coins", creatorShare: "creator's coins", treasury: "treasury", poolXno: "pool XNO", poolTokens: "coins in pool", totalStaked: "staked", rebateVault: "rebate vault", rewardPerShare: "reward per share" };
 
-const card = "rounded-none border border-neutral-300 bg-white p-4";
-const th = "text-left text-[10px] uppercase tracking-wider text-neutral-400 pb-1 pr-3";
+const card = "rounded-none border border-neutral-800 bg-neutral-950 p-4";
+const th = "text-left text-[10px] uppercase tracking-wider text-neutral-500 pb-1 pr-3";
 const td = "py-1 pr-3 text-xs";
 const mono = "font-mono text-[11px]";
-const linkC = "text-black hover:underline cursor-pointer";
+const linkC = "text-white hover:underline cursor-pointer";
 
 async function api(params: Record<string, string>) {
   const qs = new URLSearchParams(params).toString();
@@ -84,7 +84,7 @@ function Copy({ text }: { text: string }) {
     <button
       title="copy"
       onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1000); }); }}
-      className="ml-1 text-[10px] text-neutral-400 hover:text-black align-middle"
+      className="ml-1 text-[10px] text-neutral-500 hover:text-white align-middle"
     >
       {done ? "✓" : "⧉"}
     </button>
@@ -92,29 +92,30 @@ function Copy({ text }: { text: string }) {
 }
 
 function KindBadge({ kind, valid }: { kind: string; valid?: boolean }) {
-  return <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${KIND_COLOR[kind] ?? "bg-neutral-100 text-neutral-700"}`}>{KIND_LABEL[kind] ?? kind}{valid === false ? " ✕" : ""}</span>;
+  return <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${KIND_COLOR[kind] ?? "bg-neutral-900 text-neutral-300"}`}>{KIND_LABEL[kind] ?? kind}{valid === false ? " ✕" : ""}</span>;
 }
 
 /** Inline SVG price line chart from a real analytics series. */
 function MiniChart({ series }: { series: { time: number; priceRaw: string }[] }) {
-  if (!series || series.length < 2) return <p className="text-xs text-neutral-400">not enough price points yet</p>;
+  if (!series || series.length < 2) return <p className="text-xs text-neutral-500">not enough price points yet</p>;
   const pts = series.map((p) => Number(BigInt(p.priceRaw)) / 1e30);
   const min = Math.min(...pts), max = Math.max(...pts), range = max - min || 1;
   const W = 560, H = 120;
   const path = pts.map((v, i) => `${(i / (pts.length - 1)) * W},${H - ((v - min) / range) * (H - 8) - 4}`).join(" ");
-  const up = pts[pts.length - 1] >= pts[0];
   return (
     <div className="overflow-x-auto">
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-28" preserveAspectRatio="none">
-        <polyline points={path} fill="none" stroke={up ? "#000000" : "#666666"} strokeWidth="1.5" />
-        <polyline points={`0,${H} ${path} ${W},${H}`} fill={up ? "#00000018" : "#66666618"} stroke="none" />
+        {/* Direction is carried by the signed green/red change badge, never by
+            stroke shade — the line itself is always white. */}
+        <polyline points={path} fill="none" stroke="#ffffff" strokeWidth="1.5" />
+        <polyline points={`0,${H} ${path} ${W},${H}`} fill="#ffffff18" stroke="none" />
       </svg>
     </div>
   );
 }
 
 function OpsTable({ items, go }: { items: any[]; go: (v: View) => void }) {
-  if (!items?.length) return <p className="text-xs text-neutral-400">no ops</p>;
+  if (!items?.length) return <p className="text-xs text-neutral-500">no ops</p>;
   return (
     <div className="overflow-x-auto">
       <table className="w-full">
@@ -125,11 +126,11 @@ function OpsTable({ items, go }: { items: any[]; go: (v: View) => void }) {
               ? `${fmtXno((BigInt(it.fields.poolXno.after) - BigInt(it.fields.poolXno.before)).toString())} XNO`
               : it.balances?.length ? `${it.balances.length} balance change${it.balances.length > 1 ? "s" : ""}` : "";
             return (
-              <tr key={it.hash} className="border-t border-neutral-300 hover:bg-neutral-50">
+              <tr key={it.hash} className="border-t border-neutral-800 hover:bg-neutral-900">
                 <td className={td}><KindBadge kind={it.kind} valid={it.valid} /></td>
                 <td className={td}><span className={linkC} onClick={() => go({ kind: "token", q: it.tokenId })}>{tokSym(it)}</span></td>
                 <td className={`${td} ${mono}`}><span className={linkC} onClick={() => go({ kind: "account", q: it.sender })}>{short(it.sender, 10)}</span></td>
-                <td className={`${td} text-neutral-600`}>{it.valid === false ? <span className="text-black">{it.reason}</span> : sum}</td>
+                <td className={`${td} text-neutral-400`}>{it.valid === false ? <span className="text-white">{it.reason}</span> : sum}</td>
                 <td className={td}><span className={linkC} onClick={() => go({ kind: "op", q: it.hash })}>view →</span></td>
                 <td className={`${td} text-neutral-500`} title={absTime(it.timestamp)}>{ago(it.timestamp)}</td>
               </tr>
@@ -142,11 +143,11 @@ function OpsTable({ items, go }: { items: any[]; go: (v: View) => void }) {
 }
 
 function Row({ k, children }: { k: any; children: any }) {
-  return <div className="flex gap-3 py-1 border-t border-neutral-300/60 text-xs"><span className="w-36 shrink-0 text-neutral-500">{k}</span><span className="min-w-0 break-all">{children}</span></div>;
+  return <div className="flex gap-3 py-1 border-t border-neutral-800/60 text-xs"><span className="w-36 shrink-0 text-neutral-500">{k}</span><span className="min-w-0 break-all">{children}</span></div>;
 }
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: any }) {
-  return <div className="rounded-none border border-neutral-300 bg-white p-3"><p className="text-[10px] uppercase tracking-wider text-neutral-400">{label}</p><p className="text-lg font-black">{value}</p>{sub && <p className="text-[11px] text-neutral-500">{sub}</p>}</div>;
+  return <div className="rounded-none border border-neutral-800 bg-neutral-950 p-3"><p className="text-[10px] uppercase tracking-wider text-neutral-500">{label}</p><p className="text-lg font-black">{value}</p>{sub && <p className="text-[11px] text-neutral-500">{sub}</p>}</div>;
 }
 
 export default function Explorer() {
@@ -192,33 +193,33 @@ export default function Explorer() {
   return (
     <div className="space-y-4">
       <div className="flex gap-2">
-        <input className="w-full rounded-none border border-neutral-300 bg-white px-4 py-3 text-sm text-black placeholder-neutral-400 focus:outline-none focus:border-black"
+        <input className="w-full rounded-none border border-neutral-800 bg-black px-4 py-3 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-white"
           placeholder="Search a coin name, address, or transaction" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} />
-        <button className="shrink-0 rounded-none bg-black px-4 py-3 text-sm font-bold text-white hover:bg-neutral-800" onClick={submit}>Search</button>
+        <button className="shrink-0 rounded-none bg-white px-4 py-3 text-sm font-bold text-black hover:bg-neutral-200" onClick={submit}>Search</button>
       </div>
       <div className="flex gap-2 text-xs flex-wrap">
         {(["stats", "feed", "trust"] as const).map((k) => (
-          <button key={k} onClick={() => go({ kind: k })} className={`px-3 py-1.5 rounded-full font-bold ${view.kind === k ? "bg-black text-white" : "bg-white text-neutral-600 hover:text-neutral-800"}`}>
+          <button key={k} onClick={() => go({ kind: k })} className={`px-3 py-1.5 rounded-full font-bold ${view.kind === k ? "bg-white text-black" : "bg-neutral-950 text-neutral-400 hover:text-neutral-200"}`}>
             {k === "stats" ? "Overview" : k === "feed" ? "Activity" : "Verify"}
           </button>
         ))}
-        {!["stats", "feed", "trust"].includes(view.kind) && <span className="px-3 py-1.5 rounded-full bg-neutral-100 text-neutral-700 font-mono">{view.kind}: {short((view as any).q ?? "", 10)}</span>}
+        {!["stats", "feed", "trust"].includes(view.kind) && <span className="px-3 py-1.5 rounded-full bg-neutral-900 text-neutral-300 font-mono">{view.kind}: {short((view as any).q ?? "", 10)}</span>}
       </div>
 
-      {loading && <p className="text-xs text-neutral-400">loading…</p>}
-      {err && <p className="text-xs text-black">{err}</p>}
+      {loading && <p className="text-xs text-neutral-500">loading…</p>}
+      {err && <p className="text-xs text-white">{err}</p>}
       {!loading && !err && data && (
         <>
           {view.kind === "stats" && <StatsPanel d={data} go={go} />}
           {view.kind === "feed" && (
             <div className={card}>
               <div className="flex gap-1.5 flex-wrap mb-3">
-                <button onClick={() => setKindFilter("")} className={`px-2 py-1 rounded-full text-[10px] font-bold ${!kindFilter ? "bg-black text-white" : "bg-white text-neutral-600"}`}>all</button>
-                {ALL_KINDS.map((k) => <button key={k} onClick={() => setKindFilter(k)} className={`px-2 py-1 rounded-full text-[10px] font-bold ${kindFilter === k ? "bg-black text-white" : "bg-white text-neutral-600"}`}>{KIND_LABEL[k] ?? k}</button>)}
+                <button onClick={() => setKindFilter("")} className={`px-2 py-1 rounded-full text-[10px] font-bold ${!kindFilter ? "bg-white text-black" : "bg-neutral-950 text-neutral-400"}`}>all</button>
+                {ALL_KINDS.map((k) => <button key={k} onClick={() => setKindFilter(k)} className={`px-2 py-1 rounded-full text-[10px] font-bold ${kindFilter === k ? "bg-white text-black" : "bg-neutral-950 text-neutral-400"}`}>{KIND_LABEL[k] ?? k}</button>)}
               </div>
-              <p className="text-[11px] text-neutral-400 mb-2">{data.total} actions · newest first{kindFilter ? ` · ${kindFilter}` : " · live"}</p>
+              <p className="text-[11px] text-neutral-500 mb-2">{data.total} actions · newest first{kindFilter ? ` · ${kindFilter}` : " · live"}</p>
               <OpsTable items={feedItems} go={go} />
-              {feedNext != null && <button onClick={loadMoreFeed} className="mt-3 w-full rounded-none bg-white py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-100">Load more</button>}
+              {feedNext != null && <button onClick={loadMoreFeed} className="mt-3 w-full rounded-none border border-neutral-800 bg-neutral-950 py-2 text-xs font-bold text-neutral-300 hover:bg-neutral-900 hover:border-neutral-700">Load more</button>}
             </div>
           )}
           {view.kind === "results" && <Results data={data} go={go} />}
@@ -245,10 +246,10 @@ function StatsPanel({ d, go }: { d: any; go: (v: View) => void }) {
       </div>
       <div className={card}>
         <h3 className="font-black text-sm mb-2">Top tokens by market cap</h3>
-        {d.topByMcap.length === 0 && <p className="text-xs text-neutral-400">no tokens yet</p>}
+        {d.topByMcap.length === 0 && <p className="text-xs text-neutral-500">no tokens yet</p>}
         {d.topByMcap.map((t: any) => (
-          <div key={t.tokenId} className="flex items-center justify-between text-xs py-1.5 border-t border-neutral-300/60">
-            <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{t.image ? <img src={normalizeImage(t.image)} alt="" className="w-5 h-5 rounded-full object-cover inline-block mr-1.5 align-middle" /> : null}{tokName(t)} <span className="text-neutral-400">{tokSym(t)}</span></span>
+          <div key={t.tokenId} className="flex items-center justify-between text-xs py-1.5 border-t border-neutral-800/60">
+            <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{t.image ? <img src={normalizeImage(t.image)} alt="" className="w-5 h-5 rounded-full object-cover inline-block mr-1.5 align-middle" /> : null}{tokName(t)} <span className="text-neutral-500">{tokSym(t)}</span></span>
             <span className="flex gap-3"><span>{fmtXno(t.marketCapRaw)} mcap</span><span className={pctColor(t.change24h)}>{pctStr(t.change24h)}</span><span className="text-neutral-500">{t.holders} holders</span></span>
           </div>
         ))}
@@ -256,13 +257,13 @@ function StatsPanel({ d, go }: { d: any; go: (v: View) => void }) {
       <div className={card}>
         <h3 className="font-black text-sm mb-2">Latest launches</h3>
         {d.latest.map((t: any) => (
-          <div key={t.tokenId} className="flex items-center justify-between text-xs py-1.5 border-t border-neutral-300/60">
-            <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{t.image ? <img src={normalizeImage(t.image)} alt="" className="w-5 h-5 rounded-full object-cover inline-block mr-1.5 align-middle" /> : null}{tokName(t)} <span className="text-neutral-400">{tokSym(t)}</span></span>
+          <div key={t.tokenId} className="flex items-center justify-between text-xs py-1.5 border-t border-neutral-800/60">
+            <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{t.image ? <img src={normalizeImage(t.image)} alt="" className="w-5 h-5 rounded-full object-cover inline-block mr-1.5 align-middle" /> : null}{tokName(t)} <span className="text-neutral-500">{tokSym(t)}</span></span>
             <span className="text-neutral-500" title={absTime(t.createdAt)}>{ago(t.createdAt)}</span>
           </div>
         ))}
       </div>
-      <p className="text-[11px] text-neutral-400" title="A fingerprint of the entire ledger state — anyone can recompute it to verify this site">integrity fingerprint <span className={mono}>{short(d.stateRoot, 12)}</span><Copy text={d.stateRoot} /></p>
+      <p className="text-[11px] text-neutral-500" title="A fingerprint of the entire ledger state — anyone can recompute it to verify this site">integrity fingerprint <span className={mono}>{short(d.stateRoot, 12)}</span><Copy text={d.stateRoot} /></p>
     </div>
   );
 }
@@ -272,8 +273,8 @@ function Results({ data, go }: { data: any; go: (v: View) => void }) {
   if (data.type === "account") return <AccountDetail d={data.data} go={go} />;
   if (data.type === "token") return <TokenDetailX d={data.data} go={go} />;
   if (data.type === "tokens")
-    return <div className={card}>{data.data.length === 0 ? <p className="text-xs text-neutral-400">no matches</p> : data.data.map((t: any) => (
-      <div key={t.tokenId} className="flex items-center justify-between text-sm py-1 border-t border-neutral-300/60">
+    return <div className={card}>{data.data.length === 0 ? <p className="text-xs text-neutral-500">no matches</p> : data.data.map((t: any) => (
+      <div key={t.tokenId} className="flex items-center justify-between text-sm py-1 border-t border-neutral-800/60">
         <span className={linkC} onClick={() => go({ kind: "token", q: t.tokenId })}>{tokName(t)} ({tokSym(t)})</span>
         <span className="text-xs text-neutral-500">{fmtXno(t.marketCapRaw)} mcap · {t.holders}h</span>
       </div>))}</div>;
@@ -287,18 +288,18 @@ function Results({ data, go }: { data: any; go: (v: View) => void }) {
       <Row k="looks like">{data.data.classification?.kind}{data.data.classification?.tokenId ? ` · token ${short(data.data.classification.tokenId, 8)}` : ""}</Row>
       <details><summary className="text-[11px] text-neutral-500 cursor-pointer">byte-level decode</summary><Hexdump ann={data.data.annotation} /></details>
     </div>;
-  return <p className="text-xs text-neutral-400">nothing found</p>;
+  return <p className="text-xs text-neutral-500">nothing found</p>;
 }
 
 function Hexdump({ ann }: { ann: any }) {
   if (!ann?.segments) return null;
   return (
     <div className="mt-2">
-      <p className="text-[10px] uppercase tracking-wider text-neutral-400 mb-1">link decode ({ann.kind})</p>
+      <p className="text-[10px] uppercase tracking-wider text-neutral-500 mb-1">link decode ({ann.kind})</p>
       <div className="space-y-0.5">
         {ann.segments.map((s: any, i: number) => (
           <div key={i} className="flex gap-2 text-[11px]">
-            <span className={`${mono} text-black break-all w-1/2`}>{s.bytes}</span>
+            <span className={`${mono} text-white break-all w-1/2`}>{s.bytes}</span>
             <span className="text-neutral-500">{s.label}{s.value ? `: ${s.value}` : ""}</span>
           </div>
         ))}
@@ -314,13 +315,13 @@ function OpDetail({ d, go }: { d: any; go: (v: View) => void }) {
         <div className="flex items-center gap-2 mb-2 flex-wrap">
           <KindBadge kind={d.kind} valid={d.valid} />
           <span className={linkC} onClick={() => go({ kind: "token", q: d.tokenId })}>{tokSym(d)}</span>
-          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${d.confirmed ? "bg-neutral-100/60 text-black" : "bg-neutral-100/60 text-black"}`}>{d.confirmed ? "confirmed" : "pending"}</span>
-          <span className="text-neutral-400 text-xs" title={absTime(d.timestamp)}>{ago(d.timestamp)}</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${d.confirmed ? "bg-neutral-900/60 text-white" : "bg-neutral-900/60 text-white"}`}>{d.confirmed ? "confirmed" : "pending"}</span>
+          <span className="text-neutral-500 text-xs" title={absTime(d.timestamp)}>{ago(d.timestamp)}</span>
         </div>
         <Row k="hash"><span className={mono}>{d.hash}</span><Copy text={d.hash} /></Row>
         {d.carriers && <Row k="sent as"><span title={d.carriers.join(" + ")}>two linked blocks</span></Row>}
         <Row k="sent by"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.sender })}>{d.sender}</span><Copy text={d.sender} /></Row>
-        {!d.valid && <Row k="rejected"><span className="text-black">{d.reason}</span></Row>}
+        {!d.valid && <Row k="rejected"><span className="text-white">{d.reason}</span></Row>}
         {d.depositEdge && <Row k="funded by deposit"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "op", q: d.depositEdge.deposit })}>{short(d.depositEdge.deposit, 12)}</span> · {fmtXno(d.depositEdge.amountRaw)} XNO</Row>}
         <Row k="on Nano L1"><a className={linkC} href={`https://nanexplorer.com/nano/block/${d.hash}`} target="_blank" rel="noreferrer">nanexplorer ↗</a></Row>
       </div>
@@ -332,13 +333,13 @@ function OpDetail({ d, go }: { d: any; go: (v: View) => void }) {
       )}
       {d.balances?.length > 0 && (
         <div className={card}><h3 className="font-black text-sm mb-2">Who gained / lost coins</h3>
-          {d.balances.map((b: any) => <Row key={b.account} k={short(b.account, 10)}><span className={b.delta.startsWith("-") ? "text-red-600" : "text-green-700"}>{b.delta.startsWith("-") ? "" : "+"}{fmtNum(Number(b.delta))}</span> coins</Row>)}
+          {d.balances.map((b: any) => <Row key={b.account} k={short(b.account, 10)}><span className={b.delta.startsWith("-") ? "text-red-500" : "text-green-500"}>{b.delta.startsWith("-") ? "" : "+"}{fmtNum(Number(b.delta))}</span> coins</Row>)}
         </div>
       )}
       {d.payoutCoverage?.length > 0 && (
         <div className={card}><h3 className="font-black text-sm mb-2">Payout story</h3>
           {d.payoutCoverage.map((c: any) => (
-            <div key={c.sendHash} className="text-xs py-1 border-t border-neutral-300/60">pool send <span className={mono}>{short(c.sendHash, 10)}</span> → {fmtXno(c.amountRaw)} XNO to {short(c.recipient, 10)}, covering {c.covers.map((x: any, i: number) => <span key={i}>{x.kind} {x.hash ? short(x.hash, 8) : ""} ({fmtXno(x.amountRaw)} XNO){i < c.covers.length - 1 ? " + " : ""}</span>)}</div>
+            <div key={c.sendHash} className="text-xs py-1 border-t border-neutral-800/60">pool send <span className={mono}>{short(c.sendHash, 10)}</span> → {fmtXno(c.amountRaw)} XNO to {short(c.recipient, 10)}, covering {c.covers.map((x: any, i: number) => <span key={i}>{x.kind} {x.hash ? short(x.hash, 8) : ""} ({fmtXno(x.amountRaw)} XNO){i < c.covers.length - 1 ? " + " : ""}</span>)}</div>
           ))}
         </div>
       )}
@@ -372,7 +373,7 @@ function AccountDetail({ d, go }: { d: any; go: (v: View) => void }) {
     <div className="space-y-3">
       <div className={card}>
         <h3 className="font-black mb-1 text-sm">Wallet <span className={`${mono} break-all`}>{short(d.address, 12)}</span><Copy text={d.address} /></h3>
-        {d.labels?.map((l: string) => <span key={l} className="inline-block mr-1 px-2 py-0.5 rounded-full bg-blue-900/60 text-blue-300 text-[10px] font-bold">{l}</span>)}
+        {d.labels?.map((l: string) => <span key={l} className="inline-block mr-1 px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-200 text-[10px] font-bold">{l}</span>)}
         <Row k="XNO balance">{fmtXno(d.xnoBalanceRaw)} XNO {d.opened ? "" : "(never used)"}</Row>
         {d.createdTokens?.length > 0 && <Row k="created coins">{d.createdTokens.map((t: any) => <span key={t.tokenId} className={`${linkC} mr-2`} onClick={() => go({ kind: "token", q: t.tokenId })}>{tokSym(t)}</span>)}</Row>}
         {d.authorityOf?.length > 0 && <Row k="can edit info for">{d.authorityOf.map((t: any) => <span key={t.tokenId} className={`${linkC} mr-2`} onClick={() => go({ kind: "token", q: t.tokenId })}>{tokSym(t)}</span>)}</Row>}
@@ -384,7 +385,7 @@ function AccountDetail({ d, go }: { d: any; go: (v: View) => void }) {
       )}
       <div className={card}><h3 className="font-black text-sm mb-2">Actions ({d.opsTotal})</h3>
         <OpsTable items={ops} go={go} />
-        {next != null && <button onClick={more} className="mt-3 w-full rounded-none bg-white py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-100">Load more</button>}
+        {next != null && <button onClick={more} className="mt-3 w-full rounded-none border border-neutral-800 bg-neutral-950 py-2 text-xs font-bold text-neutral-300 hover:bg-neutral-900 hover:border-neutral-700">Load more</button>}
       </div>
     </div>
   );
@@ -406,11 +407,11 @@ function TokenDetailX({ d, go }: { d: any; go: (v: View) => void }) {
         <div className="flex items-center gap-3">
           {d.image ? <img src={normalizeImage(d.image)} alt="" className="w-12 h-12 rounded-full object-cover" onError={(e) => ((e.target as HTMLImageElement).style.display = "none")} /> : null}
           <div className="min-w-0">
-            <h3 className="font-black">{tokName(d)} <span className="text-neutral-500">({tokSym(d)})</span> {d.authority?.immutable && <span className="px-2 py-0.5 rounded-full bg-purple-900/60 text-purple-300 text-[10px] font-bold">immutable</span>}</h3>
+            <h3 className="font-black">{tokName(d)} <span className="text-neutral-500">({tokSym(d)})</span> {d.authority?.immutable && <span className="px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-200 text-[10px] font-bold">immutable</span>}</h3>
             <p className="text-sm">{fmtXno(d.priceRaw)} XNO <span className={pctColor(d.change24h)}>{pctStr(d.change24h)} 24h</span> · mcap {fmtXno(d.marketCapRaw)}</p>
           </div>
         </div>
-        {d.description && <p className="text-xs text-neutral-600 mt-2">{d.description}</p>}
+        {d.description && <p className="text-xs text-neutral-400 mt-2">{d.description}</p>}
         <div className="flex gap-3 mt-2 text-xs">
           {d.website && <a className={linkC} href={d.website} target="_blank" rel="noreferrer">website ↗</a>}
           {d.twitter && <a className={linkC} href={d.twitter} target="_blank" rel="noreferrer">twitter ↗</a>}
@@ -438,7 +439,7 @@ function TokenDetailX({ d, go }: { d: any; go: (v: View) => void }) {
 
       {d.reserves && (
         <div className={card}>
-          <h3 className="font-black text-sm mb-2">Proof of reserves <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${reservesMatch ? "bg-neutral-100/60 text-black" : "bg-neutral-100/60 text-black"}`}>{reservesMatch ? "backed" : "check"}</span></h3>
+          <h3 className="font-black text-sm mb-2">Proof of reserves <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${reservesMatch ? "bg-neutral-900/60 text-white" : "bg-neutral-900/60 text-white"}`}>{reservesMatch ? "backed" : "check"}</span></h3>
           <Row k="pool account"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.reserves.poolAddress })}>{short(d.reserves.poolAddress, 12)}</span><Copy text={d.reserves.poolAddress} /></Row>
           <Row k="indexed pool XNO">{fmtXno(d.reserves.indexedPoolXno)} XNO</Row>
           <Row k="on-chain balance">{fmtXno(d.reserves.onchainBalance)} XNO</Row>
@@ -450,7 +451,7 @@ function TokenDetailX({ d, go }: { d: any; go: (v: View) => void }) {
         <div className={card}><h3 className="font-black text-sm mb-2">Recent trades</h3>
           <div className="overflow-x-auto"><table className="w-full"><thead><tr><th className={th}></th><th className={th}>account</th><th className={th}>amount</th><th className={th}>price</th><th className={th}>age</th></tr></thead>
             <tbody>{d.trades.map((t: any, i: number) => (
-              <tr key={i} className="border-t border-neutral-300"><td className={td}><KindBadge kind={t.kind} /></td>
+              <tr key={i} className="border-t border-neutral-800"><td className={td}><KindBadge kind={t.kind} /></td>
                 <td className={`${td} ${mono}`}><span className={linkC} onClick={() => go({ kind: "account", q: t.account })}>{short(t.account, 10)}</span></td>
                 <td className={td}>{fmtTok(t.amountRaw, d.decimals)}</td><td className={td}>{fmtXno(t.priceRaw)}</td>
                 <td className={`${td} text-neutral-500`} title={absTime(t.time)}>{ago(t.time)}</td></tr>))}</tbody></table></div>
@@ -460,12 +461,12 @@ function TokenDetailX({ d, go }: { d: any; go: (v: View) => void }) {
       <div className={card}>
         <h3 className="font-black text-sm mb-2">Holders ({d.holdersTotal}) <span className="text-[11px] font-normal text-neutral-500">top-10 hold {d.concentration.top10Pct.toFixed(1)}%</span></h3>
         {holders.map((h: any) => (
-          <div key={h.account} className="flex items-center justify-between text-xs py-1 border-t border-neutral-300/60">
+          <div key={h.account} className="flex items-center justify-between text-xs py-1 border-t border-neutral-800/60">
             <span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: h.account })}>{short(h.account, 12)}</span>
-            <span>{fmtTok(h.balance, d.decimals)} <span className="text-neutral-400">({h.pct.toFixed(2)}%)</span></span>
+            <span>{fmtTok(h.balance, d.decimals)} <span className="text-neutral-500">({h.pct.toFixed(2)}%)</span></span>
           </div>
         ))}
-        {hnext != null && <button onClick={moreHolders} className="mt-3 w-full rounded-none bg-white py-2 text-xs font-bold text-neutral-700 hover:bg-neutral-100">Load more</button>}
+        {hnext != null && <button onClick={moreHolders} className="mt-3 w-full rounded-none border border-neutral-800 bg-neutral-950 py-2 text-xs font-bold text-neutral-300 hover:bg-neutral-900 hover:border-neutral-700">Load more</button>}
       </div>
 
       <div className={card}><h3 className="font-black text-sm mb-2">History</h3><OpsTable items={d.ops} go={go} /></div>
@@ -484,12 +485,12 @@ function VerifyButton({ serverRoot }: { serverRoot: string }) {
   }
   return (
     <div className="mt-2">
-      <button onClick={run} disabled={state === "running"} className="rounded-none bg-black px-4 py-2 text-xs font-bold text-white hover:bg-neutral-800 disabled:opacity-40">
+      <button onClick={run} disabled={state === "running"} className="rounded-none bg-white px-4 py-2 text-xs font-bold text-black hover:bg-neutral-200 disabled:opacity-40">
         {state === "running" ? "recomputing in your browser…" : "Verify in your browser"}
       </button>
       {res && <div className="mt-2 text-xs">
-        {res.error ? <p className="text-black">verify error: {res.error}</p> : <>
-          <p className={res.ok ? "text-black font-bold" : "text-black font-bold"}>{res.ok ? "✓ VERIFIED — your browser reproduced the server's root" : "✗ MISMATCH — server root differs from your recomputation"}</p>
+        {res.error ? <p className="text-white">verify error: {res.error}</p> : <>
+          <p className={res.ok ? "text-white font-bold" : "text-white font-bold"}>{res.ok ? "✓ VERIFIED — your browser reproduced the server's root" : "✗ MISMATCH — server root differs from your recomputation"}</p>
           <Row k="your root"><span className={mono}>{res.localRoot || "—"}</span></Row>
           <Row k="server root"><span className={mono}>{res.serverRoot || "—"}</span></Row>
           <Row k="replayed">{res.accounts} accounts · {res.tokens} tokens · {res.ops} ops (no secrets)</Row>
@@ -511,12 +512,12 @@ function TrustPanel({ d, go }: { d: any; go: (v: View) => void }) {
       </div>
       <div className={card}><h3 className="font-black text-sm mb-2">Proof of reserves — all pools</h3>
         <p className="text-[11px] text-neutral-500 mb-1">For each coin: the XNO this site says is in the pool vs what the Nano blockchain actually holds.</p>
-        {d.pools.length === 0 && <p className="text-xs text-neutral-400">no pools yet</p>}
+        {d.pools.length === 0 && <p className="text-xs text-neutral-500">no pools yet</p>}
         {d.pools.map((p: any) => {
           const backed = BigInt(p.onchainBalance) >= BigInt(p.indexedPoolXno);
           return (
-            <div key={p.tokenId} className="text-xs py-1.5 border-t border-neutral-300/60">
-              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold mr-1.5 ${backed ? "bg-green-100 text-green-700" : "bg-red-100 text-red-600"}`}>{backed ? "✓ backed" : "! check"}</span>
+            <div key={p.tokenId} className="text-xs py-1.5 border-t border-neutral-800/60">
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold mr-1.5 ${backed ? "bg-neutral-900 text-green-500" : "bg-neutral-900 text-red-500"}`}>{backed ? "✓ backed" : "! check"}</span>
               <span className={linkC} onClick={() => go({ kind: "token", q: p.tokenId })}>{tokSym(p)}</span> · site says {fmtXno(p.indexedPoolXno)} · blockchain holds {fmtXno(p.onchainBalance)} · still owed {p.outstandingObligations === "rpc-error" ? "?" : fmtXno(p.outstandingObligations)} XNO
             </div>
           );

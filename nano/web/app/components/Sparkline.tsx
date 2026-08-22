@@ -3,7 +3,7 @@ export function Sparkline({
   points,
   width = 96,
   height = 36,
-  color = "#22c55e",
+  color = "#ffffff",
 }: {
   points: { priceRaw: string }[] | string[];
   width?: number;

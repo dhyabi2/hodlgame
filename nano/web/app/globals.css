@@ -3,18 +3,34 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 }
 
 html,
 body {
   margin: 0;
   padding: 0;
+  background: #000000;
+  color: #ffffff;
+  min-height: 100%;
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
   background: #ffffff;
   color: #000000;
-  min-height: 100%;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Netflix-style shelves scroll without a visible scrollbar; overflow is
+   signaled by edge-cut cards, arrows, and the edge fade instead. */
+.scrollbar-hidden {
+  scrollbar-width: none;
+}
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
 }

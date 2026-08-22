@@ -110,7 +110,7 @@ export default function ProPage() {
   }, [tokenId]);
 
   return (
-    <main className="min-h-screen bg-white text-black" style={{ fontFeatureSettings: '"tnum" 1' }}>
+    <main className="min-h-screen bg-black text-white" style={{ fontFeatureSettings: '"tnum" 1' }}>
       <TopBar
         tokens={tokens}
         token={token}
@@ -151,7 +151,7 @@ export default function ProPage() {
         </div>
       )}
       {toast && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 rounded-none border border-neutral-400 bg-white px-4 py-2 text-sm shadow-lg">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 rounded-none border border-neutral-700 bg-neutral-950 px-4 py-2 text-sm shadow-lg">
           {toast}
         </div>
       )}
@@ -160,10 +160,10 @@ export default function ProPage() {
 }
 
 function Panel({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <section className={"rounded-none border border-neutral-300 bg-white p-3 " + className}>{children}</section>;
+  return <section className={"rounded-none border border-neutral-800 bg-neutral-950 p-3 " + className}>{children}</section>;
 }
 function Skeleton({ className = "" }: { className?: string }) {
-  return <div className={"rounded-none border border-neutral-300 bg-white animate-pulse " + className} />;
+  return <div className={"rounded-none bg-neutral-900 animate-pulse " + className} />;
 }
 
 // ── top bar: ticker stats + token picker + wallet ───────────────────────────
@@ -177,26 +177,26 @@ function TopBar({
   const ch = token?.change24h ?? null;
   const usd = useXnoUsd();
   return (
-    <header className="sticky top-0 z-40 border-b border-neutral-300 bg-white/95 backdrop-blur">
+    <header className="sticky top-0 z-40 border-b border-neutral-800 bg-black/95 backdrop-blur">
       <div className="w-full flex items-center gap-4 px-3 sm:px-4 py-2.5">
-        <a href="/" className="text-xs text-neutral-500 hover:text-neutral-700 shrink-0">← app</a>
-        <span className="rounded-none bg-neutral-100 px-1.5 py-0.5 text-[10px] font-black tracking-wider text-black">PRO</span>
+        <a href="/" className="text-xs text-neutral-500 hover:text-white shrink-0">← app</a>
+        <span className="rounded-none bg-white px-1.5 py-0.5 text-[10px] font-black tracking-[0.2em] text-black">PRO</span>
 
         <div className="relative">
           <button
-            className="flex items-center gap-2 rounded-none border border-neutral-300 bg-neutral-50 px-2.5 py-1.5 hover:border-neutral-400"
+            className="flex items-center gap-2 rounded-none border border-neutral-800 bg-neutral-950 px-2.5 py-1.5 hover:border-neutral-500"
             onClick={() => setOpen((v) => !v)}
           >
-            {token ? <Avatar image={token.image} symbol={tokSym(token)} size={22} /> : <div className="h-[22px] w-[22px] rounded-full bg-neutral-100" />}
+            {token ? <Avatar image={token.image} symbol={tokSym(token)} size={22} /> : <div className="h-[22px] w-[22px] rounded-full bg-neutral-900" />}
             <span className="text-sm font-black">{token ? tokSym(token) : "…"}</span>
-            <span className="text-neutral-400 text-xs">▾</span>
+            <span className="text-neutral-500 text-xs">▾</span>
           </button>
           {open && (
-            <div className="absolute left-0 top-full mt-1 max-h-80 w-72 overflow-y-auto rounded-none border border-neutral-300 bg-white p-1 shadow-2xl">
+            <div className="absolute left-0 top-full mt-1 max-h-80 w-72 overflow-y-auto rounded-none border border-neutral-800 bg-neutral-950 p-1 shadow-2xl">
               {tokens.map((t) => (
                 <button
                   key={t.tokenId}
-                  className="flex w-full items-center gap-2 rounded-none px-2 py-1.5 text-left hover:bg-white"
+                  className="flex w-full items-center gap-2 rounded-none px-2 py-1.5 text-left hover:bg-neutral-900"
                   onClick={() => { onPick(t.tokenId); setOpen(false); }}
                 >
                   <Avatar image={t.image} symbol={tokSym(t)} size={20} />
@@ -205,7 +205,7 @@ function TopBar({
                   <span className={"text-[11px] w-14 text-right " + chColor(t.change24h)}>{pctStr(t.change24h)}</span>
                 </button>
               ))}
-              {tokens.length === 0 && <p className="px-2 py-3 text-center text-xs text-neutral-400">no tokens yet</p>}
+              {tokens.length === 0 && <p className="px-2 py-3 text-center text-xs text-neutral-500">no tokens yet</p>}
             </div>
           )}
         </div>
@@ -227,11 +227,11 @@ function TopBar({
     </header>
   );
 }
-const chColor = (n: number | null) => (n == null ? "text-neutral-400" : n >= 0 ? "text-green-600" : "text-red-600");
+const chColor = (n: number | null) => (n == null ? "text-neutral-500" : n >= 0 ? "text-green-500" : "text-red-500");
 function Stat({ label, value, valueClass = "" }: { label: string; value: string; valueClass?: string }) {
   return (
     <div className="flex flex-col leading-tight">
-      <span className="text-[9px] uppercase tracking-wider text-neutral-400">{label}</span>
+      <span className="text-[9px] uppercase tracking-wider text-neutral-500">{label}</span>
       <span className={"font-bold tabular-nums " + valueClass}>{value}</span>
     </div>
   );
@@ -262,28 +262,28 @@ function WalletBadge({ keys, setKeys, say }: { keys: Keys | null; setKeys: (k: K
   if (keys) {
     return (
       <div className="flex items-center gap-2">
-        <span className="hidden md:inline font-mono text-[11px] text-neutral-600">{short(keys.address)}</span>
-        <button className="rounded-none border border-neutral-300 px-2.5 py-1.5 text-[11px] font-bold hover:border-black" onClick={() => setKeys(null)}>Lock</button>
+        <span className="hidden md:inline font-mono text-[11px] text-neutral-400">{short(keys.address)}</span>
+        <button className="rounded-none border border-neutral-800 px-2.5 py-1.5 text-[11px] font-bold hover:border-white" onClick={() => setKeys(null)}>Lock</button>
       </div>
     );
   }
   return (
     <div className="relative">
-      <button className="rounded-none bg-black px-3 py-1.5 text-[11px] font-black text-white hover:bg-neutral-800" onClick={() => setOpen((v) => !v)}>
+      <button className="rounded-none bg-white px-3 py-1.5 text-[11px] font-black text-black hover:bg-neutral-200" onClick={() => setOpen((v) => !v)}>
         Connect
       </button>
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-64 rounded-none border border-neutral-300 bg-white p-3 shadow-2xl space-y-2">
+        <div className="absolute right-0 top-full mt-1 w-64 rounded-none border border-neutral-800 bg-neutral-950 p-3 shadow-2xl space-y-2">
           {hasWallet ? (
             <>
-              <p className="text-[11px] text-neutral-600">Unlock your wallet</p>
+              <p className="text-[11px] text-neutral-400">Unlock your wallet</p>
               <input className={inp} type="password" placeholder="password" value={pw}
                 onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && unlock()} autoFocus />
-              {err && <p className="text-[11px] text-black">{err}</p>}
+              {err && <p className="text-[11px] text-white">{err}</p>}
               <button className={btnGreen} onClick={unlock}>Unlock</button>
             </>
           ) : (
-            <p className="text-[11px] text-neutral-500">No wallet on this browser. Create or import one in the <a href="/" className="text-black underline">main app</a>, then come back.</p>
+            <p className="text-[11px] text-neutral-500">No wallet on this browser. Create or import one in the <a href="/" className="text-white underline">main app</a>, then come back.</p>
           )}
         </div>
       )}
@@ -301,14 +301,14 @@ function ChartPanel({ token }: { token: Token }) {
     <div className="flex h-full flex-col">
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-bold text-neutral-700">{tokSym(token)}/XNO</span>
+          <span className="text-sm font-bold text-neutral-300">{tokSym(token)}/XNO</span>
           <span className="text-xs text-neutral-500">{fmtXno(token.price)} XNO</span>
           <span className={"text-xs " + chColor(token.change24h)}>{pctStr(token.change24h)}</span>
         </div>
         <div className="flex gap-1">
           {TF.map((t, i) => (
             <button key={t.k}
-              className={"rounded px-2 py-0.5 text-[11px] font-bold " + (i === tf ? "bg-black text-white" : "text-neutral-500 hover:text-neutral-700")}
+              className={"rounded-none px-2 py-0.5 text-[11px] font-bold " + (i === tf ? "bg-white text-black" : "text-neutral-500 hover:text-white")}
               onClick={() => setTf(i)}>{t.k}</button>
           ))}
         </div>
@@ -316,7 +316,7 @@ function ChartPanel({ token }: { token: Token }) {
       {candles.length >= 2 ? (
         <CandleCanvas candles={candles} vol={vol} />
       ) : (
-        <div className="flex flex-1 items-center justify-center text-sm text-neutral-400">not enough trades yet to chart — first buy prints the first candle</div>
+        <div className="flex flex-1 items-center justify-center text-sm text-neutral-500">not enough trades yet to chart — first buy prints the first candle</div>
       )}
     </div>
   );
@@ -388,7 +388,7 @@ function CandleCanvas({ candles, vol }: { candles: Candle[]; vol: Map<number, { 
     const yOf = (p: number) => padT + priceH - ((p - lo) / (hi - lo)) * priceH;
 
     // grid + price axis labels
-    ctx.strokeStyle = "#e5e5e5"; ctx.fillStyle = "#666666";
+    ctx.strokeStyle = "#262626"; ctx.fillStyle = "#737373";
     ctx.font = "10px ui-monospace, monospace"; ctx.lineWidth = 1;
     const rows = 4;
     for (let i = 0; i <= rows; i++) {
@@ -408,7 +408,7 @@ function CandleCanvas({ candles, vol }: { candles: Candle[]; vol: Map<number, { 
     candles.forEach((c, i) => {
       const x = padL + i * cw + cw / 2;
       const up = c.c >= c.o;
-      const col = up ? "#26a69a" : "#ef5350";
+      const col = up ? "#22c55e" : "#ef4444";
       // wick
       ctx.strokeStyle = col; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.moveTo(x, yOf(c.h)); ctx.lineTo(x, yOf(c.l)); ctx.stroke();
@@ -422,7 +422,7 @@ function CandleCanvas({ candles, vol }: { candles: Candle[]; vol: Map<number, { 
       if (v && vMax > 0) {
         const vv = (v.buy + v.sell) / vMax;
         const bh2 = vv * (volH - 4);
-        ctx.fillStyle = v.buy >= v.sell ? "rgba(38,166,154,0.4)" : "rgba(239,83,80,0.4)";
+        ctx.fillStyle = v.buy >= v.sell ? "rgba(34,197,94,0.4)" : "rgba(239,68,68,0.4)";
         ctx.fillRect(x - bodyW / 2, h - bh2, bodyW, bh2);
       }
     });
@@ -430,17 +430,17 @@ function CandleCanvas({ candles, vol }: { candles: Candle[]; vol: Map<number, { 
     // last price line
     const last = candles[n - 1];
     const ly = yOf(last.c);
-    ctx.strokeStyle = last.c >= last.o ? "#26a69a" : "#ef5350";
+    ctx.strokeStyle = last.c >= last.o ? "#22c55e" : "#ef4444";
     ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(padL, ly); ctx.lineTo(padL + plotW, ly); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = last.c >= last.o ? "#26a69a" : "#ef5350";
+    ctx.fillStyle = last.c >= last.o ? "#22c55e" : "#ef4444";
     ctx.fillRect(padL + plotW + 1, ly - 7, padR - 2, 14);
     ctx.fillStyle = "#fff"; ctx.font = "9px ui-monospace, monospace";
     ctx.fillText(fmtAxis(last.c), padL + plotW + 4, ly + 3);
 
     // volume divider label
-    ctx.fillStyle = "#999999"; ctx.font = "9px ui-monospace, monospace";
+    ctx.fillStyle = "#737373"; ctx.font = "9px ui-monospace, monospace";
     ctx.fillText("vol", padL + 2, volTop + 10);
   }, [candles, vol, dims]);
 
@@ -539,9 +539,9 @@ function OrderTicket({ token, keys, say }: { token: Token; keys: Keys | null; sa
 
   return (
     <div className="flex h-full flex-col gap-3">
-      <div className="grid grid-cols-2 gap-1 rounded-none bg-neutral-50 p-1">
-        <button className={"rounded-none py-2 text-sm font-black " + (side === "buy" ? "bg-black text-white" : "text-neutral-600 hover:text-neutral-800")} onClick={() => setSide("buy")}>Buy</button>
-        <button className={"rounded-none py-2 text-sm font-black " + (side === "sell" ? "bg-black text-white" : "text-neutral-600 hover:text-neutral-800")} onClick={() => setSide("sell")}>Sell</button>
+      <div className="grid grid-cols-2 gap-1 rounded-none bg-neutral-950 p-1">
+        <button className={"rounded-none py-2 text-sm font-black " + (side === "buy" ? "bg-white text-black" : "text-neutral-500 hover:text-white")} onClick={() => setSide("buy")}>Buy</button>
+        <button className={"rounded-none py-2 text-sm font-black " + (side === "sell" ? "bg-white text-black" : "text-neutral-500 hover:text-white")} onClick={() => setSide("sell")}>Sell</button>
       </div>
 
       <div>
@@ -560,7 +560,7 @@ function OrderTicket({ token, keys, say }: { token: Token; keys: Keys | null; sa
         />
         <div className="mt-2 grid grid-cols-4 gap-1">
           {[0.25, 0.5, 0.75, 1].map((p) => (
-            <button key={p} className="rounded-none border border-neutral-300 py-1 text-[11px] font-bold text-neutral-600 hover:border-neutral-400 hover:text-neutral-800" onClick={() => setPct(p)}>
+            <button key={p} className="rounded-none border border-neutral-800 py-1 text-[11px] font-bold text-neutral-400 hover:border-neutral-500 hover:text-neutral-200" onClick={() => setPct(p)}>
               {p === 1 ? "MAX" : `${p * 100}%`}
             </button>
           ))}
@@ -570,25 +570,25 @@ function OrderTicket({ token, keys, say }: { token: Token; keys: Keys | null; sa
       <label className="flex items-center justify-between text-[11px] text-neutral-500">
         <span>slippage tolerance</span>
         <span className="flex items-center gap-1">
-          <input className="w-14 rounded-none border border-neutral-300 bg-white px-2 py-1 text-right text-xs text-black" inputMode="decimal" value={slippage} onChange={(e) => setSlippage(e.target.value)} />
+          <input className="w-14 rounded-none border border-neutral-800 bg-neutral-950 px-2 py-1 text-right text-xs text-white" inputMode="decimal" value={slippage} onChange={(e) => setSlippage(e.target.value)} />
           <span>%</span>
         </span>
       </label>
 
-      <div className="rounded-none border border-neutral-300 bg-neutral-50 p-2.5 text-[11px] space-y-1">
-        <Row2 l="you receive ≈" r={quote ? `${quote.out} ${quote.unit}` : "—"} rClass="font-bold text-black" />
+      <div className="rounded-none border border-neutral-800 bg-neutral-950 p-2.5 text-[11px] space-y-1">
+        <Row2 l="you receive ≈" r={quote ? `${quote.out} ${quote.unit}` : "—"} rClass="font-bold text-white" />
         <Row2 l={`min @ ${slip}%`} r={quote ? `${quote.min} ${quote.unit}` : "—"} />
-        <Row2 l="price impact" r={quote ? `${quote.impact.toFixed(2)}%` : "—"} rClass={quote ? (quote.impact >= 5 ? "text-black" : quote.impact >= 1 ? "text-black" : "text-black") : ""} />
+        <Row2 l="price impact" r={quote ? `${quote.impact.toFixed(2)}%` : "—"} rClass={quote ? (quote.impact >= 5 ? "text-white" : quote.impact >= 1 ? "text-white" : "text-white") : ""} />
       </div>
 
       <button
-        className={"rounded-none py-3 text-sm font-black disabled:opacity-40 " + (side === "buy" ? "bg-black text-white hover:bg-neutral-800" : "bg-black text-white hover:bg-neutral-800")}
+        className={"rounded-none py-3 text-sm font-black disabled:opacity-40 " + (side === "buy" ? "bg-white text-black hover:bg-neutral-200" : "bg-white text-black hover:bg-neutral-200")}
         disabled={busy || noPool}
         onClick={confirm}
       >
         {noPool ? "no liquidity yet" : busy ? "submitting…" : side === "buy" ? `Buy ${tokSym(token)}` : `Sell ${tokSym(token)}`}
       </button>
-      <p className="text-center text-[10px] text-neutral-400">hotkeys: <kbd className="text-neutral-600">B</kbd> buy · <kbd className="text-neutral-600">S</kbd> sell · <kbd className="text-neutral-600">Enter</kbd> confirm</p>
+      <p className="text-center text-[10px] text-neutral-500">hotkeys: <kbd className="text-neutral-400">B</kbd> buy · <kbd className="text-neutral-400">S</kbd> sell · <kbd className="text-neutral-400">Enter</kbd> confirm</p>
 
       <PositionCard token={token} keys={keys} busy={busy} setBusy={setBusy} say={say} />
     </div>
@@ -625,18 +625,18 @@ function PositionCard({ token, keys, busy, setBusy, say }: { token: Token; keys:
   };
 
   return (
-    <div className="mt-auto rounded-none border border-neutral-300 bg-neutral-50 p-2.5 space-y-2">
-      <p className="text-[11px] font-bold text-neutral-600">Your position</p>
+    <div className="mt-auto rounded-none border border-neutral-800 bg-neutral-950 p-2.5 space-y-2">
+      <p className="text-[11px] font-bold text-neutral-400">Your position</p>
       <div className="grid grid-cols-2 gap-1 text-[11px]">
         <Row2 l="holding" r={`${fmtTok(token.myBalance, token.decimals)}`} />
         <Row2 l="value" r={`${fmtXno(valueRaw.toString())} XNO`} />
         <Row2 l="staked" r={`${fmtTok(token.myStaked, token.decimals)}`} />
-        <Row2 l="claimable" r={`${fmtXno(token.myClaimable)} XNO`} rClass="text-black" />
+        <Row2 l="claimable" r={`${fmtXno(token.myClaimable)} XNO`} rClass="text-white" />
       </div>
       <div className="flex gap-1">
         <input className={inpSm} placeholder="stake" inputMode="decimal" value={stakeAmt} onChange={(e) => setStakeAmt(e.target.value)} />
         {[25, 50, 100].map((p) => (
-          <button key={p} className="shrink-0 rounded-none border border-neutral-300 px-1.5 text-[10px] font-bold text-neutral-600 hover:border-black" disabled={bal <= 0n}
+          <button key={p} className="shrink-0 rounded-none border border-neutral-800 px-1.5 text-[10px] font-bold text-neutral-400 hover:border-white" disabled={bal <= 0n}
             onClick={() => setStakeAmt(fmtTok(((bal * BigInt(p)) / 100n).toString(), token.decimals))}>{p === 100 ? "MAX" : `${p}%`}</button>
         ))}
         <button className={miniBtn} disabled={busy || bal <= 0n} onClick={doStake}>Stake</button>
@@ -644,13 +644,13 @@ function PositionCard({ token, keys, busy, setBusy, say }: { token: Token; keys:
       <div className="flex gap-1">
         <input className={inpSm} placeholder="unstake" inputMode="decimal" value={unstakeAmt} onChange={(e) => setUnstakeAmt(e.target.value)} />
         {[25, 50, 100].map((p) => (
-          <button key={p} className="shrink-0 rounded-none border border-neutral-300 px-1.5 text-[10px] font-bold text-neutral-600 hover:border-black" disabled={staked <= 0n}
+          <button key={p} className="shrink-0 rounded-none border border-neutral-800 px-1.5 text-[10px] font-bold text-neutral-400 hover:border-white" disabled={staked <= 0n}
             onClick={() => setUnstakeAmt(fmtTok(((staked * BigInt(p)) / 100n).toString(), token.decimals))}>{p === 100 ? "MAX" : `${p}%`}</button>
         ))}
         <button className={miniBtn} disabled={busy || staked <= 0n} onClick={doUnstake}>Unstake</button>
       </div>
       <button
-        className="w-full rounded-none bg-neutral-100 border border-black py-1.5 text-[11px] font-bold text-black hover:bg-neutral-200 disabled:opacity-40"
+        className="w-full rounded-none bg-neutral-900 border border-neutral-600 py-1.5 text-[11px] font-bold text-white hover:bg-neutral-800 disabled:opacity-40"
         disabled={busy || claimable <= 0n || !keys}
         onClick={() => keys && run(() => sendOp(keys, token.tokenId, { kind: "claim" }), "claim")}
       >
@@ -700,17 +700,17 @@ function DepthCurve({ token }: { token: Token }) {
   return (
     <div className="flex h-full flex-col">
       <div className="mb-1 flex items-center justify-between">
-        <p className="text-sm font-bold text-neutral-700">AMM depth</p>
+        <p className="text-sm font-bold text-neutral-300">AMM depth</p>
         <p className="text-[11px] text-neutral-500">k = {fmtCompact(k)}</p>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full flex-1" preserveAspectRatio="none">
-        <line x1={W / 2} y1={padT} x2={W / 2} y2={H - padB} stroke="#cccccc" strokeDasharray="2 2" />
-        <line x1={padL} y1={yOf(spot)} x2={W - padR} y2={yOf(spot)} stroke="#999999" strokeWidth="0.5" />
-        <path d={path(pts.sell, -1)} fill="none" stroke="#888888" strokeWidth="1.5" />
-        <path d={path(pts.buy, 1)} fill="none" stroke="#000000" strokeWidth="1.5" />
-        <circle cx={W / 2} cy={yOf(spot)} r="2.5" fill="#000000" />
-        <text x={padL} y={H - 6} fontSize="8" fill="#666666">← sell (price falls)</text>
-        <text x={W - padR} y={H - 6} fontSize="8" fill="#666666" textAnchor="end">buy (price rises) →</text>
+        <line x1={W / 2} y1={padT} x2={W / 2} y2={H - padB} stroke="#404040" strokeDasharray="2 2" />
+        <line x1={padL} y1={yOf(spot)} x2={W - padR} y2={yOf(spot)} stroke="#737373" strokeWidth="0.5" />
+        <path d={path(pts.sell, -1)} fill="none" stroke="#737373" strokeWidth="1.5" />
+        <path d={path(pts.buy, 1)} fill="none" stroke="#ffffff" strokeWidth="1.5" />
+        <circle cx={W / 2} cy={yOf(spot)} r="2.5" fill="#ffffff" />
+        <text x={padL} y={H - 6} fontSize="8" fill="#737373">← sell (price falls)</text>
+        <text x={W - padR} y={H - 6} fontSize="8" fill="#737373" textAnchor="end">buy (price rises) →</text>
       </svg>
       <div className="mt-1 grid grid-cols-2 gap-2 text-[11px] text-neutral-500">
         <span>reserve XNO {fmtCompact(px)}</span>
@@ -727,20 +727,20 @@ function Tape({ token, keys }: { token: Token; keys: Keys | null }) {
   const tradeXno = (t: Trade) => ((BigInt(t.amountRaw) * BigInt(t.priceRaw)) / 10n ** BigInt(token.decimals)).toString();
   return (
     <div className="flex h-full flex-col">
-      <p className="mb-2 text-sm font-bold text-neutral-700">Trades</p>
-      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-2 text-[10px] uppercase tracking-wider text-neutral-400 pb-1 border-b border-neutral-300">
+      <p className="mb-2 text-sm font-bold text-neutral-300">Trades</p>
+      <div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-2 text-[10px] uppercase tracking-wider text-neutral-500 pb-1 border-b border-neutral-800">
         <span>price (XNO)</span><span className="text-right">size</span><span className="text-right">value</span><span className="text-right">age</span>
       </div>
       <div className="flex-1 overflow-y-auto">
-        {trades.length === 0 && <p className="py-6 text-center text-xs text-neutral-400">no trades yet</p>}
+        {trades.length === 0 && <p className="py-6 text-center text-xs text-neutral-500">no trades yet</p>}
         {trades.slice(0, 60).map((t, i) => {
           const mine = keys && t.account === keys.address;
           return (
-            <div key={i} className={"grid grid-cols-[1fr_auto_auto_auto] gap-x-2 py-0.5 text-[11px] tabular-nums " + (mine ? "bg-neutral-50 rounded" : "")}>
-              <span className={t.kind === "buy" ? "text-green-600" : "text-red-600"}>{fmtXno(t.priceRaw)}</span>
-              <span className="text-right text-neutral-600">{fmtTok(t.amountRaw, token.decimals)}</span>
+            <div key={i} className={"grid grid-cols-[1fr_auto_auto_auto] gap-x-2 py-0.5 text-[11px] tabular-nums " + (mine ? "bg-neutral-900 rounded" : "")}>
+              <span className={t.kind === "buy" ? "text-green-500" : "text-red-500"}>{fmtXno(t.priceRaw)}</span>
+              <span className="text-right text-neutral-400">{fmtTok(t.amountRaw, token.decimals)}</span>
               <span className="text-right text-neutral-500">{usd != null ? fmtUsd(tradeXno(t), usd) : fmtXno(tradeXno(t))}</span>
-              <span className="text-right text-neutral-400">{timeAgo(t.time)}</span>
+              <span className="text-right text-neutral-500">{timeAgo(t.time)}</span>
             </div>
           );
         })}
@@ -756,28 +756,28 @@ function HoldersList({ token }: { token: Token }) {
   return (
     <div className="flex h-full flex-col">
       <div className="mb-2 flex items-center justify-between">
-        <p className="text-sm font-bold text-neutral-700">Holders <span className="text-neutral-400">({token.holders})</span></p>
-        <p className="text-[11px] text-neutral-500">top10 <span className={top10 > 80 ? "text-black" : top10 > 50 ? "text-black" : "text-black"}>{top10.toFixed(1)}%</span></p>
+        <p className="text-sm font-bold text-neutral-300">Holders <span className="text-neutral-500">({token.holders})</span></p>
+        <p className="text-[11px] text-neutral-500">top10 <span className={top10 > 80 ? "text-white" : top10 > 50 ? "text-white" : "text-white"}>{top10.toFixed(1)}%</span></p>
       </div>
       <div className="flex-1 overflow-y-auto space-y-1">
         {top.map((h, i) => (
           <div key={h.account} className="flex items-center gap-2 text-[11px]">
-            <span className="w-4 text-neutral-400">{i + 1}</span>
-            <span className="font-mono text-neutral-600 flex-1 truncate">{h.account === token.creator ? "dev · " : ""}{short(h.account)}</span>
-            <div className="h-1.5 w-16 rounded-full bg-neutral-100 overflow-hidden">
-              <div className="h-full bg-black" style={{ width: `${Math.min(100, h.pct)}%` }} />
+            <span className="w-4 text-neutral-500">{i + 1}</span>
+            <span className="font-mono text-neutral-400 flex-1 truncate">{h.account === token.creator ? "dev · " : ""}{short(h.account)}</span>
+            <div className="h-1.5 w-16 rounded-full bg-neutral-900 overflow-hidden">
+              <div className="h-full bg-white" style={{ width: `${Math.min(100, h.pct)}%` }} />
             </div>
-            <span className="w-10 text-right tabular-nums text-neutral-600">{h.pct.toFixed(1)}%</span>
+            <span className="w-10 text-right tabular-nums text-neutral-400">{h.pct.toFixed(1)}%</span>
           </div>
         ))}
-        {top.length === 0 && <p className="py-6 text-center text-xs text-neutral-400">no holders yet</p>}
+        {top.length === 0 && <p className="py-6 text-center text-xs text-neutral-500">no holders yet</p>}
       </div>
     </div>
   );
 }
 
 function Empty({ label }: { label: string }) {
-  return <div className="flex h-full items-center justify-center p-4 text-center text-xs text-neutral-400">{label}</div>;
+  return <div className="flex h-full items-center justify-center p-4 text-center text-xs text-neutral-500">{label}</div>;
 }
 // Uploaded images are served by our own /api/image/<id> route. Older uploads
 // stored an ABSOLUTE URL baked in with whatever domain/alias was live at
@@ -793,7 +793,7 @@ function normalizeImage(url: string): string {
 function Avatar({ image, symbol, size }: { image: string; symbol: string; size: number }) {
   if (image) return <img src={normalizeImage(image)} alt={symbol} width={size} height={size} className="rounded-full object-cover" style={{ width: size, height: size }} />;
   return (
-    <div className="flex items-center justify-center rounded-full bg-neutral-200 font-black text-neutral-700"
+    <div className="flex items-center justify-center rounded-full bg-neutral-800 font-black text-white"
       style={{ width: size, height: size, fontSize: size * 0.42 }}>
       {(symbol || "?").slice(0, 2).toUpperCase()}
     </div>
@@ -803,7 +803,7 @@ function fmtCompact(n: number): string {
   return fmtNum(n, 3);
 }
 
-const inp = "w-full rounded-none border border-neutral-300 bg-white px-3 py-2.5 text-sm text-black placeholder-neutral-400 focus:outline-none focus:border-black";
-const inpSm = "w-full rounded-none border border-neutral-300 bg-white px-2 py-1.5 text-xs text-black placeholder-neutral-400 focus:outline-none focus:border-black";
-const btnGreen = "w-full rounded-none bg-black px-3 py-2 text-sm font-black text-white hover:bg-neutral-800";
-const miniBtn = "shrink-0 rounded-none border border-neutral-300 px-3 py-1.5 text-xs font-bold text-neutral-800 hover:border-black disabled:opacity-40";
+const inp = "w-full rounded-none border border-neutral-800 bg-black px-3 py-2.5 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-white";
+const inpSm = "w-full rounded-none border border-neutral-800 bg-black px-2 py-1.5 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-white";
+const btnGreen = "w-full rounded-none bg-white px-3 py-2 text-sm font-black text-black hover:bg-neutral-200";
+const miniBtn = "shrink-0 rounded-none border border-neutral-800 px-3 py-1.5 text-xs font-bold text-neutral-200 hover:border-white disabled:opacity-40";

@@ -22,8 +22,8 @@ const TF = [
   { k: "1d", s: 86400 },
 ] as const;
 
-const UP = "#26a69a";  // soft green
-const DOWN = "#ef5350"; // soft red
+const UP = "#22c55e";  // soft green
+const DOWN = "#ef4444"; // soft red
 const priceNum = (raw: string) => Number(BigInt(raw)) / 1e30;
 const fmtP = (v: number) => fmtNum(v, 4);
 
@@ -55,7 +55,7 @@ function buildVolume(trades: Trade[], tf: number, dec: number) {
     .map(([time, v]) => ({
       time: time as UTCTimestamp,
       value: v.buy + v.sell,
-      color: v.buy >= v.sell ? "rgba(38,166,154,0.45)" : "rgba(239,83,80,0.45)",
+      color: v.buy >= v.sell ? "rgba(34,197,94,0.45)" : "rgba(239,68,68,0.45)",
     }));
 }
 
@@ -104,11 +104,15 @@ export default function PriceChart({
     const chart = createChart(wrap.current, {
       width: wrap.current.clientWidth,
       height: 320,
-      layout: { background: { type: ColorType.Solid, color: "#ffffff" }, textColor: "#666666", fontSize: 11 },
-      grid: { vertLines: { color: "rgba(0,0,0,0.06)" }, horzLines: { color: "rgba(0,0,0,0.06)" } },
-      rightPriceScale: { borderColor: "rgba(0,0,0,0.2)", scaleMargins: { top: 0.08, bottom: 0.28 } },
-      timeScale: { borderColor: "rgba(0,0,0,0.2)", timeVisible: true, secondsVisible: false },
-      crosshair: { mode: CrosshairMode.Normal },
+      layout: { background: { type: ColorType.Solid, color: "#000000" }, textColor: "#a3a3a3", fontSize: 11 },
+      grid: { vertLines: { color: "rgba(255,255,255,0.06)" }, horzLines: { color: "rgba(255,255,255,0.06)" } },
+      rightPriceScale: { borderColor: "rgba(255,255,255,0.2)", scaleMargins: { top: 0.08, bottom: 0.28 } },
+      timeScale: { borderColor: "rgba(255,255,255,0.2)", timeVisible: true, secondsVisible: false },
+      crosshair: {
+        mode: CrosshairMode.Normal,
+        vertLine: { color: "rgba(255,255,255,0.4)", labelBackgroundColor: "#404040" },
+        horzLine: { color: "rgba(255,255,255,0.4)", labelBackgroundColor: "#404040" },
+      },
     });
     chartRef.current = chart;
 
@@ -123,7 +127,7 @@ export default function PriceChart({
             priceFormat: { type: "custom", formatter: (p: number) => fmtP(p / scaleRef.current), minMove: 1e-8 },
           })
         : chart.addAreaSeries({
-            lineColor: UP, topColor: "rgba(38,166,154,0.14)", bottomColor: "rgba(38,166,154,0)", lineWidth: 2,
+            lineColor: UP, topColor: "rgba(34,197,94,0.14)", bottomColor: "rgba(34,197,94,0)", lineWidth: 2,
             priceFormat: { type: "custom", formatter: (p: number) => fmtP(p / scaleRef.current), minMove: 1e-8 },
           });
     priceRef.current = price as any;
@@ -135,7 +139,7 @@ export default function PriceChart({
     // 20-period moving average overlay — the standard "is this above/below
     // trend" reference line traders expect on any serious chart.
     const ma = chart.addLineSeries({
-      color: "#b8860b", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+      color: "#737373", lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
       priceFormat: { type: "custom", formatter: (p: number) => fmtP(p / scaleRef.current), minMove: 1e-8 },
     });
     maRef.current = ma;
@@ -193,24 +197,24 @@ export default function PriceChart({
   return (
     <div className="relative">
       <div className="mb-2 flex items-center justify-between">
-        <div className="flex items-center gap-1 rounded-none bg-neutral-50 p-0.5">
+        <div className="flex items-center gap-1 rounded-none bg-neutral-950 p-0.5">
           {(["candles", "area"] as const).map((t) => (
             <button key={t}
-              className={"rounded-none px-2 py-0.5 text-[11px] font-bold " + (type === t ? "bg-black text-white" : "text-neutral-500 hover:text-neutral-700")}
+              className={"rounded-none px-2 py-0.5 text-[11px] font-bold " + (type === t ? "bg-white text-black" : "text-neutral-500 hover:text-white")}
               onClick={() => setType(t)}>{t === "candles" ? "Candles" : "Line"}</button>
           ))}
         </div>
         {cands.length > 0 && (
           <span className="hidden sm:inline text-[10px] text-neutral-500 tabular-nums">
-            H <span className="text-green-700">{fmtP(Math.max(...cands.map((c) => c.high)))}</span>{" "}
-            L <span className="text-red-600">{fmtP(Math.min(...cands.map((c) => c.low)))}</span>
-            <span className="ml-2 text-amber-600">— MA20</span>
+            H <span className="text-green-500">{fmtP(Math.max(...cands.map((c) => c.high)))}</span>{" "}
+            L <span className="text-red-500">{fmtP(Math.min(...cands.map((c) => c.low)))}</span>
+            <span className="ml-2 text-neutral-500">— MA20</span>
           </span>
         )}
         <div className="flex gap-0.5">
           {TF.map((t, i) => (
             <button key={t.k}
-              className={"rounded px-1.5 py-0.5 text-[11px] font-bold " + (i === tf ? "bg-black text-white" : "text-neutral-500 hover:text-neutral-700")}
+              className={"rounded-none px-1.5 py-0.5 text-[11px] font-bold " + (i === tf ? "bg-white text-black" : "text-neutral-500 hover:text-white")}
               onClick={() => setTf(i)}>{t.k}</button>
           ))}
         </div>
@@ -228,7 +232,7 @@ export default function PriceChart({
               <span className="text-neutral-500">C <span style={{ color: up ? UP : DOWN }}>{fmtP(legend.c)}</span></span>
             </>
           ) : (
-            <span className="text-neutral-500">{symbol || "price"} <span className="text-black">{fmtP(legend.c)} XNO</span></span>
+            <span className="text-neutral-500">{symbol || "price"} <span className="text-white">{fmtP(legend.c)} XNO</span></span>
           )}
         </div>
       )}

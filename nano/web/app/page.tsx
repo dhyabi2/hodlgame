@@ -212,9 +212,9 @@ const quoteSell = (poolXno: string, poolTokens: string, tokens: bigint): bigint 
 
 
 const inputC =
-  "w-full rounded-none border border-neutral-300 bg-white px-4 py-3 text-sm text-black placeholder-neutral-400 focus:outline-none focus:border-black";
+  "w-full rounded-none border border-neutral-800 bg-black px-4 py-3 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-white";
 const btn =
-  "w-full rounded-none bg-black px-4 py-3 text-sm font-bold text-white hover:bg-neutral-800 disabled:opacity-40 transition";
+  "w-full rounded-none bg-white px-4 py-3 text-sm font-black uppercase tracking-wide text-black hover:bg-neutral-200 disabled:opacity-40 transition duration-200 motion-reduce:transition-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-white focus-visible:outline-offset-2";
 
 export default function Home() {
   const [keys, setKeys] = useState<Keys | null>(null);
@@ -373,36 +373,36 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-white text-black pb-20 overflow-x-hidden">
-      <header className="sticky top-0 z-20 border-b border-neutral-300 bg-white/90 backdrop-blur">
-        <div className="w-full px-4 py-3 flex items-center gap-3 sm:gap-5">
-          <button className="text-lg font-black tracking-tight text-black shrink-0" onClick={() => { setSelectedId(null); setTab("explore"); }}>
-            HoldFun
+    <main className="min-h-screen bg-black text-white pb-20 overflow-x-hidden">
+      <header className={"sticky top-0 z-20 h-14 flex items-center bg-black/90 backdrop-blur border-b " + (!selectedId && tab === "explore" ? "border-transparent" : "border-neutral-800")}>
+        <div className="w-full px-4 flex items-center gap-3 sm:gap-5">
+          <button className="text-base sm:text-lg font-black tracking-[0.1em] text-white shrink-0" onClick={() => { setSelectedId(null); setTab("explore"); }}>
+            HOLDFUN
           </button>
           {/* Desktop nav only — on mobile the bottom tab bar handles navigation. */}
-          <nav className="hidden sm:flex items-center gap-4 text-xs font-bold uppercase tracking-wide text-neutral-500 min-w-0 overflow-x-auto">
+          <nav className="hidden sm:flex items-center gap-4 text-xs font-bold uppercase tracking-wide text-neutral-400 min-w-0 overflow-x-auto">
             {([["explore", "Coins"], ["ranks", "Ranks"], ["scan", "Explorer"], ["wallet", "Wallet"]] as const).map(([id, label]) => (
-              <button key={id} className={"hover:text-black whitespace-nowrap " + (!selectedId && tab === id ? "text-black" : "")} onClick={() => { setSelectedId(null); setTab(id); }}>{label}</button>
+              <button key={id} className={"whitespace-nowrap py-1 border-b-2 -mb-px " + (!selectedId && tab === id ? "text-white border-white" : "border-transparent hover:text-white")} onClick={() => { setSelectedId(null); setTab(id); }}>{label}</button>
             ))}
-            <a className="hover:text-black whitespace-nowrap" href="/pro">Chart / Trade ↗</a>
+            <a className="hover:text-white whitespace-nowrap" href="/pro">Chart / Trade ↗</a>
           </nav>
           <div className="ml-auto flex items-center gap-3 shrink-0">
             <button
-              className="hidden sm:inline-block rounded-none bg-black px-3 py-1.5 text-xs font-bold uppercase tracking-wide text-white hover:bg-neutral-800"
+              className="rounded-none bg-white px-3 py-1.5 text-xs font-black uppercase tracking-wide text-black hover:bg-neutral-200"
               onClick={() => { setSelectedId(null); setTab("create"); }}
             >
-              + Launch Token
+              Create
             </button>
             {keys ? (
               <button
-                className="text-xs text-neutral-700 font-mono hover:text-black"
+                className="text-xs text-neutral-300 font-mono hover:text-white"
                 title="wallet"
                 onClick={() => { setSelectedId(null); setTab("wallet"); }}
               >
                 {short(keys.address)}
               </button>
             ) : (
-              <button className="text-xs text-black font-bold uppercase tracking-wide" onClick={promptUnlock}>
+              <button className="text-xs text-white font-bold uppercase tracking-wide" onClick={promptUnlock}>
                 unlock
               </button>
             )}
@@ -432,12 +432,12 @@ export default function Home() {
             // a loading card, never the empty "No coins yet" feed (which made a
             // shared coin link look broken).
             <div className="w-full max-w-3xl mx-auto">
-              <button onClick={() => setSelectedId(null)} className="text-xs text-neutral-500 hover:text-black">← all coins</button>
-              <div className="mt-4 rounded-none border border-neutral-300 bg-white p-10 text-center text-neutral-500 animate-pulse">loading coin…</div>
+              <button onClick={() => setSelectedId(null)} className="text-xs text-neutral-500 hover:text-white">← all coins</button>
+              <div className="mt-4 rounded-none border border-neutral-800 bg-neutral-950 p-10 text-center text-neutral-500 animate-pulse">loading coin…</div>
             </div>
           )
         ) : tab === "explore" ? (
-          <Feed tokens={tokens} onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} usd={usd} />
+          <Feed tokens={tokens} onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} usd={usd} onCreate={() => setTab("create")} />
         ) : tab === "ranks" ? (
           <Ranks onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} />
         ) : tab === "scan" ? (
@@ -467,7 +467,7 @@ export default function Home() {
       </div>
 
       {toast && (
-        <div className="fixed bottom-20 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-none border border-black bg-white px-4 py-2 text-sm shadow-lg max-w-[90vw] truncate">
+        <div className="fixed bottom-20 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-none border border-neutral-700 bg-neutral-950 text-white px-4 py-2 text-sm shadow-lg max-w-[90vw] truncate">
           {toast}
         </div>
       )}
@@ -517,10 +517,10 @@ function UnlockModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={onClose}>
-      <div className="w-full rounded-none sm:rounded-none border border-neutral-300 bg-white p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+      <div className="w-full rounded-none sm:rounded-none border border-neutral-800 bg-neutral-950 p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between">
-          <p className="text-sm font-bold text-neutral-800">{hasWallet ? "Unlock wallet" : "Set up your wallet"}</p>
-          <button className="text-neutral-500 hover:text-neutral-700 text-lg leading-none" onClick={onClose}>×</button>
+          <p className="text-sm font-bold text-neutral-200">{hasWallet ? "Unlock wallet" : "Set up your wallet"}</p>
+          <button className="text-neutral-500 hover:text-white text-lg leading-none" onClick={onClose}>×</button>
         </div>
         {hasWallet ? (
           <>
@@ -533,13 +533,13 @@ function UnlockModal({
               onChange={(e) => setPw(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && unlock()}
             />
-            {err && <p className="text-xs text-black">{err}</p>}
+            {err && <p className="text-xs text-white">{err}</p>}
             <button className={btn} disabled={busy} onClick={unlock}>{busy ? "unlocking…" : "Unlock"}</button>
-            <p className="text-[11px] text-neutral-400">decrypted in your browser — your seed never leaves it</p>
+            <p className="text-[11px] text-neutral-500">decrypted in your browser — your seed never leaves it</p>
           </>
         ) : (
           <>
-            <p className="text-xs text-neutral-600">You need a wallet to trade. It’s created and encrypted right in your browser — takes a few seconds.</p>
+            <p className="text-xs text-neutral-400">You need a wallet to trade. It’s created and encrypted right in your browser — takes a few seconds.</p>
             <button className={btn} onClick={goSetup}>Create / import wallet →</button>
           </>
         )}
@@ -682,38 +682,39 @@ function ConnectedWallet({
   };
 
   return (
-    <div className="rounded-none border border-neutral-300 bg-white p-5 space-y-4">
+    <div className="rounded-none border border-neutral-800 bg-neutral-950 p-5 space-y-4">
       <div>
         <p className="text-[11px] text-neutral-500 mb-1">balance</p>
         <p className="text-3xl font-black">{balance == null ? "…" : fmtXno(balance)} <span className="text-lg text-neutral-500">XNO</span></p>
       </div>
 
-      <div className="rounded-none border border-neutral-300 bg-neutral-50 p-3">
+      <div className="rounded-none border border-neutral-800 bg-neutral-950 p-3">
         <p className="text-[11px] text-neutral-500 mb-2">your address · scan or send XNO here to fund</p>
         <div className="flex items-start gap-3">
-          <div className="shrink-0 border border-neutral-300 bg-white p-1.5">
+          {/* QR stays black-on-white — scanners need the light quiet zone. */}
+          <div className="shrink-0 border border-neutral-800 bg-white p-1.5">
             <QRCodeSVG value={`nano:${keys.address}`} size={112} bgColor="#ffffff" fgColor="#000000" level="M" />
           </div>
           <div className="min-w-0 flex-1 space-y-2">
-            <span className="block text-xs font-mono text-neutral-700 break-all">{keys.address}</span>
-            <button className="rounded-none bg-neutral-100 px-2.5 py-1.5 text-[11px] font-bold text-neutral-700 hover:bg-neutral-200" onClick={copy}>
+            <span className="block text-xs font-mono text-neutral-300 break-all">{keys.address}</span>
+            <button className="rounded-none bg-neutral-900 px-2.5 py-1.5 text-[11px] font-bold text-neutral-300 hover:bg-neutral-800" onClick={copy}>
               {copied ? "copied" : "copy address"}
             </button>
-            <p className="text-[10px] text-neutral-400">deposits are detected live and received automatically</p>
+            <p className="text-[10px] text-neutral-500">deposits are detected live and received automatically</p>
           </div>
         </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
         <button
-          className="rounded-none border border-neutral-300 py-3 text-sm font-bold text-neutral-800 hover:border-black disabled:opacity-40"
+          className="rounded-none border border-neutral-800 py-3 text-sm font-bold text-neutral-200 hover:border-white disabled:opacity-40"
           disabled={receiving}
           onClick={() => receiveAll(true)}
         >
           {receiving ? "receiving…" : "Receive pending"}
         </button>
         <button
-          className="rounded-none border border-neutral-300 py-3 text-sm font-bold text-neutral-800 hover:border-black"
+          className="rounded-none border border-neutral-800 py-3 text-sm font-bold text-neutral-200 hover:border-white"
           onClick={() => setReveal((v) => !v)}
         >
           Back up seed
@@ -721,35 +722,35 @@ function ConnectedWallet({
       </div>
 
       {reveal && (
-        <div className="rounded-none border border-neutral-400 bg-neutral-100 p-3 space-y-2">
-          <p className="text-[11px] text-black font-bold">Your seed is full control of this wallet. Never share it. Anyone with it can drain your funds.</p>
+        <div className="rounded-none border border-neutral-700 bg-neutral-900 p-3 space-y-2">
+          <p className="text-[11px] text-white font-bold">Your seed is full control of this wallet. Never share it. Anyone with it can drain your funds.</p>
           {!revealed ? (
             <>
               <input className={inputC} type="password" placeholder="wallet password" value={revealPw} onChange={(e) => setRevealPw(e.target.value)} />
-              {revealErr && <p className="text-xs text-black">{revealErr}</p>}
+              {revealErr && <p className="text-xs text-white">{revealErr}</p>}
               <div className="flex gap-2">
                 <button className={btn} onClick={doReveal}>Reveal seed</button>
-                <button className="rounded-none border border-neutral-300 px-4 py-3 text-sm font-bold text-neutral-600" onClick={closeReveal}>Cancel</button>
+                <button className="rounded-none border border-neutral-800 px-4 py-3 text-sm font-bold text-neutral-400" onClick={closeReveal}>Cancel</button>
               </div>
             </>
           ) : (
             <>
-              <p className="text-xs font-mono text-black break-all select-all bg-neutral-100 rounded-none p-2">{revealed}</p>
+              <p className="text-xs font-mono text-white break-all select-all bg-neutral-900 rounded-none p-2">{revealed}</p>
               <div className="flex gap-2">
                 <button
-                  className="rounded-none bg-neutral-100 px-4 py-2 text-sm font-bold text-neutral-800 hover:bg-neutral-200"
+                  className="rounded-none bg-neutral-900 px-4 py-2 text-sm font-bold text-neutral-200 hover:bg-neutral-800"
                   onClick={() => navigator.clipboard.writeText(revealed).catch(() => {})}
                 >
                   Copy seed
                 </button>
-                <button className="rounded-none border border-neutral-300 px-4 py-2 text-sm font-bold text-neutral-600" onClick={closeReveal}>Hide</button>
+                <button className="rounded-none border border-neutral-800 px-4 py-2 text-sm font-bold text-neutral-400" onClick={closeReveal}>Hide</button>
               </div>
             </>
           )}
         </div>
       )}
 
-      <button className="w-full rounded-none border border-neutral-300 px-4 py-3 text-sm font-bold text-neutral-800 hover:border-black" onClick={lock}>
+      <button className="w-full rounded-none border border-neutral-800 px-4 py-3 text-sm font-bold text-neutral-200 hover:border-white" onClick={lock}>
         Lock
       </button>
     </div>
@@ -837,15 +838,15 @@ function WalletPanel({
 
   if (hasWallet) {
     return (
-      <div className="rounded-none border border-neutral-300 bg-white p-4 space-y-2">
-        <p className="text-sm font-bold text-neutral-700">Open wallet</p>
+      <div className="rounded-none border border-neutral-800 bg-neutral-950 p-4 space-y-2">
+        <p className="text-sm font-bold text-neutral-300">Open wallet</p>
         <input className={inputC} type="password" placeholder="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        {err && <p className="text-xs text-black">{err}</p>}
+        {err && <p className="text-xs text-white">{err}</p>}
         <div className="flex gap-2">
           <button className={btn} disabled={busy} onClick={open}>
             {busy ? "opening…" : "Open"}
           </button>
-          <button className="rounded-none border border-neutral-300 px-4 py-3 text-sm font-bold text-black hover:border-black" onClick={remove}>
+          <button className="rounded-none border border-neutral-800 px-4 py-3 text-sm font-bold text-white hover:border-white" onClick={remove}>
             Delete
           </button>
         </div>
@@ -854,12 +855,12 @@ function WalletPanel({
   }
 
   return (
-    <div className="rounded-none border border-neutral-300 bg-white p-4 space-y-2">
+    <div className="rounded-none border border-neutral-800 bg-neutral-950 p-4 space-y-2">
       <div className="flex gap-2">
-        <button className={"px-4 py-2 rounded-none text-sm font-bold " + (mode === "create" ? "bg-black text-white" : "text-neutral-500")} onClick={() => setMode("create")}>
+        <button className={"px-4 py-2 rounded-none text-sm font-bold " + (mode === "create" ? "bg-white text-black" : "text-neutral-500")} onClick={() => setMode("create")}>
           Create
         </button>
-        <button className={"px-4 py-2 rounded-none text-sm font-bold " + (mode === "import" ? "bg-black text-white" : "text-neutral-500")} onClick={() => setMode("import")}>
+        <button className={"px-4 py-2 rounded-none text-sm font-bold " + (mode === "import" ? "bg-white text-black" : "text-neutral-500")} onClick={() => setMode("import")}>
           Import seed
         </button>
       </div>
@@ -870,11 +871,11 @@ function WalletPanel({
       {mode === "create" && (
         <input className={inputC} type="password" placeholder="confirm password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
       )}
-      {err && <p className="text-xs text-black">{err}</p>}
+      {err && <p className="text-xs text-white">{err}</p>}
       <button className={btn} disabled={busy} onClick={mode === "create" ? create : importSeed}>
         {busy ? "encrypting…" : mode === "create" ? "Create wallet" : "Encrypt & unlock"}
       </button>
-      <p className="text-[11px] text-neutral-400">seed is encrypted in your browser (PBKDF2 + AES-GCM) and never leaves it</p>
+      <p className="text-[11px] text-neutral-500">seed is encrypted in your browser (PBKDF2 + AES-GCM) and never leaves it</p>
     </div>
   );
 }
@@ -907,8 +908,8 @@ function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddr
   const empty = lb.tokens.byVolume.length === 0;
   if (empty) {
     return (
-      <div className="rounded-none border border-neutral-300 bg-white p-10 text-center text-neutral-500">
-        <p className="font-bold text-neutral-700">No ranks yet</p>
+      <div className="rounded-none border border-neutral-800 bg-neutral-950 p-10 text-center text-neutral-500">
+        <p className="font-bold text-neutral-300">No ranks yet</p>
         <p className="text-sm mt-1">Launch and trade coins to climb the boards.</p>
       </div>
     );
@@ -926,74 +927,74 @@ function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddr
     <div className="space-y-4">
       <div className="grid gap-4 lg:grid-cols-2">
         {/* token leaderboard */}
-        <section className="rounded-none border border-neutral-300 bg-white p-4">
+        <section className="rounded-none border border-neutral-800 bg-neutral-950 p-4">
           <div className="flex items-center gap-1 mb-3 overflow-x-auto">
             {boards.map((b) => (
               <button key={b.k}
-                className={"rounded-none px-2.5 py-1 text-xs font-bold whitespace-nowrap " + (board === b.k ? "bg-black text-white" : "text-neutral-500 hover:text-neutral-700")}
+                className={"rounded-none px-2.5 py-1 text-xs font-bold whitespace-nowrap " + (board === b.k ? "bg-white text-black" : "text-neutral-500 hover:text-white")}
                 onClick={() => setBoard(b.k)}>{b.label}</button>
             ))}
           </div>
           <div className="space-y-1">
             {rows.map((t, i) => (
               <button key={t.tokenId} onClick={() => onSelect(t.tokenId)}
-                className="flex w-full items-center gap-3 rounded-none px-2 py-2 text-left hover:bg-neutral-50">
+                className="flex w-full items-center gap-3 rounded-none px-2 py-2 text-left hover:bg-neutral-900">
                 <span className={"w-5 text-center text-xs font-black " + medal(i)}>{i + 1}</span>
                 <Avatar image={t.image} symbol={tokSym(t)} size={30} />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-bold truncate">{tokSym(t)} <span className="text-[11px] font-normal text-neutral-500">{tokName(t)}</span></p>
                   <p className="text-[11px] text-neutral-500 truncate">mc {fmtXno(t.marketCap)} XNO · {t.holders} holder{t.holders === 1 ? "" : "s"} · vol {fmtXno(t.volume)} XNO</p>
                 </div>
-                <span className={"text-xs font-bold tabular-nums shrink-0 " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-green-600" : "text-red-600")}>{pctStr(t.change24h)}</span>
+                <span className={"text-xs font-bold tabular-nums shrink-0 " + (t.change24h == null ? "text-neutral-500" : t.change24h >= 0 ? "text-green-500" : "text-red-500")}>{pctStr(t.change24h)}</span>
               </button>
             ))}
           </div>
         </section>
 
         {/* creators */}
-        <section className="rounded-none border border-neutral-300 bg-white p-4">
-          <p className="text-sm font-bold text-neutral-700 mb-3">Top creators</p>
+        <section className="rounded-none border border-neutral-800 bg-neutral-950 p-4">
+          <p className="text-sm font-bold text-neutral-300 mb-3">Top creators</p>
           <div className="space-y-1">
             {lb.creators.map((c, i) => (
-              <div key={c.account} className={"flex items-center gap-3 rounded-none px-2 py-2 " + (c.account === myAddress ? "bg-neutral-100" : "")}>
+              <div key={c.account} className={"flex items-center gap-3 rounded-none px-2 py-2 " + (c.account === myAddress ? "bg-neutral-900" : "")}>
                 <span className={"w-5 text-center text-xs font-black " + medal(i)}>{i + 1}</span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-mono text-neutral-700 truncate">{short(c.account)}{c.account === myAddress && <span className="text-black"> · you</span>}</p>
+                  <p className="text-sm font-mono text-neutral-300 truncate">{short(c.account)}{c.account === myAddress && <span className="text-white"> · you</span>}</p>
                   <p className="text-[11px] text-neutral-500 truncate">{c.tokenCount} coins · {c.holders} holders · {c.topSymbols.join(" ")}</p>
                 </div>
                 <div className="flex flex-col items-end gap-0.5 shrink-0">
-                  <span className="text-xs font-black text-black tabular-nums">{c.score.toLocaleString()}</span>
+                  <span className="text-xs font-black text-white tabular-nums">{c.score.toLocaleString()}</span>
                   {c.badges.length > 0 && <span className="text-[10px]">{c.badges.join(" ")}</span>}
                 </div>
               </div>
             ))}
-            {lb.creators.length === 0 && <p className="text-xs text-neutral-400 py-4 text-center">no creators yet</p>}
+            {lb.creators.length === 0 && <p className="text-xs text-neutral-500 py-4 text-center">no creators yet</p>}
           </div>
         </section>
       </div>
 
       {/* holders */}
-      <section className="rounded-none border border-neutral-300 bg-white p-4">
-        <p className="text-sm font-bold text-neutral-700 mb-3">Top holders</p>
+      <section className="rounded-none border border-neutral-800 bg-neutral-950 p-4">
+        <p className="text-sm font-bold text-neutral-300 mb-3">Top holders</p>
         <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
           {lb.holders.map((h, i) => (
-            <div key={h.account} className={"flex items-center gap-3 rounded-none px-2 py-1.5 " + (h.account === myAddress ? "bg-neutral-100" : "")}>
+            <div key={h.account} className={"flex items-center gap-3 rounded-none px-2 py-1.5 " + (h.account === myAddress ? "bg-neutral-900" : "")}>
               <span className={"w-5 text-center text-xs font-black " + medal(i)}>{i + 1}</span>
-              <p className="min-w-0 flex-1 text-sm font-mono text-neutral-700 truncate">{short(h.account)}{h.account === myAddress && <span className="text-black"> · you</span>}</p>
+              <p className="min-w-0 flex-1 text-sm font-mono text-neutral-300 truncate">{short(h.account)}{h.account === myAddress && <span className="text-white"> · you</span>}</p>
               <span className="text-[10px] shrink-0">{h.badges.join(" ")}</span>
               <span className="text-xs font-bold tabular-nums shrink-0">{fmtXno(h.value)} XNO</span>
             </div>
           ))}
-          {lb.holders.length === 0 && <p className="text-xs text-neutral-400 py-4 text-center">no holders yet</p>}
+          {lb.holders.length === 0 && <p className="text-xs text-neutral-500 py-4 text-center">no holders yet</p>}
         </div>
       </section>
     </div>
   );
 }
-const medal = (i: number) => (i === 0 ? "text-black" : i === 1 ? "text-neutral-700" : i === 2 ? "text-black" : "text-neutral-400");
-function Skel() { return <div className="h-40 rounded-none border border-neutral-300 bg-white animate-pulse" />; }
+const medal = (i: number) => (i === 0 ? "text-white" : i === 1 ? "text-neutral-300" : i === 2 ? "text-white" : "text-neutral-500");
+function Skel() { return <div className="h-40 rounded-none bg-neutral-900 animate-pulse" />; }
 
-function Feed({ tokens, onSelect, myAddress, usd }: { tokens: Token[]; onSelect: (id: string) => void; myAddress?: string; usd: number | null }) {
+function Feed({ tokens, onSelect, myAddress, usd, onCreate }: { tokens: Token[]; onSelect: (id: string) => void; myAddress?: string; usd: number | null; onCreate?: () => void }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"mc" | "price" | "change" | "vol" | "new">("mc");
 
@@ -1027,44 +1028,84 @@ function Feed({ tokens, onSelect, myAddress, usd }: { tokens: Token[]; onSelect:
   const trending = byVol.filter((t) => BigInt(t.buyVolume) > 0n).slice(0, 12);
   const fresh = [...live].sort((a, b) => b.createdAt - a.createdAt).slice(0, 12);
   const movers = live.filter((t) => t.change24h != null).sort((a, b) => (b.change24h ?? 0) - (a.change24h ?? 0)).slice(0, 12);
+  // "Your Coins" — the continue-watching slot: shown first when non-empty.
+  const mine = live.filter((t) => BigInt(t.myBalance) > 0n);
+
+  // SEE ALL → jump to the All-coins grid pre-sorted for that shelf.
+  const seeAll = (s: typeof sort) => {
+    setSort(s);
+    try { document.getElementById("all-coins")?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch {}
+  };
+
+  const SORTS: { k: typeof sort; label: string }[] = [
+    { k: "mc", label: "Market cap" },
+    { k: "price", label: "Price" },
+    { k: "change", label: "24h change" },
+    { k: "vol", label: "Volume" },
+    { k: "new", label: "Newest" },
+  ];
 
   if (tokens.length === 0) {
     return (
-      <div className="rounded-none border border-neutral-300 bg-white p-10 text-center text-neutral-500">
-        <p className="font-bold text-neutral-700">No coins yet</p>
-        <p className="text-sm mt-1">Launch the first one on Nano.</p>
+      <div className="bg-neutral-950 py-16 text-center space-y-4">
+        <p className="text-3xl sm:text-5xl font-black uppercase tracking-tight text-white">No coins yet</p>
+        <p className="text-[10px] uppercase tracking-[0.3em] text-neutral-500">Launch the first one on Nano</p>
+        <button
+          className="rounded-none bg-white px-5 py-2 text-xs font-black uppercase tracking-wide text-black hover:bg-neutral-200"
+          onClick={onCreate}
+        >
+          Launch a coin
+        </button>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <input
-        className={inputC + " py-2.5"}
-        placeholder="Search coins…"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
+    <div className="space-y-10">
+      <div className="relative w-full max-w-xs">
+        <svg aria-hidden viewBox="0 0 24 24" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-500" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-3.5-3.5" />
+        </svg>
+        <input
+          className="w-full rounded-none border border-neutral-800 bg-black py-2.5 pl-9 pr-3 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-white"
+          placeholder="Search coins…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+      </div>
 
       {searched ? (
-        <div>
-          {searched.length === 0 && <p className="text-sm text-neutral-400 py-6 text-center">No coins match.</p>}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+        <div className="space-y-3">
+          <p className="text-[10px] uppercase tracking-wide text-neutral-500">{searched.length} coin{searched.length === 1 ? "" : "s"} match</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
             {searched.map((t) => <PosterCard key={t.tokenId} t={t} usd={usd} onSelect={onSelect} />)}
           </div>
         </div>
       ) : (
         <>
           {featured && <HeroCard t={featured} usd={usd} onSelect={onSelect} />}
-          {trending.length > 0 && <FeedRow title="Trending" tokens={trending} usd={usd} onSelect={onSelect} />}
-          {movers.length > 0 && <FeedRow title="Top movers" tokens={movers} usd={usd} onSelect={onSelect} />}
-          {fresh.length > 0 && <FeedRow title="New launches" tokens={fresh} usd={usd} onSelect={onSelect} />}
+          {mine.length > 0 && <FeedRow title="Your Coins" tokens={mine} usd={usd} onSelect={onSelect} />}
+          {trending.length > 0 && <FeedRow title="Trending Now" tokens={trending} usd={usd} onSelect={onSelect} onSeeAll={() => seeAll("vol")} />}
+          {movers.length > 0 && <FeedRow title="Top Movers" tokens={movers} usd={usd} onSelect={onSelect} onSeeAll={() => seeAll("change")} ranked />}
+          {fresh.length > 0 && <FeedRow title="New Launches" tokens={fresh} usd={usd} onSelect={onSelect} onSeeAll={() => seeAll("new")} />}
 
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-black uppercase tracking-wide">All coins</h2>
+          <div id="all-coins" className="space-y-3 scroll-mt-16">
+            <div className="flex items-center justify-between gap-3">
+              <h2 className="text-xs font-black uppercase tracking-[0.2em] text-neutral-300">All coins</h2>
+              <div className="hidden sm:flex border border-neutral-800 divide-x divide-neutral-800">
+                {SORTS.map((s) => (
+                  <button
+                    key={s.k}
+                    className={"px-3 py-1.5 text-[10px] font-black uppercase tracking-wide " + (sort === s.k ? "bg-white text-black" : "text-neutral-500 hover:text-white")}
+                    onClick={() => setSort(s.k)}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
               <select
-                className="rounded-none border border-neutral-300 bg-white px-3 py-1.5 text-xs text-neutral-700"
+                className="sm:hidden rounded-none border border-neutral-800 bg-black px-3 py-1.5 text-xs uppercase text-neutral-300"
                 value={sort}
                 onChange={(e) => setSort(e.target.value as any)}
               >
@@ -1075,7 +1116,7 @@ function Feed({ tokens, onSelect, myAddress, usd }: { tokens: Token[]; onSelect:
                 <option value="new">newest</option>
               </select>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
               {sorted.map((t) => <PosterCard key={t.tokenId} t={t} usd={usd} onSelect={onSelect} />)}
             </div>
           </div>
@@ -1093,90 +1134,158 @@ function PosterImage({ t, className }: { t: Token; className: string }) {
   if (candidates.length > 0 && !broken) {
     return <img src={candidates[0]} alt="" className={className + " object-cover"} onError={() => setBroken(true)} />;
   }
+  // Monogram fallback: never a dead black hole on the black canvas — a
+  // neutral-900 tile with the symbol plus an oversized ghost for poster depth.
   return (
-    <div className={className + " bg-black flex items-center justify-center"}>
-      <span className="font-black text-white text-3xl tracking-tight">{tokSym(t).slice(0, 3)}</span>
+    <div className={className + " relative overflow-hidden bg-neutral-900 flex items-center justify-center"}>
+      <span aria-hidden className="absolute text-[7rem] font-black leading-none text-white/5 select-none">{tokSym(t).slice(0, 3)}</span>
+      <span className="relative font-black text-white text-3xl tracking-tight">{tokSym(t).slice(0, 3)}</span>
     </div>
   );
 }
 
-/** Netflix-style poster: image-led card, identity + price on a clean footer. */
+/** Netflix-style poster: full-color art, opaque black data footer — data never sits on imagery. */
 function PosterCard({ t, usd, onSelect }: { t: Token; usd: number | null; onSelect: (id: string) => void }) {
   return (
     <button
       onClick={() => onSelect(t.tokenId)}
-      className="group text-left rounded-none border border-neutral-200 bg-white overflow-hidden hover:border-black hover:shadow-lg transition-all"
+      className="group relative w-full text-left rounded-none bg-neutral-950 overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
     >
       <div className="relative aspect-square w-full overflow-hidden">
-        <PosterImage t={t} className="w-full h-full transition-transform duration-300 group-hover:scale-105" />
-        <span className={"absolute top-2 right-2 px-1.5 py-0.5 text-[10px] font-black bg-white/90 " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-green-600" : "text-red-600")}>
-          {pctStr(t.change24h)}
-        </span>
+        <PosterImage t={t} className="w-full h-full opacity-90 transition duration-300 ease-out group-hover:opacity-100 group-hover:scale-105 motion-reduce:transition-none motion-reduce:transform-none" />
+        {t.change24h == null ? (
+          <span className="absolute top-2 right-2 bg-white px-1.5 py-0.5 text-[10px] font-black text-black">NEW</span>
+        ) : (
+          <span className={"absolute top-2 right-2 bg-black px-1.5 py-0.5 text-[10px] font-black tabular-nums " + (t.change24h >= 0 ? "text-green-500" : "text-red-500")}>
+            {pctStr(t.change24h)}
+          </span>
+        )}
       </div>
-      <div className="p-2.5">
+      <div className="p-2.5 bg-neutral-950">
         <div className="flex items-baseline justify-between gap-1">
-          <p className="font-bold text-sm truncate">{tokName(t)}</p>
-          <p className="text-[10px] text-neutral-400 shrink-0">${tokSym(t)}</p>
+          <p className="font-bold text-sm text-white truncate">{tokName(t)}</p>
+          <p className="text-[10px] uppercase text-neutral-500 shrink-0">${tokSym(t)}</p>
         </div>
-        <p className="text-[11px] text-neutral-600 truncate">{fmtXno(t.price)} XNO{usd != null && <span className="text-neutral-400"> · {fmtUsd(t.price, usd)}</span>}</p>
-        <p className="text-[10px] text-neutral-400 truncate">mc {fmtXno(t.marketCap)}{usd != null && <> ({fmtUsd(t.marketCap, usd)})</>} · {t.holders} holder{t.holders === 1 ? "" : "s"}</p>
+        <div className="flex items-baseline justify-between gap-1">
+          <p className="text-xs font-bold tabular-nums text-white truncate">{fmtXno(t.price)} XNO{usd != null && <span className="font-normal text-neutral-500"> · {fmtUsd(t.price, usd)}</span>}</p>
+          <span aria-hidden className="text-xs text-neutral-500 group-hover:text-white shrink-0">→</span>
+        </div>
+        <p className="text-[10px] uppercase tracking-wide text-neutral-500 truncate">
+          <span title="Market cap">MC {fmtXno(t.marketCap)}</span>{usd != null && <> ({fmtUsd(t.marketCap, usd)})</>} · {t.holders} holder{t.holders === 1 ? "" : "s"}
+        </p>
       </div>
+      <span className="pointer-events-none absolute inset-x-0 bottom-0 hidden sm:block translate-y-full group-hover:translate-y-0 transition-transform duration-200 motion-reduce:transition-none motion-reduce:transform-none bg-white text-black text-[10px] font-black uppercase tracking-wide text-center py-1.5">
+        Trade
+      </span>
     </button>
   );
 }
 
-/** Horizontally-scrolling shelf of posters. */
-function FeedRow({ title, tokens, usd, onSelect }: { title: string; tokens: Token[]; usd: number | null; onSelect: (id: string) => void }) {
+/** Horizontally-scrolling shelf of posters — Netflix row grammar: snap scroll,
+ * visible prev/next arrows, SEE ALL, edge-cut cards + right-edge fade. */
+function FeedRow({ title, tokens, usd, onSelect, onSeeAll, ranked }: { title: string; tokens: Token[]; usd: number | null; onSelect: (id: string) => void; onSeeAll?: () => void; ranked?: boolean }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const page = (dir: number) => {
+    const el = trackRef.current;
+    if (el) el.scrollBy({ left: dir * el.clientWidth, behavior: "smooth" });
+  };
   return (
     <div className="space-y-2">
-      <h2 className="text-sm font-black uppercase tracking-wide">{title}</h2>
-      <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 snap-x">
-        {tokens.map((t) => (
-          <div key={t.tokenId} className="w-36 sm:w-40 shrink-0 snap-start">
-            <PosterCard t={t} usd={usd} onSelect={onSelect} />
-          </div>
-        ))}
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-xs font-black uppercase tracking-[0.2em] text-neutral-300">{title}</h2>
+        <div className="flex items-center gap-2">
+          {onSeeAll && (
+            <button className="text-[10px] font-black uppercase text-neutral-500 hover:text-white" onClick={onSeeAll}>
+              See all →
+            </button>
+          )}
+          <button aria-label={`scroll ${title} back`} className="hidden sm:flex h-7 w-7 items-center justify-center rounded-none border border-neutral-800 hover:border-white text-white text-sm" onClick={() => page(-1)}>‹</button>
+          <button aria-label={`scroll ${title} forward`} className="hidden sm:flex h-7 w-7 items-center justify-center rounded-none border border-neutral-800 hover:border-white text-white text-sm" onClick={() => page(1)}>›</button>
+        </div>
+      </div>
+      <div className="relative -mx-4">
+        <div ref={trackRef} className="flex gap-2 overflow-x-auto snap-x snap-mandatory scroll-px-4 pb-2 px-4 scrollbar-hidden">
+          {tokens.map((t, i) => (
+            <div key={t.tokenId} className="w-40 sm:w-48 shrink-0 snap-start">
+              {ranked ? (
+                <div className="relative">
+                  <span aria-hidden className="absolute -left-1 bottom-14 z-0 text-7xl font-black leading-none text-transparent [-webkit-text-stroke:2px_#404040] select-none">{i + 1}</span>
+                  <div className="relative z-10 ml-8">
+                    <PosterCard t={t} usd={usd} onSelect={onSelect} />
+                  </div>
+                </div>
+              ) : (
+                <PosterCard t={t} usd={usd} onSelect={onSelect} />
+              )}
+            </div>
+          ))}
+        </div>
+        {/* Edge fade over black chrome only — signals overflow without hiding data. */}
+        <div aria-hidden className="pointer-events-none absolute right-0 inset-y-0 w-12 bg-gradient-to-l from-black to-transparent" />
       </div>
     </div>
   );
 }
 
-/** Featured coin banner: big image, identity, live stats, one clear action. */
+/** Featured coin billboard: blurred/dimmed ambient art, content on effectively
+ * solid black, one solid-white primary CTA. Data never sits on legible artwork. */
 function HeroCard({ t, usd, onSelect }: { t: Token; usd: number | null; onSelect: (id: string) => void }) {
+  const ch = t.change24h;
   return (
-    <button
-      onClick={() => onSelect(t.tokenId)}
-      className="group w-full text-left rounded-none border border-neutral-300 bg-white overflow-hidden hover:border-black transition flex flex-col sm:flex-row"
-    >
-      <div className="sm:w-56 sm:h-56 w-full h-40 shrink-0 overflow-hidden">
-        <PosterImage t={t} className="w-full h-full transition-transform duration-300 group-hover:scale-105" />
-      </div>
-      <div className="flex-1 p-5 flex flex-col justify-center min-w-0">
-        <p className="text-[10px] font-black uppercase tracking-widest text-neutral-400 mb-1">Featured</p>
-        <div className="flex items-baseline gap-2 min-w-0">
-          <h2 className="text-2xl font-black truncate">{tokName(t)}</h2>
-          <span className="text-sm text-neutral-500 shrink-0">${tokSym(t)}</span>
+    <div className="relative w-full overflow-hidden rounded-none bg-black min-h-[320px] sm:aspect-[21/9]">
+      {/* Ambient layer only — blur + dim means text sits on effectively solid black. */}
+      <PosterImage t={t} className="absolute inset-0 w-full h-full scale-110 blur-2xl opacity-30" />
+      <div className="relative flex h-full min-h-[320px] flex-col sm:flex-row items-stretch gap-4">
+        <div className="flex-1 min-w-0 flex flex-col justify-end p-6 sm:p-10">
+          <p className="text-[10px] font-black uppercase tracking-[0.3em] text-neutral-400">Featured</p>
+          <div className="mt-1 flex items-baseline gap-3 min-w-0">
+            <h2 className="text-4xl sm:text-6xl font-black tracking-tight text-white leading-none truncate">{tokName(t)}</h2>
+            <span className="text-sm sm:text-base text-neutral-400 shrink-0">${tokSym(t)}</span>
+          </div>
+          {t.description && <p className="mt-2 text-sm text-neutral-300 line-clamp-2 max-w-xl">{t.description}</p>}
+          <div className="mt-4 grid grid-cols-3 divide-x divide-neutral-800 border-y border-neutral-800 text-center">
+            <div className="py-2 min-w-0">
+              <p className="text-[10px] uppercase tracking-wide text-neutral-500">Price</p>
+              <p className="text-base font-black tabular-nums text-white truncate">{fmtXno(t.price)} XNO{usd != null && <span className="font-bold text-neutral-500"> {fmtUsd(t.price, usd)}</span>}</p>
+            </div>
+            <div className="py-2 min-w-0">
+              <p className="text-[10px] uppercase tracking-wide text-neutral-500">24h change</p>
+              <p className={"text-base font-black tabular-nums " + (ch == null ? "text-neutral-500" : ch >= 0 ? "text-green-500" : "text-red-500")}>{pctStr(ch)}</p>
+            </div>
+            <div className="py-2 min-w-0">
+              <p className="text-[10px] uppercase tracking-wide text-neutral-500">Market cap</p>
+              <p className="text-base font-black tabular-nums text-white truncate">{fmtXno(t.marketCap)} XNO</p>
+            </div>
+          </div>
+          <div className="mt-4 flex items-center gap-2">
+            <button
+              className="rounded-none bg-white px-6 py-2.5 text-xs font-black uppercase tracking-wide text-black hover:bg-neutral-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white focus-visible:outline-offset-2"
+              onClick={() => onSelect(t.tokenId)}
+            >
+              Trade →
+            </button>
+            <button
+              className="rounded-none border border-neutral-600 px-6 py-2.5 text-xs font-black uppercase tracking-wide text-white hover:border-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+              onClick={() => onSelect(t.tokenId)}
+            >
+              Details
+            </button>
+          </div>
         </div>
-        {t.description && <p className="text-sm text-neutral-600 mt-1 line-clamp-2">{t.description}</p>}
-        <div className="flex items-center gap-4 mt-3 text-sm flex-wrap">
-          <span className="font-bold">{fmtXno(t.price)} XNO{usd != null && <span className="font-normal text-neutral-500"> ({fmtUsd(t.price, usd)})</span>}</span>
-          <span className={"font-black " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-green-600" : "text-red-600")}>{pctStr(t.change24h)}</span>
-          <span className="text-neutral-500">mc {fmtXno(t.marketCap)} XNO{usd != null && <> ({fmtUsd(t.marketCap, usd)})</>}</span>
-          <span className="text-neutral-400 text-xs">{t.holders} holder{t.holders === 1 ? "" : "s"}</span>
+        {/* Sharp full-color artwork on its own opaque zone — never under text. */}
+        <div className="hidden sm:block sm:w-64 sm:h-64 self-center mr-10 shrink-0">
+          <PosterImage t={t} className="w-full h-full" />
         </div>
-        <span className="mt-4 inline-block w-fit rounded-none bg-black px-4 py-2 text-xs font-black uppercase tracking-wide text-white group-hover:bg-neutral-800">
-          Trade →
-        </span>
       </div>
-    </button>
+    </div>
   );
 }
 
 function trendColor(points: PricePoint[]): string {
-  if (points.length < 2) return "#000000";
-  const a = BigInt(points[0].priceRaw);
-  const b = BigInt(points[points.length - 1].priceRaw);
-  return b >= a ? "#000000" : "#666666";
+  // Direction is never encoded as two grays — the sparkline stroke is always
+  // white; the adjacent signed green/red change badge carries direction.
+  void points;
+  return "#ffffff";
 }
 
 // Public IPFS gateways tried in order; images are stored as ipfs://CID so any
@@ -1226,7 +1335,7 @@ function Avatar({ image, symbol, size = 40 }: { image: string; symbol: string; s
   return (
     <div
       style={{ width: size, height: size, fontSize: size * 0.4 }}
-      className="rounded-full bg-black flex items-center justify-center font-black text-white shrink-0"
+      className="rounded-full bg-neutral-800 flex items-center justify-center font-black text-white shrink-0"
     >
       {(symbol || "?").slice(0, 2).toUpperCase()}
     </div>
@@ -1412,56 +1521,86 @@ function TokenDetail({
     }
   }
 
+  // Mobile action bar → jump to (and reveal) the trade form.
+  const goTrade = () => {
+    setTab("trade");
+    try { document.getElementById("trade-panel")?.scrollIntoView({ behavior: "smooth", block: "center" }); } catch {}
+  };
+
+  const volumeRaw = (BigInt(token.buyVolume || "0") + BigInt(token.sellVolume || "0")).toString();
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-16 sm:pb-0">
       <div className="flex items-center justify-between">
-        <button onClick={onBack} className="text-xs text-neutral-500 hover:text-neutral-700">← all coins</button>
-        <a href={`/pro?token=${token.tokenId}`} className="rounded-none border border-neutral-300 px-2.5 py-1 text-[11px] font-bold text-black hover:border-black">
+        <button onClick={onBack} className="text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white">← All coins</button>
+        <a href={`/pro?token=${token.tokenId}`} className="rounded-none border border-neutral-800 px-2.5 py-1 text-[11px] font-bold text-white hover:border-white">
           Pro terminal ↗
         </a>
       </div>
 
-      <div className="rounded-none border border-neutral-300 bg-white p-5">
-        <div className="flex items-center gap-3">
-          <Avatar image={token.image} symbol={tokSym(token)} size={48} />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl font-black truncate">{tokName(token)}</h2>
-              <span className="text-[11px] text-neutral-500">${tokSym(token)}</span>
+      {/* Title-sequence band: full-color art as blurred/dimmed ambient backdrop,
+          sharp square poster + banking-grade numbers on effectively solid black. */}
+      <div className="relative overflow-hidden rounded-none bg-neutral-950 px-5 sm:px-8 py-8">
+        <PosterImage t={token} className="absolute inset-0 w-full h-full blur-2xl scale-110 opacity-25" />
+        <div className="relative">
+          <div className="flex items-center gap-4">
+            <PosterImage t={token} className="w-20 h-20 sm:w-24 sm:h-24 shrink-0 rounded-none border border-neutral-800" />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-2 min-w-0">
+                <h2 className="text-2xl sm:text-4xl font-black tracking-tight text-white truncate">{tokName(token)}</h2>
+                <span className="text-sm text-neutral-400 shrink-0">${tokSym(token)}</span>
+              </div>
+              <button
+                className="text-[11px] text-neutral-500 font-mono hover:text-neutral-300"
+                title={`token id ${token.tokenId} — click to copy`}
+                onClick={() => { try { navigator.clipboard.writeText(token.tokenId); } catch {} }}
+              >
+                {token.tokenId.slice(0, 6)}…{token.tokenId.slice(-4)} ⧉
+              </button>
             </div>
-            <button
-              className="text-[11px] text-neutral-400 font-mono hover:text-neutral-600"
-              title={`token id ${token.tokenId} — click to copy`}
-              onClick={() => { try { navigator.clipboard.writeText(token.tokenId); } catch {} }}
-            >
-              {token.tokenId.slice(0, 6)}…{token.tokenId.slice(-4)} ⧉
-            </button>
           </div>
-          <div className="text-right shrink-0">
-            <p className="text-base sm:text-2xl font-black whitespace-nowrap">{fmtXno(token.marketCap)} XNO{usd != null && <span className="text-sm font-bold text-neutral-500"> ({fmtUsd(token.marketCap, usd)})</span>}</p>
-            <p className="text-[11px] text-neutral-500 whitespace-nowrap">
-              market cap · <span className={token.change24h == null ? "text-neutral-400" : token.change24h >= 0 ? "text-green-600" : "text-red-600"}>{pctStr(token.change24h)}</span>
-            </p>
+
+          <div className="mt-4 flex items-baseline gap-3 flex-wrap">
+            <p className="text-3xl font-black tabular-nums text-white">{fmtXno(token.price)} XNO</p>
+            {usd != null && <p className="text-base tabular-nums text-neutral-400">{fmtUsd(token.price, usd)}</p>}
+            <span className={"px-2 py-0.5 text-sm font-black tabular-nums bg-black border border-neutral-800 " + (token.change24h == null ? "text-neutral-500" : token.change24h >= 0 ? "text-green-500" : "text-red-500")}>
+              {pctStr(token.change24h)}
+            </span>
           </div>
-        </div>
-        {token.description && <p className="text-sm text-neutral-600 mt-3">{token.description}</p>}
-        <div className="flex gap-3 mt-3">
-          {token.website && <SocialLink href={token.website} label="website" />}
-          {token.twitter && <SocialLink href={token.twitter} label="X" />}
-          {token.telegram && <SocialLink href={token.telegram} label="telegram" />}
-        </div>
-        <div className="flex items-center gap-3 mt-4 text-[11px] text-neutral-500 flex-wrap">
-          <span>price {fmtXno(token.price)} XNO{usd != null && <> ({fmtUsd(token.price, usd)})</>}</span>
-          <span>liquidity {fmtXno(token.poolXno)} XNO</span>
-          <span>{token.holders} holder{token.holders === 1 ? "" : "s"}</span>
-          <span>created {timeAgo(token.createdAt)} ago</span>
-          <span>dev {short(token.creator)}</span>
+
+          {token.description && <p className="text-sm text-neutral-300 mt-3">{token.description}</p>}
+          <div className="flex gap-3 mt-3">
+            {token.website && <SocialLink href={token.website} label="website" />}
+            {token.twitter && <SocialLink href={token.twitter} label="X" />}
+            {token.telegram && <SocialLink href={token.telegram} label="telegram" />}
+          </div>
+
+          <div className="mt-4 grid grid-cols-3 border-y border-neutral-800 divide-x divide-neutral-800 text-center py-2">
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase tracking-wide text-neutral-500">Market cap</p>
+              <p className="text-sm font-black tabular-nums text-white truncate">{fmtXno(token.marketCap)} XNO{usd != null && <span className="font-bold text-neutral-500"> ({fmtUsd(token.marketCap, usd)})</span>}</p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase tracking-wide text-neutral-500">Volume</p>
+              <p className="text-sm font-black tabular-nums text-white truncate">{fmtXno(volumeRaw)} XNO</p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase tracking-wide text-neutral-500">Holders</p>
+              <p className="text-sm font-black tabular-nums text-white">{token.holders}</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 mt-3 text-[11px] text-neutral-500 flex-wrap">
+            <span>liquidity {fmtXno(token.poolXno)} XNO</span>
+            <span>created {timeAgo(token.createdAt)} ago</span>
+            <span>dev {short(token.creator)}</span>
+          </div>
         </div>
       </div>
 
-      <div className="rounded-none border border-neutral-300 bg-white p-5">
+      <div className="rounded-none border border-neutral-800 bg-neutral-950 p-5">
         <div className="flex items-center justify-between mb-3">
-          <p className="text-sm font-bold text-neutral-700">Price</p>
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">Price</p>
           <div className="flex items-center gap-3 text-[11px] text-neutral-500">
             <span>pool {fmtXno(token.poolXno)} XNO</span>
             <span>pool {fmtNum(Number(BigInt(token.poolTokens)) / 10 ** token.decimals)} {tokSym(token)}</span>
@@ -1470,21 +1609,21 @@ function TokenDetail({
         {token.series.length >= 2 ? (
           <PriceChart series={token.series} trades={token.trades} decimals={token.decimals} symbol={tokSym(token)} />
         ) : (
-          <div className="h-40 flex items-center justify-center text-neutral-400 text-sm">no trades yet — the chart appears after the first buy</div>
+          <div className="h-40 flex items-center justify-center text-neutral-500 text-sm">no trades yet — the chart appears after the first buy</div>
         )}
         <ProgressBar token={token} />
       </div>
 
-      <div className="rounded-none border border-neutral-300 bg-white p-5">
+      <div id="trade-panel" className="rounded-none border border-neutral-800 bg-neutral-950 p-5">
         <div className="flex items-center gap-2 mb-3">
           <button
-            className={"px-4 py-2 rounded-none text-sm font-bold " + (tab === "trade" ? "bg-black text-white" : "text-neutral-500")}
+            className={"px-4 py-2 rounded-none text-sm font-bold " + (tab === "trade" ? "bg-white text-black" : "text-neutral-500 hover:text-white")}
             onClick={() => setTab("trade")}
           >
             Trade
           </button>
           <button
-            className={"px-4 py-2 rounded-none text-sm font-bold " + (tab === "thread" ? "bg-black text-white" : "text-neutral-500")}
+            className={"px-4 py-2 rounded-none text-sm font-bold " + (tab === "thread" ? "bg-white text-black" : "text-neutral-500 hover:text-white")}
             onClick={() => setTab("thread")}
           >
             Thread ({token.comments.length})
@@ -1512,13 +1651,13 @@ function TokenDetail({
       {isCreator && keys && <EditCoinInfo token={token} keys={keys} say={say} />}
 
       {isCreator && (
-        <div className="rounded-none border border-black bg-white p-5 space-y-2">
+        <div className="rounded-none border border-neutral-600 bg-neutral-950 p-5 space-y-2">
           <div className="flex items-center justify-between">
-            <p className="text-sm font-bold text-black">Seed / add liquidity <span className="text-[11px] font-normal text-neutral-500">creator</span></p>
+            <p className="text-sm font-bold text-white">Seed / add liquidity <span className="text-[11px] font-normal text-neutral-500">creator</span></p>
             <p className="text-[11px] text-neutral-500">pool {fmtXno(token.poolXno)} XNO · treasury {fmtTok(token.treasury, token.decimals)}</p>
           </div>
           {BigInt(token.poolXno) <= 0n && (
-            <p className="text-[11px] text-black">This token has no pool yet — seed it to make it tradeable.</p>
+            <p className="text-[11px] text-white">This token has no pool yet — seed it to make it tradeable.</p>
           )}
           <div className="flex gap-2">
             <input className={inputC} placeholder="XNO to add" inputMode="decimal" value={seedXno} onChange={(e) => setSeedXno(e.target.value)} />
@@ -1528,12 +1667,12 @@ function TokenDetail({
         </div>
       )}
 
-      <div className="rounded-none border border-neutral-300 bg-white p-5 space-y-2">
-        <p className="text-sm font-bold text-neutral-700">Send tokens</p>
+      <div className="rounded-none border border-neutral-800 bg-neutral-950 p-5 space-y-2">
+        <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">Send tokens</p>
         <input className={inputC} placeholder="nano_… recipient" value={sendTo} onChange={(e) => setSendTo(e.target.value)} />
         <div className="flex gap-2">
           <input className={inputC} placeholder="amount" inputMode="decimal" value={sendAmount} onChange={(e) => setSendAmount(e.target.value)} />
-          <button className="rounded-none bg-neutral-100 px-4 py-3 text-sm font-bold hover:bg-neutral-200 shrink-0 disabled:opacity-40" disabled={busy} onClick={transfer}>
+          <button className="rounded-none bg-neutral-900 px-4 py-3 text-sm font-bold hover:bg-neutral-800 shrink-0 disabled:opacity-40" disabled={busy} onClick={transfer}>
             Send
           </button>
         </div>
@@ -1542,6 +1681,12 @@ function TokenDetail({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <TradesPanel trades={token.trades} decimals={token.decimals} usd={usd} />
         <HoldersPanel holders={token.topHolders} creator={token.creator} decimals={token.decimals} />
+      </div>
+
+      {/* Mobile: conversion never scrolls away — fixed bar above the tab nav. */}
+      <div className="sm:hidden fixed bottom-14 inset-x-0 z-30 border-t border-neutral-800 bg-black/95 backdrop-blur px-4 py-2 flex gap-2">
+        <button className="flex-1 rounded-none bg-white py-3 text-sm font-black uppercase text-black" onClick={goTrade}>Buy</button>
+        <button className="flex-1 rounded-none border border-white py-3 text-sm font-black uppercase text-white" onClick={goTrade}>Sell</button>
       </div>
     </div>
   );
@@ -1561,7 +1706,7 @@ function SocialLink({ href, label }: { href: string; label: string }) {
   const safe = safeHref(href);
   if (!safe) return null;
   return (
-    <a href={safe} target="_blank" rel="noreferrer" className="text-[11px] text-black hover:underline">
+    <a href={safe} target="_blank" rel="noreferrer" className="text-[11px] text-white hover:underline">
       {label}
     </a>
   );
@@ -1580,8 +1725,8 @@ function ProgressBar({ token }: { token: Token }) {
         <span>{graduated ? "fully seeded · liquidity in pool" : "seeding liquidity"}</span>
         <span>{graduated ? "100%" : `${pct.toFixed(2)}%`}</span>
       </div>
-      <div className="h-2 rounded-full bg-neutral-100 overflow-hidden">
-        <div className="h-full bg-black" style={{ width: `${Math.min(100, pct)}%` }} />
+      <div className="h-2 rounded-full bg-neutral-900 overflow-hidden">
+        <div className="h-full bg-white" style={{ width: `${Math.min(100, pct)}%` }} />
       </div>
     </div>
   );
@@ -1648,25 +1793,25 @@ function TradePanel({
       <div className="flex items-center justify-between text-[11px] text-neutral-500">
         <span>balance: {side === "buy" ? `${fmtXno(xnoBal)} XNO` : `${fmtTok(myHolding?.balanceRaw, token.decimals)} ${tokSym(token)}`}</span>
         <label className="flex items-center gap-1.5">
-          <span className="text-neutral-400">slippage %</span>
+          <span className="text-neutral-500">slippage %</span>
           <input
-            className="w-14 rounded-none bg-white border border-neutral-300 px-2 py-1 text-xs text-black text-right"
+            className="w-14 rounded-none bg-neutral-950 border border-neutral-800 px-2 py-1 text-xs text-white text-right"
             inputMode="decimal"
             value={slippage}
             onChange={(e) => setSlippage(e.target.value)}
           />
         </label>
       </div>
-      {slip > 0 && <p className="text-[10px] text-neutral-400">if the price moves more than {slip}% against you, the trade cancels instead of filling worse</p>}
+      {slip > 0 && <p className="text-[10px] text-neutral-500">if the price moves more than {slip}% against you, the trade cancels instead of filling worse</p>}
       <div className="grid grid-cols-2 gap-2">
         <button
-          className={"rounded-none py-2 text-sm font-bold " + (side === "buy" ? "bg-black text-white" : "bg-neutral-100 text-neutral-600")}
+          className={"rounded-none py-2 text-sm font-bold " + (side === "buy" ? "bg-white text-black" : "text-neutral-500 hover:text-white")}
           onClick={() => setSide("buy")}
         >
           Buy
         </button>
         <button
-          className={"rounded-none py-2 text-sm font-bold " + (side === "sell" ? "bg-black text-white" : "bg-neutral-100 text-neutral-600")}
+          className={"rounded-none py-2 text-sm font-bold " + (side === "sell" ? "bg-white text-black" : "text-neutral-500 hover:text-white")}
           onClick={() => setSide("sell")}
         >
           Sell
@@ -1682,7 +1827,7 @@ function TradePanel({
         />
         {side === "buy" && (
           <button
-            className="shrink-0 rounded-none bg-neutral-100 px-3 text-xs font-bold text-neutral-700 hover:bg-neutral-200 disabled:opacity-40"
+            className="shrink-0 rounded-none bg-neutral-900 px-3 text-xs font-bold text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
             disabled={BigInt(xnoBal) <= 0n}
             onClick={() => { const usable = BigInt(xnoBal) - 10n ** 24n; setAmount(usable > 0n ? fmtXnoPlain(usable.toString()) : "0"); }}
           >
@@ -1691,7 +1836,7 @@ function TradePanel({
         )}
         {side === "sell" && myHolding && (
           <button
-            className="shrink-0 rounded-none bg-neutral-100 px-3 text-xs font-bold text-neutral-700 hover:bg-neutral-200"
+            className="shrink-0 rounded-none bg-neutral-900 px-3 text-xs font-bold text-neutral-300 hover:bg-neutral-800"
             onClick={() => setAmount(fmtTok(myHolding.balanceRaw, token.decimals))}
           >
             Max
@@ -1707,7 +1852,7 @@ function TradePanel({
                 key={v}
                 disabled={over}
                 title={over ? "more than your balance" : undefined}
-                className="rounded-none border border-neutral-300 py-1.5 text-xs font-bold text-neutral-600 hover:border-black hover:text-black disabled:opacity-40 disabled:hover:border-neutral-300 disabled:hover:text-neutral-600"
+                className="rounded-none border border-neutral-800 py-1.5 text-xs font-bold text-neutral-400 hover:border-white hover:text-white disabled:opacity-40 disabled:hover:border-neutral-800 disabled:hover:text-neutral-300"
                 onClick={() => setAmount(v)}
               >
                 {v} XNO
@@ -1717,20 +1862,20 @@ function TradePanel({
         </div>
       )}
       {quote && (
-        <div className="rounded-none border border-neutral-300 bg-neutral-50 p-3 space-y-1 text-[11px]">
+        <div className="rounded-none border border-neutral-800 bg-neutral-950 p-3 space-y-1 text-[11px]">
           <div className="flex justify-between">
             <span className="text-neutral-500">you receive ≈</span>
-            <span className="font-bold text-black">{quote.outStr} {quote.unit}</span>
+            <span className="font-bold text-white">{quote.outStr} {quote.unit}</span>
           </div>
           {slip > 0 && (
             <div className="flex justify-between">
               <span className="text-neutral-500">minimum received</span>
-              <span className="text-neutral-700">{quote.minStr} {quote.unit}</span>
+              <span className="text-neutral-300">{quote.minStr} {quote.unit}</span>
             </div>
           )}
           <div className="flex justify-between">
             <span className="text-neutral-500">price impact</span>
-            <span className={quote.impact >= 5 ? "text-black" : quote.impact >= 1 ? "text-black" : "text-black"}>
+            <span className={quote.impact >= 5 ? "text-white" : quote.impact >= 1 ? "text-white" : "text-white"}>
               {quote.impact.toFixed(2)}%
             </span>
           </div>
@@ -1743,10 +1888,10 @@ function TradePanel({
       <StakeBox token={token} busy={busy} sendOp={sendOp} />
 
       {token.pool && (
-        <p className="text-[11px] text-neutral-400">
+        <p className="text-[11px] text-neutral-500">
           liquidity pool account{" "}
           <button
-            className="font-mono hover:text-neutral-600"
+            className="font-mono hover:text-neutral-300"
             title={`${token.pool} — click to copy`}
             onClick={() => { try { navigator.clipboard.writeText(token.pool!); } catch {} }}
           >
@@ -1787,9 +1932,9 @@ function StakeBox({
   };
 
   return (
-    <div className="rounded-none border border-neutral-300 bg-neutral-50 p-3 space-y-3">
+    <div className="rounded-none border border-neutral-800 bg-neutral-950 p-3 space-y-3">
       <div className="flex items-center justify-between text-[11px]">
-        <span className="text-neutral-600 font-bold">Stake · earn XNO rebates</span>
+        <span className="text-neutral-400 font-bold">Stake · earn XNO rebates</span>
         <span className="text-neutral-500">staked {fmtTok(token.myStaked, token.decimals)} {tokSym(token)}</span>
       </div>
 
@@ -1806,7 +1951,7 @@ function StakeBox({
             <div className="grid grid-cols-3 gap-1">
               {[25, 50, 100].map((p) => (
                 <button key={p}
-                  className="rounded-none border border-neutral-300 py-1 text-[10px] font-bold text-neutral-600 hover:border-black hover:text-black"
+                  className="rounded-none border border-neutral-800 py-1 text-[10px] font-bold text-neutral-400 hover:border-white hover:text-white"
                   onClick={() => setStakeAmt(fmtTok(((bal * BigInt(p)) / 100n).toString(), token.decimals))}>
                   {p === 100 ? "MAX" : `${p}%`}
                 </button>
@@ -1830,7 +1975,7 @@ function StakeBox({
             <div className="grid grid-cols-3 gap-1">
               {[25, 50, 100].map((p) => (
                 <button key={p}
-                  className="rounded-none border border-neutral-300 py-1 text-[10px] font-bold text-neutral-600 hover:border-black hover:text-black"
+                  className="rounded-none border border-neutral-800 py-1 text-[10px] font-bold text-neutral-400 hover:border-white hover:text-white"
                   onClick={() => setUnstakeAmt(fmtTok(((staked * BigInt(p)) / 100n).toString(), token.decimals))}>
                   {p === 100 ? "MAX" : `${p}%`}
                 </button>
@@ -1841,13 +1986,13 @@ function StakeBox({
         <ActionBtn disabled={busy || staked <= 0n} onClick={doUnstake}>Unstake</ActionBtn>
       </div>
       {unstakeAmt && Number(unstakeAmt) > 0 && (
-        <p className="text-[10px] text-black">20% exit tax on unstake (5% burned, 15% to stakers)</p>
+        <p className="text-[10px] text-white">20% exit tax on unstake (5% burned, 15% to stakers)</p>
       )}
 
-      <div className="flex items-center justify-between border-t border-neutral-300 pt-2">
-        <span className="text-[11px] text-neutral-500">claimable ≈ <span className="text-black font-bold">{fmtXno(token.myClaimable)} XNO</span></span>
+      <div className="flex items-center justify-between border-t border-neutral-800 pt-2">
+        <span className="text-[11px] text-neutral-500">claimable ≈ <span className="text-white font-bold">{fmtXno(token.myClaimable)} XNO</span></span>
         <button
-          className="rounded-none bg-neutral-100 border border-black px-3 py-1.5 text-[11px] font-bold text-black hover:bg-neutral-200 disabled:opacity-40"
+          className="rounded-none bg-neutral-900 border border-neutral-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-neutral-800 disabled:opacity-40"
           disabled={busy || claimable <= 0n}
           onClick={() => sendOp(token.tokenId, { kind: "claim" }, "claim")}
         >
@@ -1860,7 +2005,7 @@ function StakeBox({
 
 function ActionBtn({ children, onClick, disabled }: { children: ReactNode; onClick: () => void; disabled: boolean }) {
   return (
-    <button className="rounded-none border border-neutral-300 py-3 text-sm font-bold text-neutral-800 hover:border-black disabled:opacity-40" disabled={disabled} onClick={onClick}>
+    <button className="rounded-none border border-neutral-800 py-3 text-sm font-bold text-neutral-200 hover:border-white disabled:opacity-40" disabled={disabled} onClick={onClick}>
       {children}
     </button>
   );
@@ -1870,20 +2015,20 @@ function TradesPanel({ trades, decimals, usd }: { trades: Trade[]; decimals: num
   // XNO value of a trade = token amount × price-per-whole-token.
   const tradeXno = (t: Trade) => ((BigInt(t.amountRaw) * BigInt(t.priceRaw)) / 10n ** BigInt(decimals)).toString();
   return (
-    <div className="rounded-none border border-neutral-300 bg-white p-4">
-      <p className="text-sm font-bold text-neutral-700 mb-2">Recent trades</p>
+    <div className="rounded-none border border-neutral-800 bg-neutral-950 p-4">
+      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400 mb-2">Recent trades</p>
       <div className="space-y-1.5 max-h-72 overflow-y-auto">
-        {trades.length === 0 && <p className="text-xs text-neutral-400">no trades yet</p>}
+        {trades.length === 0 && <p className="text-xs text-neutral-500">no trades yet</p>}
         {trades.map((t, i) => (
           <div key={i} className="flex items-center justify-between gap-2 text-xs">
             <span className="text-neutral-500 font-mono shrink-0">{short(t.account)}</span>
-            <span className={"shrink-0 " + (t.kind === "buy" ? "text-green-600" : "text-red-600")}>
+            <span className={"shrink-0 " + (t.kind === "buy" ? "text-green-500" : "text-red-500")}>
               {t.kind === "buy" ? "▲" : "▼"} {t.kind}
             </span>
-            <span className="text-neutral-600 truncate">
+            <span className="text-neutral-400 truncate">
               {fmtXno(tradeXno(t))} XNO{usd != null && <span className="text-neutral-500"> ({fmtUsd(tradeXno(t), usd)})</span>}
             </span>
-            <span className="text-neutral-400 shrink-0">{timeAgo(t.time)}</span>
+            <span className="text-neutral-500 shrink-0">{timeAgo(t.time)}</span>
           </div>
         ))}
       </div>
@@ -1894,17 +2039,17 @@ function TradesPanel({ trades, decimals, usd }: { trades: Trade[]; decimals: num
 function HoldersPanel({ holders, creator, decimals }: { holders: Holder[]; creator: string; decimals: number }) {
   const top = holders.slice(0, 20);
   return (
-    <div className="rounded-none border border-neutral-300 bg-white p-4">
-      <p className="text-sm font-bold text-neutral-700 mb-2">Top holders</p>
+    <div className="rounded-none border border-neutral-800 bg-neutral-950 p-4">
+      <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400 mb-2">Top holders</p>
       <div className="space-y-1.5 max-h-72 overflow-y-auto">
         {top.map((h, i) => (
           <div key={i} className="flex items-center justify-between text-xs">
             <span className="text-neutral-500 font-mono flex items-center gap-1">
-              {i + 1}. {short(h.account)} {h.account === creator && <span className="text-black">dev</span>}
+              {i + 1}. {short(h.account)} {h.account === creator && <span className="text-white">dev</span>}
             </span>
             <div className="flex items-center gap-2">
-              <span className="text-neutral-600">{fmtTok(h.balanceRaw, decimals)}</span>
-              <span className="text-neutral-400 w-12 text-right">{h.pct.toFixed(2)}%</span>
+              <span className="text-neutral-400">{fmtTok(h.balanceRaw, decimals)}</span>
+              <span className="text-neutral-500 w-12 text-right">{h.pct.toFixed(2)}%</span>
             </div>
           </div>
         ))}
@@ -1938,17 +2083,17 @@ function CommentThread({ tokenId, comments, keys, isDev }: { tokenId: string; co
   return (
     <div className="space-y-3">
       <div className="space-y-2 max-h-80 overflow-y-auto">
-        {all.length === 0 && <p className="text-xs text-neutral-400">be the first to comment</p>}
+        {all.length === 0 && <p className="text-xs text-neutral-500">be the first to comment</p>}
         {all.map((c) => (
-          <div key={c.id} className="rounded-none bg-neutral-50 p-2.5">
+          <div key={c.id} className="rounded-none bg-neutral-950 p-2.5">
             <p className="text-[11px] text-neutral-500 font-mono">{short(c.account)} · {timeAgo(c.time)}</p>
-            <p className="text-xs text-neutral-700 mt-1">{c.text}</p>
+            <p className="text-xs text-neutral-300 mt-1">{c.text}</p>
           </div>
         ))}
       </div>
       <div className="flex gap-2">
         <input className={inputC} placeholder="say something…" value={text} onChange={(e) => setText(e.target.value)} />
-        <button className="shrink-0 rounded-none bg-neutral-100 px-4 py-3 text-sm font-bold hover:bg-neutral-200" onClick={post}>
+        <button className="shrink-0 rounded-none bg-neutral-900 px-4 py-3 text-sm font-bold hover:bg-neutral-800" onClick={post}>
           Post
         </button>
       </div>
@@ -2004,17 +2149,17 @@ function EditCoinInfo({ token, keys, say }: { token: Token; keys: Keys; say: (s:
   }
 
   return (
-    <div className="rounded-none border border-black bg-white p-5 space-y-2">
+    <div className="rounded-none border border-neutral-600 bg-neutral-950 p-5 space-y-2">
       <button className="flex w-full items-center justify-between" onClick={() => setOpen((v) => !v)}>
-        <span className="text-sm font-bold text-black">Coin info <span className="text-[11px] font-normal text-neutral-500">creator</span></span>
-        <span className="text-neutral-400 text-xs">{open ? "▾" : "▸"}</span>
+        <span className="text-sm font-bold text-white">Coin info <span className="text-[11px] font-normal text-neutral-500">creator</span></span>
+        <span className="text-neutral-500 text-xs">{open ? "▾" : "▸"}</span>
       </button>
-      {!token.name && !token.symbol && <p className="text-[11px] text-black">This coin has no name yet — set it here so it shows everywhere.</p>}
+      {!token.name && !token.symbol && <p className="text-[11px] text-white">This coin has no name yet — set it here so it shows everywhere.</p>}
       {open && (
         <>
           <div className="flex items-center gap-3">
             <Avatar image={image} symbol={symbol || token.tokenId.slice(0, 2)} size={44} />
-            <label className="text-xs text-black cursor-pointer">
+            <label className="text-xs text-white cursor-pointer">
               {uploading ? "uploading…" : "upload image"}
               <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
             </label>
@@ -2158,17 +2303,17 @@ function CreateToken({
   ].filter(Boolean) as string[];
 
   return (
-    <div className="rounded-none border border-neutral-300 bg-white p-5 space-y-3">
+    <div className="rounded-none border border-neutral-800 bg-neutral-950 p-5 space-y-3">
       <h3 className="font-black text-lg">Start a new coin</h3>
       <div className="flex items-center gap-3">
         <div className={"rounded-none " + (showReq && !reqMeta.image ? "ring-1 ring-red-500" : "")}>
           <Avatar image={image} symbol={symbol} size={56} />
         </div>
-        <label className="text-xs text-black cursor-pointer">
+        <label className="text-xs text-white cursor-pointer">
           {uploading ? "uploading…" : "upload image *"}
           <input type="file" accept="image/*" className="hidden" onChange={(e) => { e.target.files?.[0] && upload(e.target.files[0]); setShowReq(false); }} />
         </label>
-        <span className="text-[11px] text-neutral-400">or a URL below</span>
+        <span className="text-[11px] text-neutral-500">or a URL below</span>
       </div>
       <input
         className={inputC + (showReq && !reqMeta.image ? " ring-1 ring-red-500" : "")}
@@ -2186,7 +2331,7 @@ function CreateToken({
             onChange={(e) => { setSymbol(e.target.value); setShowReq(false); }} />
         </div>
         {showReq && missing.length > 0 && (
-          <p className="mt-1 text-[11px] font-bold text-red-600">
+          <p className="mt-1 text-[11px] font-bold text-red-500">
             {missing.join(", ")} {missing.length === 1 ? "is" : "are"} required.
           </p>
         )}
@@ -2198,10 +2343,10 @@ function CreateToken({
         <div className="mt-1.5 flex gap-2">
           {[["1M", "1000000"], ["100M", "100000000"], ["1B", "1000000000"]].map(([label, val]) => (
             <button key={label} type="button"
-              className="rounded-none border border-neutral-300 px-2.5 py-1 text-[11px] font-bold text-neutral-700 hover:border-black"
+              className="rounded-none border border-neutral-800 px-2.5 py-1 text-[11px] font-bold text-neutral-300 hover:border-white"
               onClick={() => setSupply(val)}>{label}</button>
           ))}
-          {supply && <span className="ml-auto self-center text-[11px] text-neutral-400 tabular-nums">{Number(supply).toLocaleString()} tokens · you keep 5%</span>}
+          {supply && <span className="ml-auto self-center text-[11px] text-neutral-500 tabular-nums">{Number(supply).toLocaleString()} tokens · you keep 5%</span>}
         </div>
       </div>
       <textarea className={inputC} placeholder="description" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
@@ -2213,7 +2358,7 @@ function CreateToken({
       <button className={btn} disabled={busy} onClick={launch}>
         {busy ? "launching…" : "Launch Token (0.000002 XNO)"}
       </button>
-      <p className="text-[11px] text-neutral-400">creator keeps 5% · 1 raw data fee per op</p>
+      <p className="text-[11px] text-neutral-500">creator keeps 5% · 1 raw data fee per op</p>
     </div>
   );
 }
@@ -2222,23 +2367,23 @@ function Portfolio({ tokens, onSelect, account }: { tokens: Token[]; onSelect: (
   const mine = tokens.filter((t) => BigInt(t.myBalance) > 0n);
   if (!account) {
     return (
-      <div className="rounded-none border border-neutral-300 bg-white p-10 text-center text-neutral-500">
-        <p className="font-bold text-neutral-700">Unlock your wallet</p>
+      <div className="rounded-none border border-neutral-800 bg-neutral-950 p-10 text-center text-neutral-500">
+        <p className="font-bold text-neutral-300">Unlock your wallet</p>
         <p className="text-sm mt-1">to see your tokens.</p>
       </div>
     );
   }
   if (mine.length === 0) {
     return (
-      <div className="rounded-none border border-neutral-300 bg-white p-10 text-center text-neutral-500">
-        <p className="font-bold text-neutral-700">No holdings yet</p>
+      <div className="rounded-none border border-neutral-800 bg-neutral-950 p-10 text-center text-neutral-500">
+        <p className="font-bold text-neutral-300">No holdings yet</p>
         <p className="text-sm mt-1">Buy a coin to add it here.</p>
       </div>
     );
   }
   return (
     <div className="space-y-2">
-      <h2 className="text-sm font-bold text-neutral-600">Your holdings</h2>
+      <h2 className="text-sm font-bold text-neutral-400">Your holdings</h2>
       <div className="space-y-2">
         {mine.map((t) => {
           const valueRaw = (BigInt(t.myBalance) * BigInt(t.price)) / 10n ** BigInt(t.decimals);
@@ -2246,7 +2391,7 @@ function Portfolio({ tokens, onSelect, account }: { tokens: Token[]; onSelect: (
             <button
               key={t.tokenId}
               onClick={() => onSelect(t.tokenId)}
-              className="w-full rounded-none border border-neutral-300 bg-white p-3 flex items-center gap-3 text-left hover:border-black"
+              className="w-full rounded-none border border-neutral-800 bg-neutral-950 p-3 flex items-center gap-3 text-left hover:border-white"
             >
               <Avatar image={t.image} symbol={tokSym(t)} size={40} />
               <div className="min-w-0 flex-1">
@@ -2255,7 +2400,7 @@ function Portfolio({ tokens, onSelect, account }: { tokens: Token[]; onSelect: (
               </div>
               <div className="text-right">
                 <p className="text-sm font-bold">{fmtXno(valueRaw.toString())} XNO</p>
-                <p className={"text-[11px] " + (t.change24h == null ? "text-neutral-400" : t.change24h >= 0 ? "text-green-600" : "text-red-600")}>{pctStr(t.change24h)}</p>
+                <p className={"text-[11px] " + (t.change24h == null ? "text-neutral-500" : t.change24h >= 0 ? "text-green-500" : "text-red-500")}>{pctStr(t.change24h)}</p>
               </div>
             </button>
           );
@@ -2275,13 +2420,13 @@ const TABS: { id: "explore" | "ranks" | "portfolio" | "create" | "scan" | "walle
 
 function TabBar({ tab, setTab }: { tab: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet"; setTab: (t: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet") => void }) {
   return (
-    <nav className="sm:hidden fixed bottom-0 inset-x-0 z-30 border-t border-neutral-300 bg-white/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
+    <nav className="sm:hidden fixed bottom-0 inset-x-0 z-30 border-t border-neutral-800 bg-black/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
       <div className="w-full grid grid-cols-5">
         {TABS.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={"py-3 text-xs font-bold uppercase tracking-wide border-t-2 " + (tab === t.id ? "text-black border-black" : "text-neutral-400 border-transparent hover:text-black")}
+            className={"py-3 text-xs font-bold uppercase tracking-wide border-t-2 " + (tab === t.id ? "text-white border-white" : "text-neutral-500 border-transparent hover:text-white")}
           >
             {t.label}
           </button>
