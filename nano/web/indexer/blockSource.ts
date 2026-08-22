@@ -57,21 +57,30 @@ export class MemorySource implements BlockSource {
 const FRONTIER_CACHE = new Map<string, NanoBlock[]>(); // `${account}|${frontier}` → blocks
 const FRONTIER_CACHE_MAX = 5000;
 
-/** Pending list straight from the FALLBACK endpoint (keyless, per the strict
- * RPC rule — the key is never sent there). Used only to widen the pending
- * union in counterparties(); results are locally verified downstream. */
-async function fallbackPending(account: string): Promise<string[]> {
+/** Direct call to the FALLBACK endpoint (keyless, per the strict RPC rule —
+ * the key is never sent there). nanoRpc only falls over on TRANSPORT failure,
+ * but a stale-yet-responsive primary needs its answers CROSS-CHECKED, so
+ * discovery and frontier selection query the fallback explicitly and union /
+ * maximize over all views. Results are always locally verified downstream. */
+async function fallbackRpc(body: Record<string, unknown>): Promise<any> {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 15_000);
   try {
-    const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 15_000);
     const res = await fetch(FALLBACK_RPC, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "pending", account, count: 1000 }),
+      body: JSON.stringify(body),
       signal: ctl.signal,
     });
+    return (await res.json()) as any;
+  } finally {
     clearTimeout(t);
-    const j = (await res.json()) as any;
+  }
+}
+
+async function fallbackPending(account: string): Promise<string[]> {
+  try {
+    const j = await fallbackRpc({ action: "pending", account, count: 1000 });
     return Array.isArray(j?.blocks) ? (j.blocks as string[]) : [];
   } catch {
     return [];
@@ -176,42 +185,42 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
    * triggers when staleness is actually detected.
    */
   async listBlocks(account: string, limit = 20000): Promise<NanoBlock[]> {
-    const [keyedFrontier, keylessFrontier] = await Promise.all([
-      nanoRpc(this.apiKey, { action: "account_info", account }).then((i: any) => String(i?.frontier ?? "")).catch(() => ""),
-      nanoRpc("", { action: "account_info", account }).then((i: any) => String(i?.frontier ?? "")).catch(() => ""),
-    ]);
-
-    // A walk is COMPLETE only when the verified chain actually contains the
-    // frontier its own tier reported. Root-caused live (2026-08-22, part 3 of
-    // the stale-backend saga): a backend can answer account_info with the
-    // fresh frontier while its account_history is still hours behind — the
-    // walk "succeeds" with an old, shorter chain (a creator's just-submitted
-    // liquidity seed was silently missing), and before this check that stale
-    // chain was CACHED under the fresh frontier key, poisoning the instance
-    // until restart. Now: up to two rounds across both tiers, prefer any
-    // complete walk (longest); only fall back to the longest incomplete walk
-    // when no round produced a complete one, and never cache incomplete.
-    const attempt = async (): Promise<{ blocks: NanoBlock[]; complete: boolean }[]> => {
-      const settled = await Promise.allSettled([
-        this.fetchChain(this.apiKey, account, limit, keyedFrontier),
-        this.fetchChain("", account, limit, keylessFrontier),
-      ]);
-      return settled
-        .filter((r): r is PromiseFulfilledResult<{ blocks: NanoBlock[]; complete: boolean }> => r.status === "fulfilled")
-        .map((r) => r.value);
+    // Best-view frontier selection. Final form of the stale-backend saga
+    // (2026-08-22): a lagging backend can be SELF-CONSISTENTLY stale — old
+    // frontier from account_info AND matching old history — so checking a
+    // walk against "its own" frontier still accepts an outdated chain. The
+    // only robust target is the BEST view: query account_info from all three
+    // permitted views (nano.to keyed, nano.to keyless, nano-gpt fallback),
+    // take the highest block_count as the target, and require the walk to
+    // contain THAT frontier. Walks start AT the target frontier (history
+    // head param): a backend that doesn't know the block yet returns nothing
+    // and is retried on the other tier instead of silently serving the past.
+    // A verified chain containing the highest observed frontier cannot be
+    // stale by more than what NO available view has seen.
+    const view = async (fn: () => Promise<any>) => {
+      try { const i = await fn(); return { frontier: String(i?.frontier ?? ""), height: Number(i?.block_count ?? 0) }; }
+      catch { return { frontier: "", height: 0 }; }
     };
+    const views = await Promise.all([
+      view(() => nanoRpc(this.apiKey, { action: "account_info", account })),
+      view(() => nanoRpc("", { action: "account_info", account })),
+      view(() => fallbackRpc({ action: "account_info", account })),
+    ]);
+    const best = views.reduce((a, b) => (b.height > a.height ? b : a));
+    if (!best.frontier) return []; // unopened / unknown everywhere
 
-    let best: { blocks: NanoBlock[]; complete: boolean } | null = null;
+    const walks: { blocks: NanoBlock[]; complete: boolean }[] = [];
     for (let round = 0; round < 2; round++) {
-      for (const r of await attempt()) {
-        if (best === null) { best = r; continue; }
-        const better = (r.complete && !best.complete) || (r.complete === best.complete && r.blocks.length > best.blocks.length);
-        if (better) best = r;
-      }
-      if (best !== null && best.complete) return best.blocks;
+      const settled = await Promise.allSettled([
+        this.fetchChain(this.apiKey, account, limit, best.frontier),
+        this.fetchChain("", account, limit, best.frontier),
+      ]);
+      for (const r of settled) if (r.status === "fulfilled") walks.push(r.value);
+      const complete = walks.filter((w) => w.complete);
+      if (complete.length > 0) return complete.reduce((a, b) => (b.blocks.length > a.blocks.length ? b : a)).blocks;
     }
-    if (best === null) throw new Error(`listBlocks(${account}): both keyed and keyless RPC failed`);
-    return best.blocks;
+    if (walks.length === 0) throw new Error(`listBlocks(${account}): both keyed and keyless RPC failed`);
+    return walks.reduce((a, b) => (b.blocks.length > a.blocks.length ? b : a)).blocks;
   }
 
   private async fetchChain(apiKey: string, account: string, limit: number, frontier: string): Promise<{ blocks: NanoBlock[]; complete: boolean }> {
@@ -225,7 +234,10 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
 
     const raw: RawFetchedBlock[] = [];
     const seen = new Set<string>();
-    let head: string | undefined;
+    // Start the walk AT the target frontier so a backend that hasn't seen it
+    // yet returns nothing (→ incomplete → retried elsewhere) instead of
+    // silently serving an older tip.
+    let head: string | undefined = frontier || undefined;
 
     while (raw.length < limit) {
       const params: Record<string, unknown> = { action: "account_history", account, count: 500, raw: true };
