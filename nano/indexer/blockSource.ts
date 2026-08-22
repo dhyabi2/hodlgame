@@ -11,7 +11,7 @@
 // (liveness) but cannot forge value, ownership, or attribution (integrity).
 
 import * as nanocurrency from "nanocurrency";
-import { nanoRpc } from "../lib/rpc";
+import { nanoRpc, FALLBACK_RPC } from "../lib/rpc";
 import { verifyFetchedBlock, deriveAmountSubtype, finalizeChain, type NanoBlock, type RawFetchedBlock } from "../core/blockVerify";
 
 // Re-export the browser-safe verification primitives (single source of truth,
@@ -57,6 +57,27 @@ export class MemorySource implements BlockSource {
 const FRONTIER_CACHE = new Map<string, NanoBlock[]>(); // `${account}|${frontier}` → blocks
 const FRONTIER_CACHE_MAX = 5000;
 
+/** Pending list straight from the FALLBACK endpoint (keyless, per the strict
+ * RPC rule — the key is never sent there). Used only to widen the pending
+ * union in counterparties(); results are locally verified downstream. */
+async function fallbackPending(account: string): Promise<string[]> {
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 15_000);
+    const res = await fetch(FALLBACK_RPC, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "pending", account, count: 1000 }),
+      signal: ctl.signal,
+    });
+    clearTimeout(t);
+    const j = (await res.json()) as any;
+    return Array.isArray(j?.blocks) ? (j.blocks as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Reads blocks from rpc.nano.to (nano-gpt fallback) and verifies each block
  * locally (core/blockVerify.ts). Uses `account_history` + `blocks_info`, with a
@@ -97,14 +118,35 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
 
   /** Discovery primitive: who sent into / received from this account. Inbound
    * covers both confirmed receives and STILL-PENDING sends (a hello counts
-   * even if the anchor never pockets it). */
+   * even if the anchor never pockets it).
+   *
+   * The pending list is unioned across ALL THREE permitted views of the two
+   * allowed endpoints — nano.to keyed, nano.to keyless, and the nano-gpt
+   * fallback. Root-caused live (2026-08-22): pending/receivable state is
+   * node-local in Nano, and rpc.nano.to's regional backends serve DIFFERENT
+   * pending lists for the same account (its US cluster was missing a
+   * confirmed hello for hours that both its EU view and nano-gpt had), so a
+   * new creator's coin never appeared for requests served from that region.
+   * Unioning is safe: every hash is then resolved via blocks_info and
+   * verified locally (core/blockVerify.ts), so a wrong entry cannot get in —
+   * omission was the only failure mode, and a union closes it as long as ANY
+   * of the three views has current data. No new endpoints (strict RPC rule):
+   * the key still goes only to nano.to, never to the fallback. */
   async counterparties(account: string): Promise<{ inbound: HelloInfo[]; outbound: string[] }> {
     const blocks = await this.listBlocks(account);
     const sourceHashes = blocks
       .filter((b) => (b.subtype === "receive" || b.subtype === "open") && /^[0-9a-fA-F]{64}$/.test(b.link))
       .map((b) => b.link);
-    const pend = await nanoRpc(this.apiKey, { action: "pending", account, count: 1000 }).catch(() => ({}));
-    const pending = ((pend as any).blocks ?? []) as string[];
+    const [pKeyed, pKeyless, pFallback] = await Promise.all([
+      nanoRpc(this.apiKey, { action: "pending", account, count: 1000 }).catch(() => ({})),
+      nanoRpc("", { action: "pending", account, count: 1000 }).catch(() => ({})),
+      fallbackPending(account),
+    ]);
+    const pending = [
+      ...(((pKeyed as any).blocks ?? []) as string[]),
+      ...(((pKeyless as any).blocks ?? []) as string[]),
+      ...pFallback,
+    ];
     const all = [...new Set([...sourceHashes, ...pending])];
 
     const inbound: HelloInfo[] = [];
