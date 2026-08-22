@@ -1220,6 +1220,12 @@ function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddr
 const medal = (i: number) => (i === 0 ? "text-white" : i === 1 ? "text-neutral-300" : i === 2 ? "text-white" : "text-neutral-500");
 function Skel() { return <div className="h-40 rounded-none bg-neutral-900 animate-pulse" />; }
 
+/** Starting XNO-raw price of one whole token for a seed of (xnoRaw, tokenRaw). */
+function priceOfSeed(xnoRaw: bigint, tokenRaw: bigint, decimals: number): bigint {
+  if (tokenRaw <= 0n) return 0n;
+  return (xnoRaw * 10n ** BigInt(decimals)) / tokenRaw;
+}
+
 /** The Unavoidable Pick — one coin surfaced per UTC day, chosen by a public,
  * future-unknowable seed = SHA-256(UTC-date · your address) indexed into the
  * eligible set. Nobody (us included) can curate or rig it toward/against you,
@@ -1661,7 +1667,22 @@ function TokenDetail({
   const [sendAmount, setSendAmount] = useState("");
   const [seedXno, setSeedXno] = useState("");
   const [seedTokens, setSeedTokens] = useState("");
+  const [seedTouched, setSeedTouched] = useState(false); // creator edited the fields
   const [xnoBal, setXnoBal] = useState("0");
+
+  // Prefill a RECOMMENDED starting price for the creator so they can seed in one
+  // click (still editable): the full treasury (all 95% tradeable supply) against
+  // a 1 XNO virtual reserve — a low, sensible starting price/market cap. Only
+  // fills an un-seeded coin, and never overwrites the creator's own edits.
+  useEffect(() => {
+    if (seedTouched) return;
+    const isMine = keys?.address === token.creator;
+    if (isMine && BigInt(token.poolXno || "0") <= 0n && BigInt(token.treasury || "0") > 0n) {
+      setSeedXno("1");
+      setSeedTokens(fmtTok(token.treasury, token.decimals));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token.tokenId, token.poolXno, token.treasury, keys?.address, seedTouched]);
 
   // Live XNO balance for the trade/seed MAX buttons — paused when hidden, 15s.
   useEffect(() => { if (!keys) setXnoBal("0"); }, [keys]);
@@ -2108,10 +2129,15 @@ function TokenDetail({
             </p>
           )}
           <div className="flex gap-2">
-            <input className={inputC} placeholder={token.direct ? "virtual XNO reserve" : "XNO to add"} inputMode="decimal" value={seedXno} onChange={(e) => setSeedXno(e.target.value)} />
-            <input className={inputC} placeholder="tokens to add" inputMode="decimal" value={seedTokens} onChange={(e) => setSeedTokens(e.target.value)} />
+            <input className={inputC} placeholder={token.direct ? "virtual XNO reserve" : "XNO to add"} inputMode="decimal" value={seedXno} onChange={(e) => { setSeedTouched(true); setSeedXno(e.target.value); }} />
+            <input className={inputC} placeholder="tokens to add" inputMode="decimal" value={seedTokens} onChange={(e) => { setSeedTouched(true); setSeedTokens(e.target.value); }} />
           </div>
-          <button className={btn} disabled={busy} onClick={seed}>Seed pool</button>
+          {BigInt(token.poolXno || "0") <= 0n && toRaw(seedXno, 30) > 0n && toRaw(seedTokens, token.decimals) > 0n && (() => {
+            const px = priceOfSeed(toRaw(seedXno, 30), toRaw(seedTokens, token.decimals), token.decimals);
+            const mc = (px * BigInt(token.supply)) / 10n ** BigInt(token.decimals);
+            return <p className="text-[11px] text-neutral-500">recommended · starting price ≈ {fmtXno(px.toString())} XNO · starting market cap ≈ {fmtXno(mc.toString())} XNO <span className="text-neutral-600">(edit above to change)</span></p>;
+          })()}
+          <button className={btn} disabled={busy} onClick={seed}>{token.direct ? "Set starting price" : "Seed pool"}</button>
         </div>
       )}
 
