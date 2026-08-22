@@ -87,14 +87,14 @@ export function analyze(events: IndexedEvent[]): Analytics {
   // applied or in what sequence.
   const { applied } = fixpointOrder(events);
   for (const ev of applied) {
-    let out: bigint | null = null;
-    if (ev.op.kind === "sell") {
-      const pre = s.get(ev.tokenId);
+    const pre = s.get(ev.tokenId);
+    let out: bigint | null = null; // XNO-out for on-chain pool payout (non-direct sells only)
+    let sellXno: bigint | null = null; // XNO value of a sell for VOLUME/tape (any pooled or virtual token)
+    if (ev.op.kind === "sell" && pre && pre.poolXno > 0n && pre.poolTokens > 0n) {
+      sellXno = (ev.op.tokens * pre.poolXno) / (pre.poolTokens + ev.op.tokens);
       // Direct tokens never produce pool payouts — sells settle wallet-side
       // (earmark release + flow queue), so no SellPayout entry is emitted.
-      if (pre && !pre.direct && pre.poolXno > 0n && pre.poolTokens > 0n) {
-        out = (ev.op.tokens * pre.poolXno) / (pre.poolTokens + ev.op.tokens);
-      }
+      if (!pre.direct) out = sellXno;
     }
 
     let next;
@@ -128,16 +128,23 @@ export function analyze(events: IndexedEvent[]): Analytics {
 
     if (ev.op.kind === "buy") {
       const price = priceOf(st.poolXno, st.poolTokens, st.decimals);
+      // Trade "size" is TOKENS for both buy and sell, so the shared display
+      // formula amountRaw·price/10^dec (and the fmtTok column) is correct. A
+      // buy's tokens received = pre.poolTokens − post.poolTokens.
+      const tokensGot = pre ? pre.poolTokens - st.poolTokens : 0n;
       const t = tradesMap.get(ev.tokenId) ?? [];
-      t.push({ kind: "buy", account: ev.sender, amountRaw: ev.op.xno.toString(), priceRaw: price.toString(), time: timeFor(ev.tokenId, ev) });
+      t.push({ kind: "buy", account: ev.sender, amountRaw: tokensGot.toString(), priceRaw: price.toString(), time: timeFor(ev.tokenId, ev) });
       tradesMap.set(ev.tokenId, t);
+      // Volume in XNO-raw (the value spent) so buy and sell volume share units.
       buyVol.set(ev.tokenId, (buyVol.get(ev.tokenId) ?? 0n) + ev.op.xno);
     } else if (ev.op.kind === "sell") {
       const price = priceOf(st.poolXno, st.poolTokens, st.decimals);
       const t = tradesMap.get(ev.tokenId) ?? [];
       t.push({ kind: "sell", account: ev.sender, amountRaw: ev.op.tokens.toString(), priceRaw: price.toString(), time: timeFor(ev.tokenId, ev) });
       tradesMap.set(ev.tokenId, t);
-      sellVol.set(ev.tokenId, (sellVol.get(ev.tokenId) ?? 0n) + ev.op.tokens);
+      // Volume in XNO-raw (value received) so it matches buyVolume's units;
+      // was token-raw, which made buy+sell volume meaningless to sum/rank.
+      sellVol.set(ev.tokenId, (sellVol.get(ev.tokenId) ?? 0n) + (sellXno ?? 0n));
     }
   }
 

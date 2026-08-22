@@ -30,8 +30,12 @@ export async function discoverAccounts(reader: CounterpartyReader, anchor: strin
     else users.add(h.sender);
   }
 
-  for (const pool of [...pools.keys()].sort()) {
-    const cp = await reader.counterparties(pool);
+  // Resolve every pool's counterparties in parallel — independent RPC calls
+  // unioned into a Set (order-independent, idempotent), so the discovered set
+  // is identical to the serial version; discovery only proposes candidates
+  // that replay re-validates. The final `[...users].sort()` normalizes order.
+  const cps = await Promise.all([...pools.keys()].map((pool) => reader.counterparties(pool)));
+  for (const cp of cps) {
     for (const h of cp.inbound) users.add(h.sender);
     for (const a of cp.outbound) users.add(a);
   }

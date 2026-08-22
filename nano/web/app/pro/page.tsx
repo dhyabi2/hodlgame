@@ -19,6 +19,7 @@ import {
   receiveAll,
   fetchXnoBalance,
   fmtNum,
+  clampSlippage,
 } from "../lib/trade";
 import { loadWallet, decryptSeed } from "../lib/wallet";
 import { useXnoUsd, fmtUsd } from "../lib/usd";
@@ -494,7 +495,7 @@ function OrderTicket({ token, keys, say }: { token: Token; keys: Keys | null; sa
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const slip = Number(slippage || "0");
+  const slip = clampSlippage(slippage); // NaN→0, clamped [0,100]; non-numeric input no longer crashes the quote
   const quote = useMemo(() => {
     const px = BigInt(token.poolXno), pt = BigInt(token.poolTokens);
     if (px <= 0n || pt <= 0n) return null;

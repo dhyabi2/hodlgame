@@ -85,13 +85,13 @@ export interface RawMarket {
 // live from chain data; there is nothing for a cache to save that isn't
 // already a live, verified RPC round-trip away.
 async function compute(): Promise<RawMarket> {
-  const reg = await loadRegistry();
-  const commit = await commitResolver();
+  // Prologue reads are independent live sources — overlap them instead of
+  // stacking three round-trips. Values are unchanged; only wall-clock differs.
+  const [reg, commit, watched] = await Promise.all([loadRegistry(), commitResolver(), watchedAccounts()]);
   const master = process.env.POOL_SEED ?? "";
   const poolKey = (tokenId: string) => (master ? tokenPoolKeys(master, tokenId).publicKey : null);
   const src = new NanoRpcSource(loadNanoRpcKey());
   const idx = new MultiIndexer(src, (id) => reg.get(id) ?? EMPTY_META, commit, poolKey);
-  const watched = await watchedAccounts();
   let events = await idx.collectEvents(watched);
   // Second discovery pass: a creator's chain reveals each token's pool (the
   // seed-deposit link), even before the pool's own anchor hello lands — that
@@ -101,12 +101,17 @@ async function compute(): Promise<RawMarket> {
   // so their holdings appear immediately instead of after the next sweep.
   const watchedSet = new Set(watched);
   const extra = new Set<string>();
-  for (const set of idx.getChainPoolSet().values()) {
-    for (const pub of set) {
-      const cp = await src.counterparties(deriveAddress(pub, { useNanoPrefix: true })).catch(() => null);
-      if (!cp) continue;
-      for (const h of cp.inbound) if (!watchedSet.has(h.sender)) extra.add(h.sender);
-    }
+  // Dedupe pool pubkeys first (a custody rotation can list the same pool in
+  // several sets), then resolve counterparties in parallel — independent RPC
+  // calls unioned into a Set, so the discovered `extra` set is identical to the
+  // serial version, just faster. Over-inclusion is re-validated by replay.
+  const poolPubs = [...new Set([...idx.getChainPoolSet().values()].flatMap((s) => [...s]))];
+  const cps = await Promise.all(
+    poolPubs.map((pub) => src.counterparties(deriveAddress(pub, { useNanoPrefix: true })).catch(() => null))
+  );
+  for (const cp of cps) {
+    if (!cp) continue;
+    for (const h of cp.inbound) if (!watchedSet.has(h.sender)) extra.add(h.sender);
   }
   if (extra.size > 0) events = await idx.collectEvents([...watchedSet, ...extra].sort());
   const { state, byToken, sellPayouts } = analyze(events);

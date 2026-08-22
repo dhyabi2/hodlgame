@@ -389,10 +389,28 @@ export class MultiIndexer {
     return { events, byHash, anchors };
   }
 
-  /** Fragment-aware decoded chains per account (explorer/edge consumers). */
+  /** Fragment-aware decoded chains per account (explorer/edge consumers).
+   *
+   * Block fetches run with bounded concurrency (each account's listBlocks is an
+   * independent RPC round-trip), then the Map is rebuilt in the ORIGINAL
+   * `accounts` order. decodeChain is a pure function of one account's own
+   * locally-verified blocks with zero cross-account dependency, and downstream
+   * consumers either sort (canonicalOrder) or are order-independent — so the
+   * folded state is byte-identical; only wall-clock changes. Was O(N) serial. */
   async collectChains(accounts: string[]): Promise<Map<string, DecodedChain>> {
+    const CONCURRENCY = 10;
+    const out: (DecodedChain | null)[] = new Array(accounts.length).fill(null);
+    let cursor = 0;
+    const worker = async () => {
+      for (;;) {
+        const i = cursor++; // atomic in single-threaded JS (no await before use)
+        if (i >= accounts.length) return;
+        out[i] = this.decodeChain(await this.source.listBlocks(accounts[i]));
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, accounts.length) }, worker));
     const decoded = new Map<string, DecodedChain>();
-    for (const account of accounts) decoded.set(account, this.decodeChain(await this.source.listBlocks(account)));
+    for (let i = 0; i < accounts.length; i++) decoded.set(accounts[i], out[i]!);
     return decoded;
   }
 
