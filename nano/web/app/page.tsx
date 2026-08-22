@@ -1943,7 +1943,7 @@ function TokenDetail({
     const raw = toRaw(sendAmount, token.decimals);
     if (!to || raw <= 0n) return say("enter recipient address + amount");
     if (!isNanoAddr(to)) return say("recipient must be a valid nano_ address");
-    if (raw > BigInt(myHolding?.balanceRaw ?? "0")) return say(`you only hold ${fmtTok(myHolding?.balanceRaw, token.decimals)} ${tokSym(token)}`);
+    if (raw > BigInt(token.myBalance ?? "0")) return say(`you only hold ${fmtTok(token.myBalance, token.decimals)} ${tokSym(token)}`);
     try {
       const [fragA, fragB] = encodeFragLinks(token.tokenId, { kind: "transfer", to, amount: raw });
       await submitBlock(fragA, 1n);
@@ -2346,7 +2346,7 @@ function TradePanel({
         </div>
       )}
       <div className="flex items-center justify-between text-[11px] text-neutral-500">
-        <span>balance: {side === "buy" ? `${fmtXno(xnoBal)} XNO` : `${fmtTok(myHolding?.balanceRaw, token.decimals)} ${tokSym(token)}`}</span>
+        <span>balance: {side === "buy" ? `${fmtXno(xnoBal)} XNO` : `${fmtTok(token.myBalance, token.decimals)} ${tokSym(token)}`}</span>
         <label className="flex items-center gap-1.5">
           <span className="text-neutral-500">slippage %</span>
           <input
@@ -2389,10 +2389,11 @@ function TradePanel({
             Max
           </button>
         )}
-        {side === "sell" && myHolding && (
+        {side === "sell" && (
           <button
-            className="shrink-0 rounded-none bg-neutral-900 px-3 text-xs font-bold text-neutral-300 hover:bg-neutral-800"
-            onClick={() => setAmount(fmtTok(myHolding.balanceRaw, token.decimals))}
+            className="shrink-0 rounded-none bg-neutral-900 px-3 text-xs font-bold text-neutral-300 hover:bg-neutral-800 disabled:opacity-40"
+            disabled={BigInt(token.myBalance || "0") <= 0n}
+            onClick={() => setAmount(fmtTok(token.myBalance, token.decimals))}
           >
             Max
           </button>
@@ -2416,26 +2417,33 @@ function TradePanel({
           })}
         </div>
       )}
-      {/* Sell quick-fills: % of your holding, so it's one tap to sell part or all
-          of your bag. Disabled when you hold none of the coin. */}
+      {/* Sell quick-fills: % of YOUR balance (token.myBalance is authoritative —
+          the top-holders list is capped, so never gate on it). One tap to sell
+          part or all of your bag when you don't know the exact amount. */}
       {side === "sell" && (
-        <div className="grid grid-cols-4 gap-2">
-          {[10, 25, 50, 100].map((p) => {
-            const bal = BigInt(myHolding?.balanceRaw ?? "0");
-            const amt = (bal * BigInt(p)) / 100n;
-            return (
-              <button
-                key={p}
-                disabled={bal <= 0n}
-                title={bal <= 0n ? `you hold no ${tokSym(token)}` : `${p}% of your ${tokSym(token)}`}
-                className="rounded-none border border-neutral-800 py-1.5 text-xs font-bold text-neutral-400 hover:border-white hover:text-white disabled:opacity-40 disabled:hover:border-neutral-800 disabled:hover:text-neutral-300"
-                onClick={() => setAmount(fmtTok(amt.toString(), token.decimals))}
-              >
-                {p === 100 ? "MAX" : `${p}%`}
-              </button>
-            );
-          })}
-        </div>
+        <>
+          <div className="flex items-center justify-between text-[11px] text-neutral-500">
+            <span>your {tokSym(token)}</span>
+            <span className="tabular-nums text-neutral-300">{fmtTok(token.myBalance, token.decimals)} {tokSym(token)}</span>
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            {[10, 25, 50, 100].map((p) => {
+              const bal = BigInt(token.myBalance || "0");
+              const amt = (bal * BigInt(p)) / 100n;
+              return (
+                <button
+                  key={p}
+                  disabled={bal <= 0n}
+                  title={bal <= 0n ? `you hold no ${tokSym(token)}` : `${p}% of your ${tokSym(token)}`}
+                  className="rounded-none border border-neutral-800 py-1.5 text-xs font-bold text-neutral-400 hover:border-white hover:text-white disabled:opacity-40 disabled:hover:border-neutral-800 disabled:hover:text-neutral-300"
+                  onClick={() => setAmount(fmtTok(amt.toString(), token.decimals))}
+                >
+                  {p === 100 ? "MAX" : `${p}%`}
+                </button>
+              );
+            })}
+          </div>
+        </>
       )}
       {quote && (
         <div className="rounded-none border border-neutral-800 bg-neutral-950 p-3 space-y-1 text-[11px]">
