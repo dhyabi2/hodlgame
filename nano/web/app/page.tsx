@@ -1276,14 +1276,22 @@ function UnavoidablePick({ coins, myAddress, onSelect }: { coins: Token[]; myAdd
 function Feed({ tokens, onSelect, myAddress, usd, onCreate }: { tokens: Token[]; onSelect: (id: string) => void; myAddress?: string; usd: number | null; onCreate?: () => void }) {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"mc" | "price" | "change" | "vol" | "new">("mc");
+  const [showZeroCap, setShowZeroCap] = useState(false);
 
   // "Live" coins: named, funded, held by you, or traded. Hides only
   // fully-abandoned launches you don't hold.
   // A coin must carry an image to be shown (pre-image-fix test launches are
   // hidden everywhere) — unless YOU hold it, so owners can always reach it.
-  const live = tokens.filter(
+  const eligible = tokens.filter(
     (t) => (Boolean(t.image) && (Boolean(t.name || t.symbol) || BigInt(t.poolXno) > 0n || BigInt(t.buyVolume) > 0n)) || BigInt(t.myBalance) > 0n
   );
+  // Zero-cap = no starting price set yet (market cap 0 / unseeded). Hidden by
+  // default so the feed shows only real, tradeable coins — but you always see
+  // ones you hold or created, and a button at the end reveals the rest.
+  const isZeroCap = (t: Token) => BigInt(t.marketCap || "0") <= 0n;
+  const mineOrMade = (t: Token) => BigInt(t.myBalance || "0") > 0n || (!!myAddress && t.creator === myAddress);
+  const hiddenZeroCap = eligible.filter((t) => isZeroCap(t) && !mineOrMade(t));
+  const live = showZeroCap ? eligible : eligible.filter((t) => !isZeroCap(t) || mineOrMade(t));
 
   // Search matches ANY identifying field (name / symbol / tokenId) across all
   // tokens, so a coin is findable even before its metadata loads.
@@ -1404,6 +1412,19 @@ function Feed({ tokens, onSelect, myAddress, usd, onCreate }: { tokens: Token[];
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2">
               {sorted.map((t) => <PosterCard key={t.tokenId} t={t} usd={usd} onSelect={onSelect} />)}
             </div>
+            {/* Zero-cap coins (no starting price yet) are hidden by default;
+                reveal them on demand at the very end. */}
+            {(hiddenZeroCap.length > 0 || showZeroCap) && (
+              <div className="pt-3 text-center">
+                <button
+                  className="rounded-none border border-neutral-800 px-4 py-2 text-[11px] font-bold uppercase tracking-wide text-neutral-400 hover:border-white hover:text-white"
+                  onClick={() => setShowZeroCap((v) => !v)}
+                >
+                  {showZeroCap ? "Hide zero-cap coins" : `Show ${hiddenZeroCap.length} zero-cap coin${hiddenZeroCap.length === 1 ? "" : "s"}`}
+                </button>
+                {!showZeroCap && <p className="mt-1 text-[10px] text-neutral-600">no starting price set yet — not tradeable</p>}
+              </div>
+            )}
           </div>
         </>
       )}
