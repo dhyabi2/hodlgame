@@ -2,6 +2,7 @@
 // cap, holders, a price/time series (for charts), and a trade feed. No network.
 
 import { applyBlock, multiEmpty, type MultiState } from "../core/multi";
+import { fixpointOrder } from "../indexer/replay";
 import type { IndexedEvent } from "../indexer/multiIndexer";
 import { clampDecimals } from "./validate";
 
@@ -81,7 +82,11 @@ export function analyze(events: IndexedEvent[]): Analytics {
     return time;
   };
 
-  for (const ev of events) {
+  // Fold in the deterministic FIXPOINT application order (indexer/replay.ts)
+  // so analytics and consensus state can never disagree about which events
+  // applied or in what sequence.
+  const { applied } = fixpointOrder(events);
+  for (const ev of applied) {
     let out: bigint | null = null;
     if (ev.op.kind === "sell") {
       const pre = s.get(ev.tokenId);
