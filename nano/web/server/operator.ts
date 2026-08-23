@@ -11,10 +11,48 @@ import { commitResolver } from "./commits";
 import { loadNanoRpcKey } from "../lib/rpc";
 import { discoverAccounts } from "../indexer/discovery";
 import { ANCHOR_ADDRESS } from "../core/anchor";
+import { loadBlob, saveBlob } from "./store";
 
 export function watched(): string[] {
   const raw = process.env.WATCHED_ACCOUNTS ?? "";
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+// Shared, append-only watch-list. Live anchor discovery is NON-DETERMINISTIC —
+// it walks the anchor's pending/receive counterparties, which are node-local in
+// Nano and differ per RPC backend/region, so two requests can discover DIFFERENT
+// account sets and therefore replay to DIFFERENT holder counts / poolXno /
+// trades (the observed flicker). A monotonic UNION in the durable store fixes
+// this: every request folds live discovery into the stored set and writes the
+// grown union back, so the watch-list only ever grows and CONVERGES to the
+// complete set across all instances. This is NOT the per-instance TTL cache the
+// old comment warned against (that diverged BECAUSE it was per-instance and
+// could shrink) — it's shared and append-only, so it never goes stale (a stale
+// value can only be MISSING an account, which the next request that sees it
+// adds) and never drops one. A wrongly-INCLUDED account is impossible anyway
+// (blocks are self-verifying; a non-participant contributes no valid ops), so
+// union-only growth is safe.
+const WATCH_KEY = "watched-accounts";
+const HEX_ADDR = /^(nano|xrb)_[13][0-9a-z]{59}$/;
+
+async function loadStoredWatched(): Promise<string[]> {
+  try {
+    const raw = await loadBlob(WATCH_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter((a) => typeof a === "string" && HEX_ADDR.test(a)) : [];
+  } catch { return []; }
+}
+
+/** Fold `accounts` into the stored watch-list; write back only if it grew.
+ * Best-effort — never throws, never blocks the caller on a store error. */
+export async function persistWatched(accounts: string[]): Promise<void> {
+  try {
+    const stored = new Set(await loadStoredWatched());
+    let grew = false;
+    for (const a of accounts) if (HEX_ADDR.test(a) && !stored.has(a)) { stored.add(a); grew = true; }
+    if (grew) await saveBlob(WATCH_KEY, JSON.stringify([...stored].sort()));
+  } catch {}
 }
 
 // Anchor-derived discovery (core/anchor.ts): a live, uncached 2-hop walk of
@@ -44,14 +82,21 @@ export function watched(): string[] {
 // the two calls has current data.
 export async function watchedAccounts(): Promise<string[]> {
   const env = watched();
-  const [keyed, keyless] = await Promise.allSettled([
+  const [keyed, keyless, stored] = await Promise.allSettled([
     discoverAccounts(new NanoRpcSource(loadNanoRpcKey()), ANCHOR_ADDRESS),
     discoverAccounts(new NanoRpcSource(""), ANCHOR_ADDRESS),
+    loadStoredWatched(),
   ]);
   const users = new Set(env);
+  // The persisted union is the stable base — nothing ever disappears from it.
+  if (stored.status === "fulfilled") for (const u of stored.value) users.add(u);
   if (keyed.status === "fulfilled") for (const u of keyed.value.users) users.add(u);
   if (keyless.status === "fulfilled") for (const u of keyless.value.users) users.add(u);
-  return [...users].sort();
+  const list = [...users].sort();
+  // Grow the shared set with anything newly discovered (fire-and-forget).
+  const storedCount = stored.status === "fulfilled" ? stored.value.length : 0;
+  if (list.length > storedCount) void persistWatched(list);
+  return list;
 }
 
 export async function indexer(): Promise<MultiIndexer> {

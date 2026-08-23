@@ -11,7 +11,7 @@ import { loadRegistry, EMPTY_META } from "./tokens";
 import { commentsFor, type Comment } from "./comments";
 import { commitResolver } from "./commits";
 import { loadNanoRpcKey } from "../lib/rpc";
-import { watchedAccounts } from "./operator";
+import { watchedAccounts, persistWatched } from "./operator";
 import { deriveMetaAuthority, type MetaAuthorityState } from "../core/metaAnchor";
 import { claimableReward } from "../core/state";
 
@@ -113,7 +113,13 @@ async function compute(): Promise<RawMarket> {
     if (!cp) continue;
     for (const h of cp.inbound) if (!watchedSet.has(h.sender)) extra.add(h.sender);
   }
-  if (extra.size > 0) events = await idx.collectEvents([...watchedSet, ...extra].sort());
+  if (extra.size > 0) {
+    events = await idx.collectEvents([...watchedSet, ...extra].sort());
+    // Persist the first-time buyers found this pass into the shared watch-list
+    // so they're replayed from the base set next time (fire-and-forget) — this
+    // is what stops a holder count from flickering as discovery varies.
+    void persistWatched([...watchedSet, ...extra]);
+  }
   const { state, byToken, sellPayouts } = analyze(events);
   // Chain-derived metadata-authority state (core/metaAnchor.ts): seeded by
   // each launch creator, folded over on-chain immutable/setAuthority anchors.
