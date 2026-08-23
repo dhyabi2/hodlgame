@@ -397,7 +397,7 @@ export class MultiIndexer {
    * locally-verified blocks with zero cross-account dependency, and downstream
    * consumers either sort (canonicalOrder) or are order-independent — so the
    * folded state is byte-identical; only wall-clock changes. Was O(N) serial. */
-  async collectChains(accounts: string[]): Promise<Map<string, DecodedChain>> {
+  async collectChains(accounts: string[], onProgress?: (done: number, total: number) => void): Promise<Map<string, DecodedChain>> {
     // Batch-resolve every account's best frontier in ~3 RPC calls (if the source
     // supports it) so the per-account fetches below skip their own frontier
     // probes. Best-effort — a source without warmFrontiers, or an account it
@@ -410,11 +410,14 @@ export class MultiIndexer {
     const CONCURRENCY = 10;
     const out: (DecodedChain | null)[] = new Array(accounts.length).fill(null);
     let cursor = 0;
+    let done = 0;
+    onProgress?.(0, accounts.length);
     const worker = async () => {
       for (;;) {
         const i = cursor++; // atomic in single-threaded JS (no await before use)
         if (i >= accounts.length) return;
         out[i] = this.decodeChain(await this.source.listBlocks(accounts[i]));
+        onProgress?.(++done, accounts.length); // report as each account's chain lands
       }
     };
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, accounts.length) }, worker));
@@ -423,8 +426,8 @@ export class MultiIndexer {
     return decoded;
   }
 
-  async collectEvents(accounts: string[]): Promise<IndexedEvent[]> {
-    const decoded = await this.collectChains(accounts);
+  async collectEvents(accounts: string[], onProgress?: (done: number, total: number) => void): Promise<IndexedEvent[]> {
+    const decoded = await this.collectChains(accounts, onProgress);
 
     // Initial (first-seed-wins) pool per token, then follow custody rotations.
     const initial = derivePoolKeysFromChain(decoded);
@@ -570,8 +573,8 @@ export class MultiIndexer {
   }
 
   /** Pull blocks for the given accounts and fold them into a MultiState. */
-  async sync(accounts: string[]): Promise<SyncResult> {
-    const events = await this.collectEvents(accounts);
+  async sync(accounts: string[], onProgress?: (done: number, total: number) => void): Promise<SyncResult> {
+    const events = await this.collectEvents(accounts, onProgress);
     const result = replayMulti(events);
     this.state = result.state;
     return {

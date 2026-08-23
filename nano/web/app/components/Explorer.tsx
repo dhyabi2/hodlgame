@@ -552,9 +552,11 @@ function VerifyButton({ serverRoot }: { serverRoot: string }) {
   const [state, setState] = useState<"idle" | "running" | "done">("idle");
   const [res, setRes] = useState<VerifyResult | null>(null);
   const [scramble, setScramble] = useState("");
+  const [prog, setProg] = useState<{ done: number; total: number }>({ done: 0, total: 0 });
 
   async function run() {
     setState("running");
+    setProg({ done: 0, total: 0 });
     // Scramble a fake digest while the real replay runs underneath.
     const len = Math.max(16, serverRoot.length || 64);
     let raf = 0;
@@ -566,7 +568,7 @@ function VerifyButton({ serverRoot }: { serverRoot: string }) {
     };
     tick();
     let result: VerifyResult;
-    try { result = await verifyInBrowser(); }
+    try { result = await verifyInBrowser((done, total) => setProg({ done, total })); }
     catch (e: any) { result = { ok: false, localRoot: "", serverRoot, tokens: 0, ops: 0, accounts: 0, error: e.message }; }
     cancelAnimationFrame(raf);
     // Resolve the real digest left-to-right for the reveal payoff. On error we
@@ -587,6 +589,23 @@ function VerifyButton({ serverRoot }: { serverRoot: string }) {
       <button onClick={run} disabled={state === "running"} className="rounded-none bg-white px-4 py-2 text-xs font-bold text-black hover:bg-neutral-200 disabled:opacity-40">
         {state === "running" ? "recomputing in your browser…" : state === "done" ? "Verify again" : "Verify it yourself"}
       </button>
+      {state === "running" && (() => {
+        // Real progress: fraction of the account set whose signed chain the
+        // browser has fetched + replayed. `total` is 0 for the brief moment
+        // before the account set is known — show an indeterminate label then.
+        const pct = prog.total > 0 ? Math.round((prog.done / prog.total) * 100) : 0;
+        return (
+          <div className="mt-2">
+            <div className="flex justify-between text-[10px] uppercase tracking-wide text-neutral-500 mb-1">
+              <span>{prog.total > 0 ? `replaying accounts ${prog.done} / ${prog.total}` : "discovering accounts…"}</span>
+              <span className="tabular-nums">{prog.total > 0 ? `${pct}%` : ""}</span>
+            </div>
+            <div className="h-1.5 w-full bg-neutral-900 overflow-hidden">
+              <div className={"h-full bg-white transition-all duration-300 " + (prog.total > 0 ? "" : "animate-pulse w-1/3")} style={prog.total > 0 ? { width: `${pct}%` } : undefined} />
+            </div>
+          </div>
+        );
+      })()}
       {state !== "idle" && (
         <div className="mt-2 text-xs">
           <p className="text-[10px] uppercase tracking-wide text-neutral-500">your browser’s computed fingerprint</p>

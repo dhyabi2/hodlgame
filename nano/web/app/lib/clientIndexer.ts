@@ -151,7 +151,7 @@ export interface VerifyResult {
  * check, nothing else). And because it unions in its own discovery, a server
  * that tried to HIDE an account can't: the browser would replay the hidden
  * account too and the roots would then diverge — a real, surfaced mismatch. */
-export async function verifyInBrowser(): Promise<VerifyResult> {
+export async function verifyInBrowser(onProgress?: (done: number, total: number) => void): Promise<VerifyResult> {
   const src = new BrowserSource();
 
   // Server scope + claimed root, fetched first so we can reproduce its exact set.
@@ -167,16 +167,13 @@ export async function verifyInBrowser(): Promise<VerifyResult> {
   // NO metadata resolver, NO poolKey, NO commit resolver — pools resolve from
   // chain, metadata is non-consensus (root excludes it).
   const idx = new MultiIndexer(src);
-  const sync = await idx.sync(union);
+  // Single walk: sync() fetches every account's chain and replays it, reporting
+  // per-account progress. (The old code then re-walked with collectEvents() just
+  // to count ops — a wasted second full walk; the count comes free from sync.)
+  const sync = await idx.sync(union, onProgress);
   const state = idx.getState();
   const localRoot = stateRoot(state);
-
-  let events = 0;
-  try {
-    events = (await idx.collectEvents(union)).length;
-  } catch {
-    events = sync.applied;
-  }
+  const events = sync.applied + sync.invalid;
 
   return {
     ok: Boolean(serverRoot) && serverRoot.toLowerCase() === localRoot.toLowerCase(),
