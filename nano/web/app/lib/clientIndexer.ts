@@ -15,14 +15,28 @@ import { ANCHOR_ADDRESS } from "../../core/anchor";
 import { stateRoot } from "../../core/canonical";
 import * as nanocurrency from "nanocurrency";
 
-async function rpc(action: string, params: Record<string, unknown>): Promise<any> {
-  const res = await fetch("/api/rpc", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action, ...params }),
-  });
-  if (!res.ok) throw new Error(`rpc ${action} ${res.status}`);
-  return res.json();
+async function rpc(action: string, params: Record<string, unknown>, tries = 4): Promise<any> {
+  // The /api/rpc proxy maps EVERY upstream failure (timeout, 5xx, throttle) to a
+  // 400, so over a full multi-account verify walk a single transient hiccup would
+  // otherwise abort the whole recomputation. Retry with backoff so the walk
+  // survives blips; only a persistent failure throws (an honest "couldn't
+  // verify — retry", never a silently-truncated chain that fakes a mismatch).
+  let lastErr: unknown;
+  for (let i = 0; i < tries; i++) {
+    try {
+      const res = await fetch("/api/rpc", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...params }),
+      });
+      if (!res.ok) throw new Error(`rpc ${action} ${res.status}`);
+      return await res.json();
+    } catch (e) {
+      lastErr = e;
+      if (i < tries - 1) await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+    }
+  }
+  throw lastErr;
 }
 
 /** Browser BlockSource + CounterpartyReader over /api/rpc, using the identical
@@ -35,14 +49,24 @@ class BrowserSource implements BlockSource, CounterpartyReader {
     while (raw.length < limit) {
       const params: Record<string, unknown> = { action: "account_history", account, count: 500, raw: true };
       if (head) params.head = head;
-      const hist = await rpc("account_history", params).catch(() => ({}));
+      // NOT swallowed: a silently-empty history would truncate this account's
+      // chain and compute a WRONG root (a false mismatch). rpc() already retries
+      // transients; a persistent failure should surface, not fake a result.
+      const hist = await rpc("account_history", params);
       const history = (hist.history ?? []) as { hash: string }[];
       if (!history.length) break;
       const hashes = history.map((h) => h.hash).filter((h) => !seen.has(h));
       if (!hashes.length) break;
-      const info = await rpc("blocks_info", { hashes, json_block: true });
+      // Chunk blocks_info: a 500-hash request is the most likely single call to
+      // trip an upstream size/timeout limit (→ proxy 400). Smaller batches (each
+      // retried) keep the walk moving.
+      const blocks: Record<string, any> = {};
+      for (let i = 0; i < hashes.length; i += 200) {
+        const part = await rpc("blocks_info", { hashes: hashes.slice(i, i + 200), json_block: true });
+        Object.assign(blocks, part.blocks ?? {});
+      }
       for (const hash of hashes) {
-        const b = info.blocks?.[hash];
+        const b = blocks[hash];
         if (!b) continue;
         seen.add(hash);
         raw.push({ hash, block_account: b.block_account, contents: b.contents, height: b.height, local_timestamp: b.local_timestamp });
