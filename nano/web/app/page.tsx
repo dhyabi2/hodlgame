@@ -3330,6 +3330,21 @@ function ExchangeListing() {
       </div>
 
       <div>
+        <p className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500">Submission-ready — CoinGecko & CoinMarketCap spec</p>
+        <div className="space-y-2">
+          <Endpoint path="/api/cg/tickers" desc="CoinGecko-spec tickers (base = coin, target = XNO): last_price, base/target volume, bid/ask, 24h high/low, liquidity." />
+          <Endpoint path="/api/cg/pairs" desc="CoinGecko-spec tradeable pairs list." />
+          <Endpoint path="/api/cmc/summary" desc="CoinMarketCap-spec 24h summary keyed by market pair." />
+          <Endpoint path="/api/cmc/assets" desc="CoinMarketCap-spec asset details (name, unified id, deposit/withdraw, fees=0)." />
+          <Endpoint path="/api/cmc/ticker" desc="CoinMarketCap-spec price + volume keyed by market pair." />
+        </div>
+        <p className="mt-2 text-[11px] text-neutral-500">
+          These match the exact schemas CoinGecko / CoinMarketCap require — submit the base URL in their listing form.
+          Reality check: aggregators <span className="text-neutral-300">manually review + require minimum volume, liquidity and holders</span> before they display anything — the API is what you hand them, not an instant switch. The no-application indexers (GeckoTerminal / DEXScreener) don't support Nano yet.
+        </p>
+      </div>
+
+      <div>
         <p className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500">Listing integration — for exchanges</p>
         <div className="space-y-2">
           <Endpoint path={`/api/exchange?view=token-info&q=${sample?.first?.tokenId ?? "<tokenId>"}`} desc="Identity you pin to list: symbol, name, CONSENSUS-bound decimals (from the launch link — immutable), supply, circulating, liquidity, creator, metadata authority + immutability, pool address." />

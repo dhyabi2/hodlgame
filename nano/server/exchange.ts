@@ -157,6 +157,190 @@ export async function recentTrades(tokenId: string, limit = 200) {
   return { tokenId, trades };
 }
 
+// ── CoinGecko / CoinMarketCap spec-exact adapters ───────────────────────────
+// Both aggregators require a DEX/exchange submission to expose specific endpoint
+// SHAPES and field names. These map our data to those exact schemas so a formal
+// listing application passes their validator on the first try. The market pair /
+// ticker_id is `<tokenId>_XNO` — unique and unforgeable (symbols can collide);
+// the human symbol travels in base_currency / base_symbol / name.
+
+const pairId = (tokenId: string) => `${tokenId}_XNO`;
+const tokenOfPair = (id: string) => (id.toLowerCase().endsWith("_xno") ? id.slice(0, -4).toLowerCase() : id.toLowerCase());
+
+/** 24h high/low price (raw) from the trade feed; falls back to last price. */
+function hilo24(a: TokenAnalytics | undefined, priceRaw: string, now: number): { hi: bigint; lo: bigint } {
+  let hi = 0n, lo = 0n, seen = false;
+  if (a) for (const t of a.trades) {
+    if (t.time < now - DAY) continue;
+    const p = BigInt(t.priceRaw);
+    if (!seen) { hi = p; lo = p; seen = true; } else { if (p > hi) hi = p; if (p < lo) lo = p; }
+  }
+  if (!seen) { const p = BigInt(priceRaw || "0"); hi = p; lo = p; }
+  return { hi, lo };
+}
+
+/** CoinGecko `/tickers` — array of market tickers (base=coin, target=XNO). */
+export async function cgTickers() {
+  const m = await raw();
+  const now = Math.floor(Date.now() / 1000);
+  return [...m.state.entries()].map(([tokenId, s]) => {
+    const a = m.byToken.get(tokenId);
+    const dec = s.decimals;
+    const price = a?.priceRaw ?? "0";
+    const v = a ? vol24(a, dec, now) : { base: 0n, quote: 0n };
+    const { hi, lo } = hilo24(a, price, now);
+    return {
+      ticker_id: pairId(tokenId),
+      base_currency: s.symbol || tokenId.slice(0, 6).toUpperCase(),
+      target_currency: "XNO",
+      last_price: fmtDec(price, XNO_DECIMALS),
+      base_volume: fmtDec(v.base.toString(), dec),
+      target_volume: fmtDec(v.quote.toString(), XNO_DECIMALS),
+      bid: fmtDec(price, XNO_DECIMALS),
+      ask: fmtDec(price, XNO_DECIMALS),
+      high: fmtDec(hi.toString(), XNO_DECIMALS),
+      low: fmtDec(lo.toString(), XNO_DECIMALS),
+      liquidity_in_xno: fmtDec(s.poolXno.toString(), XNO_DECIMALS),
+    };
+  });
+}
+
+/** CoinGecko `/pairs` — the tradeable pairs list. */
+export async function cgPairs() {
+  const m = await raw();
+  return [...m.state.entries()].map(([tokenId, s]) => ({
+    ticker_id: pairId(tokenId),
+    base: s.symbol || tokenId.slice(0, 6).toUpperCase(),
+    target: "XNO",
+    pool_id: tokenId,
+  }));
+}
+
+/** CoinGecko `/historical_trades` — { buy:[…], sell:[…] } for one pair. */
+export async function cgHistoricalTrades(tickerId: string, type: string, limit: number) {
+  const tokenId = tokenOfPair(tickerId);
+  const m = await raw();
+  const s = m.state.get(tokenId);
+  const a = m.byToken.get(tokenId);
+  if (!s || !a) return null;
+  const scale = 10n ** BigInt(s.decimals);
+  const rows = [...a.trades].sort((x, y) => y.time - x.time).slice(0, Math.min(Math.max(limit, 1), 1000)).map((t) => ({
+    trade_id: `${t.time}-${t.kind}-${t.amountRaw}`,
+    price: fmtDec(t.priceRaw, XNO_DECIMALS),
+    base_volume: fmtDec(t.amountRaw, s.decimals),
+    target_volume: fmtDec(((BigInt(t.amountRaw) * BigInt(t.priceRaw)) / scale).toString(), XNO_DECIMALS),
+    trade_timestamp: t.time,
+    type: t.kind,
+  }));
+  const want = type === "buy" || type === "sell" ? type : null;
+  return {
+    buy: want && want !== "buy" ? [] : rows.filter((r) => r.type === "buy"),
+    sell: want && want !== "sell" ? [] : rows.filter((r) => r.type === "sell"),
+  };
+}
+
+/** AMM pseudo-orderbook: no book exists (constant-product pool), so we quote the
+ * single spot level — price with the pool's token depth as size. Shared by the
+ * CoinGecko and CMC orderbook endpoints (both require the field). */
+export async function pairOrderbook(tickerId: string) {
+  const tokenId = tokenOfPair(tickerId);
+  const m = await raw();
+  const s = m.state.get(tokenId);
+  const a = m.byToken.get(tokenId);
+  if (!s) return null;
+  const price = fmtDec(a?.priceRaw ?? "0", XNO_DECIMALS);
+  const size = fmtDec(s.poolTokens.toString(), s.decimals);
+  const now = Math.floor(Date.now() * 1000); // ms → CMC wants ms timestamp
+  return { ticker_id: pairId(tokenId), timestamp: now, bids: [[price, size]], asks: [[price, size]] };
+}
+
+/** CoinMarketCap `/summary` — object keyed by market pair. */
+export async function cmcSummary() {
+  const m = await raw();
+  const now = Math.floor(Date.now() / 1000);
+  const out: Record<string, any> = {};
+  for (const [tokenId, s] of m.state) {
+    const a = m.byToken.get(tokenId);
+    const dec = s.decimals;
+    const price = a?.priceRaw ?? "0";
+    const v = a ? vol24(a, dec, now) : { base: 0n, quote: 0n };
+    const { hi, lo } = hilo24(a, price, now);
+    out[pairId(tokenId)] = {
+      trading_pairs: pairId(tokenId),
+      base_symbol: s.symbol || tokenId.slice(0, 6).toUpperCase(),
+      quote_symbol: "XNO",
+      last_price: fmtDec(price, XNO_DECIMALS),
+      lowest_ask: fmtDec(price, XNO_DECIMALS),
+      highest_bid: fmtDec(price, XNO_DECIMALS),
+      base_volume: fmtDec(v.base.toString(), dec),
+      quote_volume: fmtDec(v.quote.toString(), XNO_DECIMALS),
+      price_change_percent_24h: (a ? priceChange24h(a, now) : null) ?? 0,
+      highest_price_24h: fmtDec(hi.toString(), XNO_DECIMALS),
+      lowest_price_24h: fmtDec(lo.toString(), XNO_DECIMALS),
+    };
+  }
+  return out;
+}
+
+/** CoinMarketCap `/assets` — object keyed by asset id (tokenId). */
+export async function cmcAssets() {
+  const m = await raw();
+  const out: Record<string, any> = {};
+  for (const [tokenId, s] of m.state) {
+    out[tokenId] = {
+      name: s.name || s.symbol || tokenId.slice(0, 6),
+      unified_cryptoasset_id: tokenId,
+      can_withdraw: true,
+      can_deposit: true,
+      maker_fee: 0,
+      taker_fee: 0,
+    };
+  }
+  return out;
+}
+
+/** CoinMarketCap `/ticker` — object keyed by market pair. */
+export async function cmcTicker() {
+  const m = await raw();
+  const now = Math.floor(Date.now() / 1000);
+  const out: Record<string, any> = {};
+  for (const [tokenId, s] of m.state) {
+    const a = m.byToken.get(tokenId);
+    const dec = s.decimals;
+    const price = a?.priceRaw ?? "0";
+    const v = a ? vol24(a, dec, now) : { base: 0n, quote: 0n };
+    out[pairId(tokenId)] = {
+      base_id: tokenId,
+      base_name: s.symbol || tokenId.slice(0, 6).toUpperCase(),
+      quote_id: "XNO",
+      quote_name: "XNO",
+      last_price: fmtDec(price, XNO_DECIMALS),
+      base_volume: fmtDec(v.base.toString(), dec),
+      quote_volume: fmtDec(v.quote.toString(), XNO_DECIMALS),
+      isFrozen: 0,
+    };
+  }
+  return out;
+}
+
+/** CoinMarketCap `/trades/<market_pair>` — array of recent trades. */
+export async function cmcTrades(tickerId: string, limit: number) {
+  const tokenId = tokenOfPair(tickerId);
+  const m = await raw();
+  const s = m.state.get(tokenId);
+  const a = m.byToken.get(tokenId);
+  if (!s || !a) return null;
+  const scale = 10n ** BigInt(s.decimals);
+  return [...a.trades].sort((x, y) => y.time - x.time).slice(0, Math.min(Math.max(limit, 1), 1000)).map((t) => ({
+    trade_id: `${t.time}-${t.kind}-${t.amountRaw}`,
+    price: fmtDec(t.priceRaw, XNO_DECIMALS),
+    base_volume: fmtDec(t.amountRaw, s.decimals),
+    quote_volume: fmtDec(((BigInt(t.amountRaw) * BigInt(t.priceRaw)) / scale).toString(), XNO_DECIMALS),
+    timestamp: t.time * 1000,
+    type: t.kind,
+  }));
+}
+
 /** Full listing-metadata package (logo, socials, supply, circulating) — what an
  * exchange/aggregator autofills its asset page from. */
 export async function assetMeta(tokenId: string) {
