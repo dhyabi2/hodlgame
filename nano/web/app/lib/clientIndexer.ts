@@ -49,10 +49,14 @@ class BrowserSource implements BlockSource, CounterpartyReader {
     while (raw.length < limit) {
       const params: Record<string, unknown> = { action: "account_history", account, count: 500, raw: true };
       if (head) params.head = head;
-      // NOT swallowed: a silently-empty history would truncate this account's
-      // chain and compute a WRONG root (a false mismatch). rpc() already retries
-      // transients; a persistent failure should surface, not fake a result.
-      const hist = await rpc("account_history", params);
+      // An UNOPENED account (in the watch set as a discovered counterparty but
+      // with no chain yet) makes the RPC return "account not found", which the
+      // /api/rpc proxy maps to a 400. The SERVER treats such an account as an
+      // empty chain (contributes nothing to the root), so we must too: on a
+      // failure here, stop walking this account and keep what we have. rpc()
+      // still retried a couple of times first, so a transient blip on an OPENED
+      // account is absorbed rather than truncating a real chain.
+      const hist = await rpc("account_history", params, 2).catch(() => ({} as any));
       const history = (hist.history ?? []) as { hash: string }[];
       if (!history.length) break;
       const hashes = history.map((h) => h.hash).filter((h) => !seen.has(h));

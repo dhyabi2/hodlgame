@@ -569,8 +569,10 @@ function VerifyButton({ serverRoot }: { serverRoot: string }) {
     try { result = await verifyInBrowser(); }
     catch (e: any) { result = { ok: false, localRoot: "", serverRoot, tokens: 0, ops: 0, accounts: 0, error: e.message }; }
     cancelAnimationFrame(raf);
-    // Resolve the real digest left-to-right for the reveal payoff.
-    const real = result.localRoot || serverRoot || "";
+    // Resolve the real digest left-to-right for the reveal payoff. On error we
+    // have NO computed root — never fall back to the server root, or a failed
+    // walk would masquerade as a perfect match.
+    const real = result.localRoot || (result.error ? "" : serverRoot) || "";
     for (let i = 1; i <= real.length; i += 2) {
       setScramble(real.slice(0, i) + Array.from({ length: real.length - i }, (_, k) => HEXCH[(Date.now() / 30 + k) % 16 | 0]).join(""));
       await new Promise((r) => setTimeout(r, 12));
