@@ -1805,7 +1805,10 @@ function TokenDetail({
   const doShare = async () => {
     const url = `${typeof window !== "undefined" ? window.location.origin : "https://www.hodlgame.fun"}/t/${token.tokenId}`;
     const title = `${tokName(token)} ${token.symbol ? `($${tokSym(token)})` : ""} · HodlGame`.trim();
-    const text = `${tokName(token)} — a zero-custody memecoin on Nano. Trade it on HodlGame.`;
+    // Symbol as a hashtag (alphanumerics only — hashtags can't contain $ or
+    // spaces) so a paste onto X/Telegram is tag-searchable.
+    const tag = (token.symbol || "").replace(/[^a-zA-Z0-9]/g, "");
+    const text = `${tokName(token)} — a zero-custody memecoin on Nano. Trade it on HodlGame.${tag ? ` #${tag}` : ""}`;
     try {
       if (typeof navigator !== "undefined" && (navigator as any).share) {
         await (navigator as any).share({ title, text, url });
