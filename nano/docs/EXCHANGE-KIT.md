@@ -128,3 +128,37 @@ if (verifyMerkleProof(proof) && proof.root === trustedBalanceRoot) creditVerifie
 The `balanceRoot` is a pure function of the same ledger the `stateRoot`
 commits to, so anyone who replays confirms both — light clients get succinct
 proofs, full clients get end-to-end verification.
+
+## 7. Market-data API (CMC / CoinGecko / DEX-tracker style)
+
+HodlGame **is** the venue (the AMM / direct-settlement engine), so from an
+aggregator's perspective it's a DEX. These read endpoints expose every coin's
+market in the shape trackers poll. `base` is the coin, `target`/quote is XNO.
+Values are human decimals; `*_raw` fields give the exact integers.
+
+- `?view=tickers` → `{ updated, quote_currency:"XNO", tickers:[…] }`. One row per
+  coin: `last_price`, `base_volume`/`target_volume` (24h), `liquidity_in_xno`
+  (AMM reserves), `pool_xno_raw`/`pool_tokens_raw`, **`circulating_supply`** &
+  `total_supply`, `market_cap_xno`, `price_change_24h_pct`, `holders`. Poll this
+  to list all HodlGame markets. Cached 15s.
+- `?view=ohlcv&q=<tokenId>[&interval=3600&limit=300]` → price candles
+  (`{time,open,high,low,close,volume_xno}`) bucketed from the on-chain trade
+  feed. `interval` in seconds (60–86400).
+- `?view=trades&q=<tokenId>[&limit=200]` → recent trades
+  (`{trade_id,type,price,base_volume,target_volume,timestamp}`), newest first —
+  the `historical_trades` feed.
+- `?view=asset&q=<tokenId>` → full listing metadata: `logo`, `description`,
+  socials, `decimals`, `total_supply`/`circulating_supply`/`max_supply`,
+  `price_xno`, `market_cap_xno`, `holders`, `creator`, metadata authority +
+  immutability, `explorer` URL — what a listing form autofills from.
+
+**Supply semantics:** `circulating_supply = total − treasury` (the creator's
+undistributed reserve). The creator's held 5% and staked tokens count as
+circulating (they're owned/out). `token-info` now also returns
+`circulatingRaw`, `poolXnoRaw`/`poolTokensRaw` (liquidity), `volume24hXnoRaw`,
+`priceChange24hPct`, and `holders`.
+
+All market-data endpoints are read-only and derive from the same deterministic
+replay the state root commits to — so every number here is reproducible from
+public Nano blocks (see §1). Live toolkit + example URLs: the **List** tab at
+hodlgame.fun.

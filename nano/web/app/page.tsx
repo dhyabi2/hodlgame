@@ -381,7 +381,7 @@ export default function Home() {
   const usd = useXnoUsd(); // live XNO→USD for $-equivalents across the app
   // First-visit gate: the app is reachable only after the Terms are accepted.
   const [termsAccepted, acceptTerms] = useTermsAccepted();
-  const [tab, setTab] = useState<"explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet">("explore");
+  const [tab, setTab] = useState<"explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet" | "list">("explore");
   const [unlockOpen, setUnlockOpen] = useState(false);
 
   // Transient status message (auto-dismisses) — no persistent debug log in the UI.
@@ -434,7 +434,7 @@ export default function Home() {
       const t = h.get("t");
       const tb = h.get("tab") as typeof tab | null;
       if (t) setSelectedId(t.toLowerCase());
-      else if (tb && ["explore", "ranks", "portfolio", "create", "scan", "wallet"].includes(tb)) setTab(tb);
+      else if (tb && ["explore", "ranks", "portfolio", "create", "scan", "wallet", "list"].includes(tb)) setTab(tb);
     } catch {}
   }, []);
 
@@ -553,7 +553,7 @@ export default function Home() {
           </button>
           {/* Desktop nav only — on mobile the bottom tab bar handles navigation. */}
           <nav className="hidden sm:flex items-center gap-4 text-xs font-bold uppercase tracking-wide text-neutral-400 min-w-0 overflow-x-auto">
-            {([["explore", "Coins"], ["ranks", "Ranks"], ["scan", "Explorer"], ["wallet", "Wallet"]] as const).map(([id, label]) => (
+            {([["explore", "Coins"], ["ranks", "Ranks"], ["scan", "Explorer"], ["wallet", "Wallet"], ["list", "List"]] as const).map(([id, label]) => (
               <button key={id} className={"whitespace-nowrap py-1 border-b-2 -mb-px " + (!selectedId && tab === id ? "text-white border-white" : "border-transparent hover:text-white")} onClick={() => { setSelectedId(null); setTab(id); }}>{label}</button>
             ))}
             <a className="hover:text-white whitespace-nowrap" href="/pro">Chart / Trade ↗</a>
@@ -627,6 +627,8 @@ export default function Home() {
           <Ranks onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} />
         ) : tab === "scan" ? (
           <Explorer />
+        ) : tab === "list" ? (
+          <ExchangeListing />
         ) : tab === "create" ? (
           <div className="w-full max-w-xl mx-auto">
             <CreateToken
@@ -3261,6 +3263,100 @@ function EditCoinInfo({ token, keys, say }: { token: Token; keys: Keys; say: (s:
   );
 }
 
+// Exchange listing / aggregator toolkit — a developer-facing page (the "List"
+// tab) documenting every endpoint + library an exchange or a CMC/CoinGecko-style
+// tracker needs to list HodlGame coins, with live example URLs. Zero-custody:
+// deposit derivation + withdrawal are libraries the exchange runs with its own
+// key; we never hold funds.
+function ExchangeListing() {
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://www.hodlgame.fun";
+  const [sample, setSample] = useState<{ count: number; first: any } | null>(null);
+  const [copied, setCopied] = useState("");
+  useEffect(() => {
+    let live = true;
+    fetch("/api/exchange?view=tickers").then((r) => r.json()).then((j) => {
+      if (live && Array.isArray(j?.tickers)) setSample({ count: j.tickers.length, first: j.tickers[0] ?? null });
+    }).catch(() => {});
+    return () => { live = false; };
+  }, []);
+  const copy = (t: string) => { try { navigator.clipboard.writeText(t); setCopied(t); setTimeout(() => setCopied(""), 1400); } catch {} };
+
+  const Endpoint = ({ path, desc }: { path: string; desc: string }) => {
+    const full = origin + path;
+    return (
+      <div className="rounded-none border border-neutral-800 bg-black p-3">
+        <div className="flex items-center gap-2">
+          <span className="rounded-none bg-neutral-900 px-1.5 py-0.5 text-[10px] font-black text-neutral-400">GET</span>
+          <code className="flex-1 min-w-0 truncate text-[12px] text-white">{path}</code>
+          <button onClick={() => copy(full)} className="shrink-0 text-[10px] font-bold text-neutral-400 hover:text-white">{copied === full ? "copied" : "copy"}</button>
+          <a href={path} target="_blank" rel="noreferrer" className="shrink-0 text-[10px] font-bold text-neutral-400 hover:text-white">open ↗</a>
+        </div>
+        <p className="mt-1 text-[11px] text-neutral-500">{desc}</p>
+      </div>
+    );
+  };
+
+  const Feature = ({ h, children }: { h: string; children: React.ReactNode }) => (
+    <div className="rounded-none border border-neutral-800 bg-neutral-950 p-3">
+      <p className="text-xs font-black text-white">{h}</p>
+      <p className="mt-1 text-[11px] text-neutral-400">{children}</p>
+    </div>
+  );
+
+  return (
+    <div className="w-full max-w-3xl mx-auto space-y-5">
+      <div className="rounded-none border border-neutral-800 bg-neutral-950 p-5">
+        <h2 className="text-xl font-black text-white">List HodlGame coins</h2>
+        <p className="mt-1 text-sm text-neutral-400">
+          Everything an exchange or a market-data tracker (CoinMarketCap / CoinGecko / DEXScreener-style) needs to list HodlGame coins.
+          Balances live in a deterministic ledger anyone can replay from public Nano blocks — so you <span className="text-white font-bold">verify</span> reserves, you don't trust them. Feeless, instant, and <span className="text-white font-bold">zero-custody</span>: we never hold your keys or your customers' funds.
+        </p>
+        {sample && (
+          <div className="mt-3 rounded-none border border-neutral-800 bg-black p-3 text-[11px] text-neutral-400">
+            <span className="text-green-500 font-bold">● live</span> the tickers feed is serving <span className="text-white font-black">{sample.count}</span> market{sample.count === 1 ? "" : "s"} right now
+            {sample.first && <> · e.g. <span className="text-white">{sample.first.base_currency}/XNO</span> @ {Number(sample.first.last_price).toPrecision(4)} XNO</>}
+          </div>
+        )}
+      </div>
+
+      <div>
+        <p className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500">Market-data API — for aggregators / trackers</p>
+        <div className="space-y-2">
+          <Endpoint path="/api/exchange?view=tickers" desc="Every coin's market: price, 24h volume, liquidity (AMM reserves), circulating & total supply, market cap, 24h change, holders. Poll this to list all HodlGame markets (base = coin, quote = XNO)." />
+          <Endpoint path={`/api/exchange?view=asset&q=${sample?.first?.tokenId ?? "<tokenId>"}`} desc="Full listing metadata for one coin: logo, socials, description, decimals, total/circulating/max supply, price, market cap — the fields a listing form autofills from." />
+          <Endpoint path={`/api/exchange?view=ohlcv&q=${sample?.first?.tokenId ?? "<tokenId>"}&interval=3600`} desc="OHLCV price candles bucketed from the on-chain trade feed (interval in seconds, 60–86400)." />
+          <Endpoint path={`/api/exchange?view=trades&q=${sample?.first?.tokenId ?? "<tokenId>"}&limit=200`} desc="Recent trades (historical_trades): type, price, base/target volume, timestamp." />
+        </div>
+      </div>
+
+      <div>
+        <p className="mb-2 text-[10px] font-black uppercase tracking-[0.2em] text-neutral-500">Listing integration — for exchanges</p>
+        <div className="space-y-2">
+          <Endpoint path={`/api/exchange?view=token-info&q=${sample?.first?.tokenId ?? "<tokenId>"}`} desc="Identity you pin to list: symbol, name, CONSENSUS-bound decimals (from the launch link — immutable), supply, circulating, liquidity, creator, metadata authority + immutability, pool address." />
+          <Endpoint path={`/api/exchange?view=balance&token=${sample?.first?.tokenId ?? "<tokenId>"}&account=<nano_address>`} desc="A customer's token balance + the state root that authenticates it. Read the balance from a replay you can reproduce, not a claim." />
+          <Endpoint path={`/api/exchange?view=balance-proof&token=${sample?.first?.tokenId ?? "<tokenId>"}&account=<nano_address>`} desc="Merkle inclusion proof of one holding — verify a balance in O(log N) with no full replay." />
+          <Endpoint path="/api/explorer?view=trust" desc="Proof of reserves: the integrity fingerprint over all trustless coins, the exact accounts + frontiers replayed, and the snapshot anchor. Recompute it yourself to verify." />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <Feature h="Verify, don't trust">Every balance is authenticated by the consensus state root. Run <code className="text-neutral-300">scripts/verify.ts</code> to recompute the whole market from public Nano blocks with zero secrets, and match the root. You can prove customer balances — a normal token contract can't.</Feature>
+        <Feature h="Consensus-bound decimals">Decimals live in the launch op link (byte 1), part of the immutable launch block — not a mutable off-chain value. Verify independently by decoding the launch block. Closes the classic decimals footgun.</Feature>
+        <Feature h="Deposits — your key, your derivation">Each customer gets a deterministic deposit account HD-derived from YOUR master seed (<code className="text-neutral-300">depositAddress()</code>). We never see the seed. A token transfer to it credits the customer once its block is cemented.</Feature>
+        <Feature h="Withdrawals — headless & crash-safe">Drive transfers from your server with your own key (<code className="text-neutral-300">withdrawToken()</code>). Deterministic hashes make re-broadcast a no-op and a mid-crash partial transfer impossible — idempotent by construction.</Feature>
+        <Feature h="Feeless & instant">Nano settlement is feeless and confirms in ~1s. Even dust deposits/withdrawals are economical — no gas to bleed customers, and finality is a cemented block that never reorgs.</Feature>
+        <Feature h="Zero custody, always">Deposit derivation and withdrawal are libraries you run with your own keys — never hosted. We hold no exchange keys and no customer funds, ever.</Feature>
+      </div>
+
+      <div className="rounded-none border border-neutral-800 bg-neutral-950 p-4 flex flex-wrap items-center gap-3">
+        <a href="https://github.com/dhyabi2/hodlgame/blob/main/nano/docs/EXCHANGE-KIT.md" target="_blank" rel="noreferrer" className="rounded-none bg-white px-4 py-2 text-xs font-black uppercase tracking-wide text-black hover:bg-neutral-200">Full integration docs ↗</a>
+        <a href="https://github.com/dhyabi2/hodlgame" target="_blank" rel="noreferrer" className="rounded-none border border-neutral-700 px-4 py-2 text-xs font-black uppercase tracking-wide text-neutral-200 hover:border-white hover:text-white">Source on GitHub ↗</a>
+        <span className="text-[11px] text-neutral-500">Integrating? The deposit/withdrawal libraries are in <code className="text-neutral-300">server/exchange.ts</code> & <code className="text-neutral-300">client/exchangeWithdraw.ts</code>.</span>
+      </div>
+    </div>
+  );
+}
+
 // Launch Certificate — the celebratory "your coin is live" moment shown the
 // instant a launch confirms. Captures peak creator energy and hands them a
 // one-tap share so they recruit their own first holders (they own 5%, so they
@@ -3610,7 +3706,7 @@ function Portfolio({ tokens, onSelect, account, sendOp, busy, usd }: { tokens: T
   );
 }
 
-const TABS: { id: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet"; label: string; icon: string }[] = [
+const TABS: { id: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet" | "list"; label: string; icon: string }[] = [
   { id: "explore", label: "Explore", icon: "🏠" },
   { id: "ranks", label: "Ranks", icon: "🏆" },
   { id: "create", label: "Launch", icon: "✨" },
@@ -3618,7 +3714,7 @@ const TABS: { id: "explore" | "ranks" | "portfolio" | "create" | "scan" | "walle
   { id: "wallet", label: "Wallet", icon: "👛" },
 ];
 
-function TabBar({ tab, setTab }: { tab: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet"; setTab: (t: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet") => void }) {
+function TabBar({ tab, setTab }: { tab: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet" | "list"; setTab: (t: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet" | "list") => void }) {
   return (
     <nav className="sm:hidden fixed bottom-0 inset-x-0 z-30 border-t border-neutral-800 bg-black/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
       <div className="w-full grid grid-cols-5">
