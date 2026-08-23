@@ -1225,6 +1225,16 @@ function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddr
 const medal = (i: number) => (i === 0 ? "text-white" : i === 1 ? "text-neutral-300" : i === 2 ? "text-white" : "text-neutral-500");
 function Skel() { return <div className="h-40 rounded-none bg-neutral-900 animate-pulse" />; }
 
+/** Monochrome padlock — matches the stark black/white branding (currentColor). */
+function LockIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden className="inline-block shrink-0">
+      <rect x="3.25" y="7" width="9.5" height="7" rx="0.5" />
+      <path d="M5.25 7V4.75a2.75 2.75 0 0 1 5.5 0V7" />
+    </svg>
+  );
+}
+
 /** Elegant loading skeleton for the Coins feed — a hero band + poster shelf +
  * grid mirroring the real layout, so the page doesn't jump when data lands. */
 function FeedSkeleton() {
@@ -2363,7 +2373,7 @@ function TradePanel({
             className="w-full rounded-none border border-white bg-neutral-950 p-3 text-left hover:bg-neutral-900"
             onClick={promptUnlock}
           >
-            <span className="block text-xs font-black uppercase tracking-wide">🔒 Unlock your wallet to trade</span>
+            <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wide"><LockIcon /> Unlock your wallet to trade</span>
             <span className="mt-1 block text-[11px] text-neutral-500">Your balance and holdings are hidden until you unlock.</span>
           </button>
         ) : (
@@ -2405,7 +2415,7 @@ function TradePanel({
         </div>
       )}
       <div className="flex items-center justify-between text-[11px] text-neutral-500">
-        <span>balance: {!address ? "🔒 unlock to view" : side === "buy" ? `${fmtXno(xnoBal)} XNO` : `${fmtTok(token.myBalance, token.decimals)} ${tokSym(token)}`}</span>
+        <span className="flex items-center gap-1">balance: {!address ? <><LockIcon /> unlock to view</> : side === "buy" ? `${fmtXno(xnoBal)} XNO` : `${fmtTok(token.myBalance, token.decimals)} ${tokSym(token)}`}</span>
         <label className="flex items-center gap-1.5">
           <span className="text-neutral-500">slippage %</span>
           <input
@@ -2934,7 +2944,7 @@ function CreateToken({
   const [showReq, setShowReq] = useState(false); // flag the required name/symbol fields on a failed submit
   // Direct-Settlement (zero-custody) launch: trades settle wallet-to-wallet,
   // no pool account ever exists. Default ON — it is the trustless mode.
-  const [zeroCustody, setZeroCustody] = useState(true);
+  
 
   async function upload(file: File) {
     if (!file.type.startsWith("image/")) return say("please choose an image file");
@@ -2987,7 +2997,7 @@ function CreateToken({
     setBusy(true);
     try {
       const hash = await submitBlock(
-        encodeOpLink("", { kind: "launch", supply: rawSupply, name: meta.name, symbol: meta.symbol, decimals, image: "", direct: zeroCustody }),
+        encodeOpLink("", { kind: "launch", supply: rawSupply, name: meta.name, symbol: meta.symbol, decimals, image: "", direct: true }),
         1n
       );
       const tokenId = tokenIdFromLaunchHash(hash);
@@ -3083,23 +3093,6 @@ function CreateToken({
         <input className={inputC} placeholder="https://x.com/… (optional)" value={twitter} onChange={(e) => setTwitter(e.target.value)} />
         <input className={inputC} placeholder="https://t.me/… (optional)" value={telegram} onChange={(e) => setTelegram(e.target.value)} />
       </div>
-      <button
-        type="button"
-        className="w-full rounded-none border border-neutral-800 p-3 text-left hover:border-neutral-600"
-        onClick={() => setZeroCustody(!zeroCustody)}
-      >
-        <span className="flex items-center justify-between">
-          <span className="text-xs font-black uppercase tracking-wide">Zero-custody mode</span>
-          <span className={"text-[10px] font-black uppercase tracking-wide px-2 py-0.5 " + (zeroCustody ? "bg-white text-black" : "border border-neutral-700 text-neutral-500")}>
-            {zeroCustody ? "on" : "off"}
-          </span>
-        </span>
-        <span className="mt-1 block text-[11px] text-neutral-500 leading-relaxed">
-          {zeroCustody
-            ? "No pool account exists — nobody (not even us) ever holds traders' money. Buys pay sellers wallet-to-wallet; sellers' principal settles instantly from their own collateral."
-            : "Classic pooled coin: trades settle through a pool account operated by the platform."}
-        </span>
-      </button>
       <button className={btn} disabled={busy} onClick={launch}>
         {busy ? "launching…" : "Launch Token (0.000002 XNO)"}
       </button>

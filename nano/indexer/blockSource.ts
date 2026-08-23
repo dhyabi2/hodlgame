@@ -96,8 +96,26 @@ async function fallbackPending(account: string): Promise<string[]> {
  * locally (core/blockVerify.ts). Uses `account_history` + `blocks_info`, with a
  * frontier-keyed cache so unchanged accounts are skipped.
  */
+/**
+ * Optional SHARED, cross-instance cache (server-only — injected by the server;
+ * the browser verifier passes none). Two things, both keyed monotonically so
+ * they can only ever move FORWARD and are therefore self-invalidating and safe:
+ *  - a per-account monotonic best frontier (never regresses → the target tip is
+ *    the freshest EVER observed, so a lagging RPC view can't drag the account
+ *    back to an older state → holder counts / poolXno stop flickering);
+ *  - the verified block list at that frontier (fetch-once, serve-consistently —
+ *    turns flaky per-request RPC into a stable snapshot every instance shares).
+ * All methods are best-effort; a store error just falls back to live RPC.
+ */
+export interface SharedBlockCache {
+  getFrontier(account: string): Promise<{ frontier: string; height: number } | null>;
+  putFrontier(account: string, frontier: string, height: number): Promise<void>;
+  getBlocks(account: string, frontier: string): Promise<NanoBlock[] | null>;
+  putBlocks(account: string, frontier: string, blocks: NanoBlock[]): Promise<void>;
+}
+
 export class NanoRpcSource implements BlockSource, CounterpartyReader {
-  constructor(private apiKey: string) {}
+  constructor(private apiKey: string, private cache?: SharedBlockCache) {}
 
   // Request-scoped memo. A NanoRpcSource is created fresh per request (compute()
   // makes a new one each call), so this dedupes listBlocks WITHIN one request —
@@ -298,6 +316,25 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
       ]);
       best = views.reduce((a, b) => (b.height > a.height ? b : a));
     }
+
+    // Monotonic frontier: never target an OLDER tip than one we (or any other
+    // instance) already saw. If the shared store has a higher frontier, adopt
+    // it — a lagging RPC view can't roll the account back, so counts stay
+    // stable. And if we already have that frontier's verified chain cached,
+    // serve it directly (identical for every request — kills the flicker).
+    if (this.cache) {
+      try {
+        const stored = await this.cache.getFrontier(account);
+        if (stored && stored.height > best.height && stored.frontier) best = stored;
+      } catch {}
+      if (best.frontier) {
+        try {
+          const cached = await this.cache.getBlocks(account, best.frontier);
+          if (cached && cached.length) return cached;
+        } catch {}
+      }
+    }
+
     if (!best.frontier) return []; // unopened / unknown everywhere
 
     // Three walk sources: nano.to keyed, nano.to keyless, and the FALLBACK
@@ -314,7 +351,16 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
       ]);
       for (const r of settled) if (r.status === "fulfilled") walks.push(r.value);
       const complete = walks.filter((w) => w.complete);
-      if (complete.length > 0) return complete.reduce((a, b) => (b.blocks.length > a.blocks.length ? b : a)).blocks;
+      if (complete.length > 0) {
+        const blocks = complete.reduce((a, b) => (b.blocks.length > a.blocks.length ? b : a)).blocks;
+        // Publish the complete chain + its frontier to the shared store so every
+        // other request/instance serves this exact verified snapshot.
+        if (this.cache && best.frontier) {
+          void this.cache.putBlocks(account, best.frontier, blocks).catch(() => {});
+          void this.cache.putFrontier(account, best.frontier, best.height || blocks.length).catch(() => {});
+        }
+        return blocks;
+      }
     }
     if (walks.length === 0) throw new Error(`listBlocks(${account}): both keyed and keyless RPC failed`);
     return walks.reduce((a, b) => (b.blocks.length > a.blocks.length ? b : a)).blocks;

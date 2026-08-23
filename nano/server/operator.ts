@@ -12,6 +12,7 @@ import { loadNanoRpcKey } from "../lib/rpc";
 import { discoverAccounts } from "../indexer/discovery";
 import { ANCHOR_ADDRESS } from "../core/anchor";
 import { loadBlob, saveBlob } from "./store";
+import { StoreBlockCache } from "./sharedCache";
 
 export function watched(): string[] {
   const raw = process.env.WATCHED_ACCOUNTS ?? "";
@@ -104,7 +105,7 @@ export async function indexer(): Promise<MultiIndexer> {
   const poolKey = (tokenId: string) => (master ? tokenPoolKeys(master, tokenId).publicKey : null);
   const commit = await commitResolver();
   const idx = new MultiIndexer(
-    new NanoRpcSource(loadNanoRpcKey()),
+    new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache()),
     () => ({ name: "", symbol: "", decimals: 6, image: "" }),
     commit,
     poolKey

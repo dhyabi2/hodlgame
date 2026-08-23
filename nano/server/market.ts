@@ -12,6 +12,7 @@ import { commentsFor, type Comment } from "./comments";
 import { commitResolver } from "./commits";
 import { loadNanoRpcKey } from "../lib/rpc";
 import { watchedAccounts, persistWatched } from "./operator";
+import { StoreBlockCache } from "./sharedCache";
 import { deriveMetaAuthority, type MetaAuthorityState } from "../core/metaAnchor";
 import { claimableReward } from "../core/state";
 
@@ -90,7 +91,10 @@ async function compute(): Promise<RawMarket> {
   const [reg, commit, watched] = await Promise.all([loadRegistry(), commitResolver(), watchedAccounts()]);
   const master = process.env.POOL_SEED ?? "";
   const poolKey = (tokenId: string) => (master ? tokenPoolKeys(master, tokenId).publicKey : null);
-  const src = new NanoRpcSource(loadNanoRpcKey());
+  // Shared monotonic frontier + block cache (server-only): makes every request
+  // fold the SAME freshest-ever verified chain per account, so holder counts /
+  // poolXno / trades stop flickering across instances and RPC backends.
+  const src = new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache());
   const idx = new MultiIndexer(src, (id) => reg.get(id) ?? EMPTY_META, commit, poolKey);
   let events = await idx.collectEvents(watched);
   // Second discovery pass: a creator's chain reveals each token's pool (the
