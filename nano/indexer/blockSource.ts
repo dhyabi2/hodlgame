@@ -117,6 +117,12 @@ export interface SharedBlockCache {
 export class NanoRpcSource implements BlockSource, CounterpartyReader {
   constructor(private apiKey: string, private cache?: SharedBlockCache) {}
 
+  // account → the exact tip (last block hash) this source replayed for it.
+  // Published by the trust view so a browser can pin its own walk to the SAME
+  // per-account frontier and reproduce a byte-identical root regardless of any
+  // blocks that landed after this snapshot (kills the live-freshness mismatch).
+  readonly frontiers = new Map<string, string>();
+
   // Request-scoped memo. A NanoRpcSource is created fresh per request (compute()
   // makes a new one each call), so this dedupes listBlocks WITHIN one request —
   // not across requests. compute() calls collectEvents up to twice (watched,
@@ -330,7 +336,7 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
       if (best.frontier) {
         try {
           const cached = await this.cache.getBlocks(account, best.frontier);
-          if (cached && cached.length) return cached;
+          if (cached && cached.length) { this.frontiers.set(account, cached[cached.length - 1].hash); return cached; }
         } catch {}
       }
     }
@@ -353,6 +359,7 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
       const complete = walks.filter((w) => w.complete);
       if (complete.length > 0) {
         const blocks = complete.reduce((a, b) => (b.blocks.length > a.blocks.length ? b : a)).blocks;
+        if (blocks.length) this.frontiers.set(account, blocks[blocks.length - 1].hash); // the replayed tip
         // Publish the complete chain + its frontier to the shared store so every
         // other request/instance serves this exact verified snapshot.
         if (this.cache && best.frontier) {

@@ -70,10 +70,15 @@ async function rpcOnce(action: string, params: Record<string, unknown>, tries: n
 /** Browser BlockSource + CounterpartyReader over /api/rpc, using the identical
  * verification (finalizeChain) as the server. */
 class BrowserSource implements BlockSource, CounterpartyReader {
+  // account → the server's replayed tip. When present we start the walk AT that
+  // tip (ignoring any blocks mined after the server's snapshot) so our chain is
+  // byte-identical to what the server folded — no live-freshness mismatch.
+  constructor(private pinned: Record<string, string> = {}) {}
+
   async listBlocks(account: string, limit = 5000): Promise<NanoBlock[]> {
     const raw: RawFetchedBlock[] = [];
     const seen = new Set<string>();
-    let head: string | undefined;
+    let head: string | undefined = this.pinned[account] || undefined;
     while (raw.length < limit) {
       const params: Record<string, unknown> = { action: "account_history", account, count: 500, raw: true };
       if (head) params.head = head;
@@ -166,12 +171,17 @@ export interface VerifyResult {
  * that tried to HIDE an account can't: the browser would replay the hidden
  * account too and the roots would then diverge — a real, surfaced mismatch. */
 export async function verifyInBrowser(onProgress?: (done: number, total: number) => void): Promise<VerifyResult> {
-  const src = new BrowserSource();
-
-  // Server scope + claimed root, fetched first so we can reproduce its exact set.
+  // Server scope + claimed root + per-account frontiers, fetched first so we can
+  // reproduce its EXACT input.
   const serverResp = await fetch("/api/explorer?view=trust").then((r) => r.json());
   const serverRoot = String(serverResp?.stateRoot ?? "");
   const serverAccounts: string[] = Array.isArray(serverResp?.accounts) ? serverResp.accounts : [];
+  const frontiers: Record<string, string> =
+    serverResp?.frontiers && typeof serverResp.frontiers === "object" ? serverResp.frontiers : {};
+
+  // Pin each account's walk to the server's replayed tip → identical chains even
+  // if new blocks landed after the server's snapshot.
+  const src = new BrowserSource(frontiers);
 
   // Our OWN independent discovery from the public anchor — unioned in so we can
   // never be told to ignore an account we found ourselves.
@@ -186,14 +196,21 @@ export async function verifyInBrowser(onProgress?: (done: number, total: number)
   // to count ops — a wasted second full walk; the count comes free from sync.)
   const sync = await idx.sync(union, onProgress);
   const state = idx.getState();
-  const localRoot = stateRoot(state);
+  // Scope the fingerprint to TRUSTLESS (direct / zero-custody) tokens only. Legacy
+  // pooled tokens' state depends on custody keys, the commit resolver and
+  // sweep-settled payouts a browser can't reproduce — they'd diverge here even
+  // though they're honestly reserved (see the Proof-of-Reserves panel). Direct
+  // tokens are 100% chain-derived, so they reproduce byte-for-byte. The server
+  // computes its published root the same way.
+  const directState = new Map([...state].filter(([, s]) => (s as any).direct));
+  const localRoot = stateRoot(directState);
   const events = sync.applied + sync.invalid;
 
   return {
     ok: Boolean(serverRoot) && serverRoot.toLowerCase() === localRoot.toLowerCase(),
     localRoot,
     serverRoot,
-    tokens: state.size,
+    tokens: directState.size,
     ops: events,
     accounts: union.length,
   };

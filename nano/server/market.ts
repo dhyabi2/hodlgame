@@ -76,6 +76,9 @@ export interface RawMarket {
    * trust view so a browser can reproduce the SAME scope (and flag any account
    * it discovers that this set omits). */
   accounts: string[];
+  /** account → the exact tip hash replayed for it, so a browser verifier can pin
+   * its walk to the same frontier and match the root without a freshness race. */
+  frontiers: Record<string, string>;
 }
 
 // Deliberately UNCACHED. This used to be a 2-second in-memory cache shared
@@ -154,7 +157,7 @@ async function computeFresh(): Promise<RawMarket> {
   const creators = new Map<string, string>();
   for (const [tokenId, s] of state) if (s.creator) creators.set(tokenId, s.creator);
   const metaAuthority = deriveMetaAuthority(idx.getMetaAnchors(), creators);
-  return { state, byToken, meta: reg, master, metaAuthority, events, idx, sellPayouts, accounts };
+  return { state, byToken, meta: reg, master, metaAuthority, events, idx, sellPayouts, accounts, frontiers: Object.fromEntries(src.frontiers) };
 }
 
 /** On-chain creator for a token (launch block signer), or null if the launch

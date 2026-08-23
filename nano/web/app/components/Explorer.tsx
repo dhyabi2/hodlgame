@@ -628,9 +628,9 @@ function TrustPanel({ d, go }: { d: any; go: (v: View) => void }) {
     <div className="space-y-3">
       <div className={card}><h3 className="font-black text-sm mb-2">Don't trust — verify</h3>
         <Row k="integrity fingerprint"><span className={mono}>{d.stateRoot}</span><Copy text={d.stateRoot} /></Row>
-        <Row k="coins / actions replayed">{d.tokens} / {d.events}</Row>
+        <Row k="trustless coins fingerprinted">{d.tokens}{typeof d.totalTokens === "number" && d.totalTokens !== d.tokens ? ` of ${d.totalTokens} total` : ""} · {d.events} actions replayed</Row>
         <Row k="protocol anchor wallet"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.anchor })}>{short(d.anchor, 12)}</span></Row>
-        <Row k="verify yourself">your browser re-checks every action and must arrive at the same fingerprint</Row>
+        <Row k="verify yourself">your browser re-replays every trustless (zero-custody) coin and must arrive at the same fingerprint — pooled coins are proven separately below</Row>
         <VerifyButton serverRoot={d.stateRoot} />
       </div>
       <div className={card}><h3 className="font-black text-sm mb-2">Proof of reserves — legacy pooled coins</h3>

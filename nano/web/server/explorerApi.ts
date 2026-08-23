@@ -288,7 +288,12 @@ export async function trustDashboard() {
   const m = await raw();
   const key = loadNanoRpcKey();
   const src = new NanoRpcSource(key);
-  const root = stateRoot(m.state);
+  // The integrity fingerprint covers TRUSTLESS (direct / zero-custody) tokens
+  // only — their state is 100% chain-derived, so a browser can reproduce it
+  // byte-for-byte. Legacy pooled tokens depend on custody keys / sweep payouts a
+  // browser can't reproduce; their solvency is proven separately (pools below).
+  const directState = new Map([...m.state].filter(([, s]) => s.direct));
+  const root = stateRoot(directState);
   const pools: any[] = [];
   const credits = creditedBuys(m.events);
   for (const [tokenId, pub] of m.idx.getChainPools()) {
@@ -312,7 +317,7 @@ export async function trustDashboard() {
   const snap = await exportSnapshot();
   let snapshotAnchored = false;
   try { snapshotAnchored = isAnchored(await src.listBlocks(ANCHOR_ADDRESS), snap.hash); } catch {}
-  return { stateRoot: root, tokens: m.state.size, events: m.events.length, accounts: m.accounts, pools, snapshot: { hash: snap.hash, bytes: snap.json.length, anchored: snapshotAnchored }, anchor: ANCHOR_ADDRESS };
+  return { stateRoot: root, tokens: directState.size, totalTokens: m.state.size, events: m.events.length, accounts: m.accounts, frontiers: m.frontiers, pools, snapshot: { hash: snap.hash, bytes: snap.json.length, anchored: snapshotAnchored }, anchor: ANCHOR_ADDRESS };
 }
 
 // ── Unified search ──────────────────────────────────────────────────────────
