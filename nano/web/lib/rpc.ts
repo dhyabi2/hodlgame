@@ -30,7 +30,13 @@ export function loadNanoRpcKey(): string {
   }
 }
 
-const TIMEOUT_MS = 30_000;
+// A healthy nano.to read responds in well under a second, so 30s only ever
+// prolonged a STUCK call (cold-start / regional hiccup) before failing over —
+// producing the ~30s tail on /api/state's first hit. 10s fails a stuck endpoint
+// over to the keyless fallback ~3x sooner while never cutting a healthy call.
+// (process/broadcast is idempotent — Nano dedups by block hash — so a
+// re-broadcast to the fallback on timeout is safe.)
+const TIMEOUT_MS = 10_000;
 const WORK_RPC_TIMEOUT_MS = 10_000; // work_generate is known to hang; fail fast to local
 
 async function callEndpoint(
