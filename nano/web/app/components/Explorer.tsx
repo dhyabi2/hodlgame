@@ -630,21 +630,8 @@ function TrustPanel({ d, go }: { d: any; go: (v: View) => void }) {
         <Row k="integrity fingerprint"><span className={mono}>{d.stateRoot}</span><Copy text={d.stateRoot} /></Row>
         <Row k="trustless coins fingerprinted">{d.tokens}{typeof d.totalTokens === "number" && d.totalTokens !== d.tokens ? ` of ${d.totalTokens} total` : ""} · {d.events} actions replayed</Row>
         <Row k="protocol anchor wallet"><span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: d.anchor })}>{short(d.anchor, 12)}</span></Row>
-        <Row k="verify yourself">your browser re-replays every trustless (zero-custody) coin and must arrive at the same fingerprint — pooled coins are proven separately below</Row>
+        <Row k="verify yourself">your browser re-replays every trustless (zero-custody) coin and must arrive at the same fingerprint</Row>
         <VerifyButton serverRoot={d.stateRoot} />
-      </div>
-      <div className={card}><h3 className="font-black text-sm mb-2">Proof of reserves — legacy pooled coins</h3>
-        <p className="text-[11px] text-neutral-500 mb-1">Only <span className="text-neutral-300">legacy pooled</span> coins have reserves to prove: the XNO this site says is in the pool vs what Nano actually holds. Zero-custody (v2) coins have no pool — nothing is ever custodied.</p>
-        {d.pools.length === 0 && <p className="text-xs text-neutral-500">No pooled coins — every coin here is zero-custody (no reserves to hold).</p>}
-        {d.pools.map((p: any) => {
-          const backed = BigInt(p.onchainBalance) >= BigInt(p.indexedPoolXno);
-          return (
-            <div key={p.tokenId} className="text-xs py-1.5 border-t border-neutral-800/60">
-              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold mr-1.5 ${backed ? "bg-neutral-900 text-green-500" : "bg-neutral-900 text-red-500"}`}>{backed ? "✓ backed" : "! check"}</span>
-              <span className={linkC} onClick={() => go({ kind: "token", q: p.tokenId })}>{tokSym(p)}</span> · site says {fmtXno(p.indexedPoolXno)} · blockchain holds {fmtXno(p.onchainBalance)} · still owed {p.outstandingObligations === "rpc-error" ? "?" : fmtXno(p.outstandingObligations)} XNO
-            </div>
-          );
-        })}
       </div>
       <div className={card}><h3 className="font-black text-sm mb-2">Metadata snapshot</h3>
         <Row k="fingerprint"><span className={mono}>{d.snapshot.hash}</span><Copy text={d.snapshot.hash} /></Row>

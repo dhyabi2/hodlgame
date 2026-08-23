@@ -291,33 +291,14 @@ export async function trustDashboard() {
   // The integrity fingerprint covers TRUSTLESS (direct / zero-custody) tokens
   // only — their state is 100% chain-derived, so a browser can reproduce it
   // byte-for-byte. Legacy pooled tokens depend on custody keys / sweep payouts a
-  // browser can't reproduce; their solvency is proven separately (pools below).
+  // browser can't reproduce, so they're excluded from the fingerprint (and the
+  // per-pool reserve breakdown is no longer surfaced).
   const directState = new Map([...m.state].filter(([, s]) => s.direct));
   const root = stateRoot(directState);
-  const pools: any[] = [];
-  const credits = creditedBuys(m.events);
-  for (const [tokenId, pub] of m.idx.getChainPools()) {
-    const s = m.state.get(tokenId);
-    if (!s) continue;
-    const address = pubToAddress(pub);
-    const info = await nanoRpc(key, { action: "account_info", account: address }).catch(() => null);
-    let outstanding = "0";
-    try {
-      const poolBlocks = await src.listBlocks(address);
-      const poolReceived = await readPoolDepositsFromChain(key, { address, publicKey: pub, secretKey: "" } as any, poolBlocks);
-      const refunds = computeRefunds(poolReceived, credits.get(tokenId) ?? new Map());
-      const entitled = entitlementsFor(m.state.get(tokenId)?.xnoWithdrawn ?? new Map(), refunds);
-      const obligations = netObligations(entitled, poolOutgoingByRecipient(poolBlocks));
-      outstanding = obligations.reduce((x, o) => x + o.amountRaw, 0n).toString();
-    } catch {
-      outstanding = "rpc-error";
-    }
-    pools.push({ tokenId, symbol: m.meta.get(tokenId)?.symbol || tokenId.slice(0, 4).toUpperCase(), poolAddress: address, indexedPoolXno: s.poolXno.toString(), onchainBalance: info?.balance ?? "0", outstandingObligations: outstanding });
-  }
   const snap = await exportSnapshot();
   let snapshotAnchored = false;
   try { snapshotAnchored = isAnchored(await src.listBlocks(ANCHOR_ADDRESS), snap.hash); } catch {}
-  return { stateRoot: root, tokens: directState.size, totalTokens: m.state.size, events: m.events.length, accounts: m.accounts, frontiers: m.frontiers, pools, snapshot: { hash: snap.hash, bytes: snap.json.length, anchored: snapshotAnchored }, anchor: ANCHOR_ADDRESS };
+  return { stateRoot: root, tokens: directState.size, totalTokens: m.state.size, events: m.events.length, accounts: m.accounts, frontiers: m.frontiers, snapshot: { hash: snap.hash, bytes: snap.json.length, anchored: snapshotAnchored }, anchor: ANCHOR_ADDRESS };
 }
 
 // ── Unified search ──────────────────────────────────────────────────────────
