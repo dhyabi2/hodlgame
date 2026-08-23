@@ -148,6 +148,44 @@ async function resizeImageFile(file: File, maxDim = 512): Promise<{ blob: Blob; 
   return { blob, w, h };
 }
 
+// Monochrome Maker: convert a coin image to the HodlGame black-&-white brand
+// look (grayscale + a firm S-curve contrast) so every coin is instantly
+// recognizable as one of ours in any feed or share card. Keeps detail — not a
+// brutal 1-bit threshold. Returns a fresh PNG blob; opt-out toggle in create.
+async function monochromeBlob(src: Blob): Promise<Blob> {
+  const url = URL.createObjectURL(src);
+  try {
+    const img = await new Promise<HTMLImageElement>((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = () => rej(new Error("bad image"));
+      i.src = url;
+    });
+    const w = img.width || 1;
+    const h = img.height || 1;
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("canvas unsupported");
+    ctx.drawImage(img, 0, 0, w, h);
+    const data = ctx.getImageData(0, 0, w, h);
+    const px = data.data;
+    for (let i = 0; i < px.length; i += 4) {
+      const luma = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+      // S-curve around mid-gray → stark but not detail-destroying B/W.
+      const v = 255 / (1 + Math.exp(-(luma - 128) / 34));
+      px[i] = px[i + 1] = px[i + 2] = v;
+    }
+    ctx.putImageData(data, 0, 0);
+    return await new Promise<Blob>((res, rej) =>
+      canvas.toBlob((b) => (b ? res(b) : rej(new Error("encode failed"))), "image/png")
+    );
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function genSeed(): string {
   const b = new Uint8Array(32);
   crypto.getRandomValues(b);
@@ -1796,6 +1834,7 @@ function TokenDetail({
   })();
 
   const [amount, setAmount] = useState("");
+  const [sellReceipt, setSellReceipt] = useState<{ tokens: bigint; xnoOut?: bigint } | null>(null); // paper-hands receipt on sell
   const [shared, setShared] = useState(false);
   // Share this coin via a REAL server route (/t/<id>) — not the #t= hash, which
   // crawlers never see. That route serves per-coin OG tags + a branded OG image,
@@ -1991,6 +2030,7 @@ function TokenDetail({
         await sendOp(token.tokenId, { kind: "sell", tokens: raw, minXno: 0n }, "sell");
       }
       markWalletDirty();
+      setSellReceipt({ tokens: raw });
     } catch (e: any) {
       say("sell failed: " + e.message);
     }
@@ -2016,6 +2056,7 @@ function TokenDetail({
       say(`sold ✓ — ${parts.join(" · ")}`);
       setAmount("");
       markWalletDirty();
+      setSellReceipt({ tokens: raw, xnoOut: guarded });
     } catch (e: any) {
       say("sell failed: " + e.message);
     }
@@ -2140,6 +2181,18 @@ function TokenDetail({
 
   return (
     <div className="space-y-4 pb-16 sm:pb-0">
+      {sellReceipt && (
+        <PaperHandsReceipt
+          kind="sell"
+          symbol={tokSym(token)}
+          decimals={token.decimals}
+          tokenId={token.tokenId}
+          tokens={sellReceipt.tokens}
+          xnoOut={sellReceipt.xnoOut}
+          onRedeem={() => { setSellReceipt(null); setSide("buy"); }}
+          onClose={() => setSellReceipt(null)}
+        />
+      )}
       <div className="flex items-center justify-between">
         <button onClick={onBack} className="text-[10px] font-black uppercase tracking-widest text-neutral-500 hover:text-white">← All coins</button>
         <a href={`/pro?token=${token.tokenId}`} className="rounded-none border border-neutral-800 px-2.5 py-1 text-[11px] font-bold text-white hover:border-white">
@@ -2823,6 +2876,81 @@ function Line({ k, v, strong = false }: { k: string; v: string; strong?: boolean
   );
 }
 
+// Paper-Hands Receipt — fires the moment someone sells or unstakes. A stark
+// thermal-receipt card citing the EXACT cost of folding (the 20% unstake tax
+// split, or the XNO taken for a sell), with a self-deprecating share + a
+// "buy back in" redemption CTA. Shame + redemption, both shareable.
+function PaperHandsReceipt({
+  kind,
+  symbol,
+  decimals,
+  tokenId,
+  tokens,
+  xnoOut,
+  onRedeem,
+  onClose,
+}: {
+  kind: "sell" | "unstake";
+  symbol: string;
+  decimals: number;
+  tokenId: string;
+  tokens: bigint;
+  xnoOut?: bigint;
+  onRedeem: () => void;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const pct = (n: bigint) => (tokens * n) / 100n;
+  const url = `${typeof window !== "undefined" ? window.location.origin : "https://www.hodlgame.fun"}/t/${tokenId}`;
+  const line = kind === "unstake"
+    ? `I paper-handed and ate the 20% unstake tax on $${symbol} 📄🖐️ Receipt attached. ${url}`
+    : `I folded my $${symbol} bag 📄🖐️ Somebody screenshot this so I never do it again. ${url}`;
+  const share = async () => {
+    try {
+      if (typeof navigator !== "undefined" && (navigator as any).share) {
+        await (navigator as any).share({ title: "Paper-hands receipt", text: line, url });
+        return;
+      }
+    } catch { return; }
+    try { await navigator.clipboard.writeText(line); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch {}
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4" onClick={onClose}>
+      <div className="w-full max-w-xs rounded-none border border-neutral-700 bg-neutral-950 p-5 space-y-3 font-mono" onClick={(e) => e.stopPropagation()}>
+        <div className="text-center border-b border-dashed border-neutral-700 pb-2">
+          <p className="text-sm font-black tracking-[0.2em] text-white">PAPER-HANDS RECEIPT</p>
+          <p className="text-[10px] text-neutral-500">{kind === "unstake" ? "UNSTAKE" : "SELL"} · ${symbol.toUpperCase()}</p>
+        </div>
+        <div className="text-xs divide-y divide-neutral-800 border border-neutral-800">
+          {kind === "unstake" ? (
+            <>
+              <Line k="unstaked" v={`${fmtTok(tokens.toString(), decimals)} ${symbol}`} />
+              <Line k="you kept (80%)" v={`${fmtTok(pct(80n).toString(), decimals)} ${symbol}`} strong />
+              <Line k="burned forever (5%)" v={`−${fmtTok(pct(5n).toString(), decimals)}`} />
+              <Line k="paid to hodlers (15%)" v={`−${fmtTok(pct(15n).toString(), decimals)}`} />
+            </>
+          ) : (
+            <>
+              <Line k="sold" v={`${fmtTok(tokens.toString(), decimals)} ${symbol}`} />
+              <Line k="you got" v={xnoOut != null ? `${fmtXno(xnoOut.toString())} XNO` : "—"} strong />
+              <Line k="diamond hands" v="0.00 💎" />
+            </>
+          )}
+        </div>
+        <p className="text-center text-[10px] text-neutral-600">— thanks for playing, paperhand —</p>
+        <div className="flex flex-col gap-2">
+          <button onClick={onRedeem} className="w-full rounded-none bg-white py-2 text-[11px] font-black uppercase tracking-wide text-black hover:bg-neutral-200">
+            Redeem yourself — buy back in
+          </button>
+          <button onClick={share} className="w-full rounded-none border border-neutral-700 py-2 text-[11px] font-black uppercase tracking-wide text-neutral-300 hover:border-white hover:text-white">
+            {copied ? "copied" : "Cope — share the receipt"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // of the connected account's staked balance and claimable XNO rebate rewards.
 function StakeBox({
   token,
@@ -2836,6 +2964,7 @@ function StakeBox({
   const [stakeAmt, setStakeAmt] = useState("");
   const [unstakeAmt, setUnstakeAmt] = useState("");
   const [confirm, setConfirm] = useState<{ kind: "stake" | "unstake"; raw: bigint } | null>(null);
+  const [receipt, setReceipt] = useState<bigint | null>(null); // unstake amount → paper-hands receipt
   const staked = BigInt(token.myStaked || "0");
   const claimable = BigInt(token.myClaimable || "0");
   const bal = BigInt(token.myBalance || "0");
@@ -2856,7 +2985,10 @@ function StakeBox({
     if (!confirm) return;
     const { kind, raw } = confirm;
     setConfirm(null);
-    sendOp(token.tokenId, { kind, amount: raw }, kind).then(() => (kind === "stake" ? setStakeAmt("") : setUnstakeAmt("")));
+    sendOp(token.tokenId, { kind, amount: raw }, kind).then(() => {
+      if (kind === "stake") setStakeAmt("");
+      else { setUnstakeAmt(""); setReceipt(raw); } // fire the paper-hands receipt on unstake
+    });
   };
 
   return (
@@ -2869,6 +3001,17 @@ function StakeBox({
           symbol={tokSym(token)}
           onConfirm={runConfirmed}
           onCancel={() => setConfirm(null)}
+        />
+      )}
+      {receipt != null && (
+        <PaperHandsReceipt
+          kind="unstake"
+          symbol={tokSym(token)}
+          decimals={token.decimals}
+          tokenId={token.tokenId}
+          tokens={receipt}
+          onRedeem={() => setReceipt(null)}
+          onClose={() => setReceipt(null)}
         />
       )}
       <div className="flex items-center justify-between text-[11px]">
@@ -3118,6 +3261,60 @@ function EditCoinInfo({ token, keys, say }: { token: Token; keys: Keys; say: (s:
   );
 }
 
+// Launch Certificate — the celebratory "your coin is live" moment shown the
+// instant a launch confirms. Captures peak creator energy and hands them a
+// one-tap share so they recruit their own first holders (they own 5%, so they
+// want to). Monochrome, on-brand, with the /t/<id> unfurl link baked in.
+function LaunchCertificate({
+  info,
+  onView,
+  onClose,
+}: {
+  info: { tokenId: string; name: string; symbol: string; image: string };
+  onView: () => void;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const url = `${typeof window !== "undefined" ? window.location.origin : "https://www.hodlgame.fun"}/t/${info.tokenId}`;
+  const text = `I just launched $${info.symbol} on HodlGame — feeless, zero-custody, creator capped at 5%. First holders win. ${url}`;
+  const share = async () => {
+    try {
+      if (typeof navigator !== "undefined" && (navigator as any).share) {
+        await (navigator as any).share({ title: `${info.name} ($${info.symbol}) is live`, text, url });
+        return;
+      }
+    } catch { return; }
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {}
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4" onClick={onClose}>
+      <div className="w-full max-w-sm rounded-none border border-neutral-700 bg-black p-6 space-y-4 text-center" onClick={(e) => e.stopPropagation()}>
+        <p className="text-[11px] font-black uppercase tracking-[0.25em] text-neutral-500">Certificate of Launch</p>
+        <div className="flex justify-center">
+          <div className="border border-neutral-700 p-1"><Avatar image={info.image} symbol={info.symbol} size={96} /></div>
+        </div>
+        <div>
+          <h3 className="text-2xl font-black text-white leading-tight">{info.name}</h3>
+          <p className="text-sm text-neutral-400 tracking-wide">${info.symbol.toUpperCase()}</p>
+        </div>
+        <p className="text-[12px] text-neutral-400">Live on Nano · feeless · zero-custody · you keep 5%. It's worthless until people hold it — go get your first holders.</p>
+        <div className="flex flex-col gap-2 pt-1">
+          <button onClick={share} className="w-full rounded-none bg-white py-2.5 text-xs font-black uppercase tracking-wide text-black hover:bg-neutral-200">
+            {copied ? "copied — paste it anywhere" : "Recruit your first holders →"}
+          </button>
+          <button onClick={onView} className="w-full rounded-none border border-neutral-700 py-2.5 text-xs font-black uppercase tracking-wide text-neutral-200 hover:border-white hover:text-white">
+            View / trade your coin
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CreateToken({
   busy,
   setBusy,
@@ -3145,11 +3342,15 @@ function CreateToken({
   const [image, setImage] = useState("");
   const [uploading, setUploading] = useState(false);
   const [showReq, setShowReq] = useState(false); // flag the required name/symbol fields on a failed submit
-  // Direct-Settlement (zero-custody) launch: trades settle wallet-to-wallet,
-  // no pool account ever exists. Default ON — it is the trustless mode.
-  
+  // Monochrome Maker: default every uploaded coin image to the B/W brand look so
+  // the whole feed + all share cards read as one family. Toggleable — we keep
+  // the original file so flipping it re-processes without a re-upload.
+  const [mono, setMono] = useState(true);
+  const [origFile, setOrigFile] = useState<File | null>(null);
+  // Launch Certificate: the celebratory "your coin is live" moment (rendered below).
+  const [launched, setLaunched] = useState<{ tokenId: string; name: string; symbol: string; image: string } | null>(null);
 
-  async function upload(file: File) {
+  async function processAndUpload(file: File, useMono: boolean) {
     if (!file.type.startsWith("image/")) return say("please choose an image file");
     setUploading(true);
     try {
@@ -3157,11 +3358,12 @@ function CreateToken({
       // only if canvas resizing isn't available.
       let body: Blob = file;
       try {
-        const r = await resizeImageFile(file, 512);
-        body = r.blob;
-        say(`image resized to ${r.w}×${r.h}`);
+        body = (await resizeImageFile(file, 512)).blob;
       } catch {
         /* keep original; the server still validates it */
+      }
+      if (useMono) {
+        try { body = await monochromeBlob(body); } catch { /* keep color if the filter fails */ }
       }
       const fd = new FormData();
       fd.append("file", body, "image.png");
@@ -3174,6 +3376,13 @@ function CreateToken({
       setUploading(false);
     }
   }
+
+  const pickFile = (file: File) => { setOrigFile(file); void processAndUpload(file, mono); };
+  const toggleMono = () => {
+    const v = !mono;
+    setMono(v);
+    if (origFile) void processAndUpload(origFile, v);
+  };
 
   async function launch() {
     if (!keys) return promptUnlock();
@@ -3226,7 +3435,9 @@ function CreateToken({
       } else {
         say(`launch ✓ ${hash.slice(0, 10)}…`);
       }
-      onCreated(tokenId);
+      // Launch Certificate: capture the highest-energy moment and turn the
+      // creator into their own first recruiter, before they navigate away.
+      setLaunched({ tokenId, name: meta.name, symbol: meta.symbol, image: meta.image });
     } catch (e: any) {
       say("launch failed: " + e.message);
     } finally {
@@ -3245,6 +3456,13 @@ function CreateToken({
 
   return (
     <div className="rounded-none border border-neutral-800 bg-neutral-950 p-5 space-y-3">
+      {launched && (
+        <LaunchCertificate
+          info={launched}
+          onView={() => { const t = launched.tokenId; setLaunched(null); onCreated(t); }}
+          onClose={() => setLaunched(null)}
+        />
+      )}
       <h3 className="font-black text-lg">Start a new coin</h3>
       <div className="flex items-center gap-3">
         <div className={"rounded-none " + (showReq && !reqMeta.image ? "ring-1 ring-red-500" : "")}>
@@ -3252,10 +3470,21 @@ function CreateToken({
         </div>
         <label className="text-xs text-white cursor-pointer">
           {uploading ? "uploading…" : "upload image *"}
-          <input type="file" accept="image/*" className="hidden" onChange={(e) => { e.target.files?.[0] && upload(e.target.files[0]); setShowReq(false); }} />
+          <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pickFile(f); setShowReq(false); }} />
         </label>
         <span className="text-[11px] text-neutral-500">or a URL below</span>
       </div>
+      {/* Monochrome Maker toggle — on by default so every coin lands in the B/W
+          house style; the creator can keep original colors if they prefer. */}
+      {origFile && (
+        <button type="button" onClick={toggleMono} disabled={uploading}
+          className="flex items-center gap-2 text-[11px] text-neutral-400 hover:text-white disabled:opacity-50">
+          <span className={"inline-flex h-4 w-7 items-center rounded-full border border-neutral-600 px-0.5 transition-colors " + (mono ? "bg-white justify-end" : "bg-neutral-900 justify-start")}>
+            <span className={"h-3 w-3 rounded-full " + (mono ? "bg-black" : "bg-neutral-500")} />
+          </span>
+          Monochrome brand style {mono ? "on" : "off"}
+        </button>
+      )}
       <input
         className={inputC + (showReq && !reqMeta.image ? " ring-1 ring-red-500" : "")}
         placeholder="image URL *" value={image}
