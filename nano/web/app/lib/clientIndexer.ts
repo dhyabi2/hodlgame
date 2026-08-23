@@ -15,26 +15,40 @@ import { ANCHOR_ADDRESS } from "../../core/anchor";
 import { stateRoot } from "../../core/canonical";
 import * as nanocurrency from "nanocurrency";
 
-async function rpc(action: string, params: Record<string, unknown>, tries = 4): Promise<any> {
-  // The /api/rpc proxy maps EVERY upstream failure (timeout, 5xx, throttle) to a
-  // 400, so over a full multi-account verify walk a single transient hiccup would
-  // otherwise abort the whole recomputation. Retry with backoff so the walk
-  // survives blips; only a persistent failure throws (an honest "couldn't
-  // verify — retry", never a silently-truncated chain that fakes a mismatch).
+/** An unopened account: the RPC answered "Account not found" — a real, terminal
+ * answer (empty chain), never a reason to retry or to fail the whole walk. */
+class RpcNotFound extends Error {}
+
+async function rpc(action: string, params: Record<string, unknown>, tries = 6): Promise<any> {
+  // The /api/rpc proxy flattens EVERY upstream outcome to a 400 — both a genuine
+  // "Account not found" (an unopened account, terminal) and a transient blip
+  // (timeout/throttle, retryable). Over a full multi-account walk these must be
+  // told apart: retrying an unopened account is wasted, while giving up on a
+  // transient blip would TRUNCATE a real chain — and truncating a creator's
+  // chain before its launch block silently drops the whole token (the 0-token
+  // recomputation). So: inspect the error text, throw RpcNotFound for unopened
+  // (caller treats as empty, like the server), and retry everything else hard;
+  // only a persistent transient surfaces as an honest error, never a fake root.
   let lastErr: unknown;
   for (let i = 0; i < tries; i++) {
+    let res: Response;
     try {
-      const res = await fetch("/api/rpc", {
+      res = await fetch("/api/rpc", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, ...params }),
       });
-      if (!res.ok) throw new Error(`rpc ${action} ${res.status}`);
-      return await res.json();
     } catch (e) {
-      lastErr = e;
-      if (i < tries - 1) await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+      lastErr = e; // network/transport → retry
+      await new Promise((r) => setTimeout(r, 400 * (i + 1)));
+      continue;
     }
+    if (res.ok) return res.json();
+    let msg = `rpc ${action} ${res.status}`;
+    try { const b = await res.json(); if (b?.error) msg = String(b.error); } catch {}
+    if (/not\s*found|unopened|bad_?account/i.test(msg)) throw new RpcNotFound(msg); // terminal, don't retry
+    lastErr = new Error(msg);
+    if (i < tries - 1) await new Promise((r) => setTimeout(r, 400 * (i + 1)));
   }
   throw lastErr;
 }
@@ -49,14 +63,18 @@ class BrowserSource implements BlockSource, CounterpartyReader {
     while (raw.length < limit) {
       const params: Record<string, unknown> = { action: "account_history", account, count: 500, raw: true };
       if (head) params.head = head;
-      // An UNOPENED account (in the watch set as a discovered counterparty but
-      // with no chain yet) makes the RPC return "account not found", which the
-      // /api/rpc proxy maps to a 400. The SERVER treats such an account as an
-      // empty chain (contributes nothing to the root), so we must too: on a
-      // failure here, stop walking this account and keep what we have. rpc()
-      // still retried a couple of times first, so a transient blip on an OPENED
-      // account is absorbed rather than truncating a real chain.
-      const hist = await rpc("account_history", params, 2).catch(() => ({} as any));
+      // Unopened account (no chain yet) → RpcNotFound → empty, exactly like the
+      // server's listBlocks. Any OTHER error means rpc() already retried hard and
+      // still failed — surface it (abort with an honest error) rather than break
+      // early, because a silent truncation here would drop this account's ops and
+      // fake a mismatch (a truncated creator chain = a vanished token).
+      let hist: any;
+      try {
+        hist = await rpc("account_history", params);
+      } catch (e) {
+        if (e instanceof RpcNotFound) break;
+        throw e;
+      }
       const history = (hist.history ?? []) as { hash: string }[];
       if (!history.length) break;
       const hashes = history.map((h) => h.hash).filter((h) => !seen.has(h));
