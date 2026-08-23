@@ -167,9 +167,13 @@ export default function Explorer() {
     setLoading(true);
     setErr("");
     if (view.kind === "feed") { setFeedItems([]); setFeedCursor(0); }
+    // The feed is fetched ONCE as the full mixed stream (no `kind`); the kind
+    // chips filter it client-side (see `shownFeed`), so switching tabs is
+    // instant and never triggers another full-chain-walk request. A generous
+    // page keeps rarer kinds represented; Load more pulls the next page.
     const params: Record<string, string> =
       view.kind === "stats" || view.kind === "trust" ? { view: view.kind }
-      : view.kind === "feed" ? { view: "feed", limit: "50", ...(kindFilter ? { kind: kindFilter } : {}) }
+      : view.kind === "feed" ? { view: "feed", limit: "100" }
       : view.kind === "results" ? { view: "search", q: view.q }
       : { view: view.kind, q: view.q };
     const load = (first: boolean) => api(params).then((j) => {
@@ -178,17 +182,19 @@ export default function Explorer() {
       else { setData(j); setErr(""); if (view.kind === "feed") { setFeedItems(j.items); setFeedNext(j.nextCursor); } }
     }).catch((e) => live && first && setErr(e.message)).finally(() => live && first && setLoading(false));
     load(true);
-    const t = view.kind === "stats" || view.kind === "trust" || (view.kind === "feed" && !kindFilter) ? setInterval(() => load(false), 5000) : null;
+    const t = view.kind === "stats" || view.kind === "trust" || view.kind === "feed" ? setInterval(() => load(false), 5000) : null;
     return () => { live = false; if (t) clearInterval(t); };
-  }, [JSON.stringify(view), kindFilter]);
+  }, [JSON.stringify(view)]);
 
   const go = (v: View) => { setData(null); setView(v); };
   const submit = () => q.trim() && go({ kind: "results", q: q.trim() });
   const loadMoreFeed = async () => {
     if (feedNext == null) return;
-    const j = await api({ view: "feed", cursor: String(feedNext), limit: "50", ...(kindFilter ? { kind: kindFilter } : {}) });
+    const j = await api({ view: "feed", cursor: String(feedNext), limit: "100" });
     setFeedItems((p) => [...p, ...(j.items ?? [])]); setFeedNext(j.nextCursor);
   };
+  // Client-side kind filter over the single fetched stream — instant tab switch.
+  const shownFeed = kindFilter ? feedItems.filter((it) => it.kind === kindFilter) : feedItems;
 
   return (
     <div className="space-y-4">
@@ -224,8 +230,14 @@ export default function Explorer() {
                 <button onClick={() => setKindFilter("")} className={`px-2 py-1 rounded-full text-[10px] font-bold ${!kindFilter ? "bg-white text-black" : "bg-neutral-950 text-neutral-400"}`}>all</button>
                 {ALL_KINDS.map((k) => <button key={k} onClick={() => setKindFilter(k)} className={`px-2 py-1 rounded-full text-[10px] font-bold ${kindFilter === k ? "bg-white text-black" : "bg-neutral-950 text-neutral-400"}`}>{KIND_LABEL[k] ?? k}</button>)}
               </div>
-              <p className="text-[11px] text-neutral-500 mb-2">{data.total} actions · newest first{kindFilter ? ` · ${kindFilter}` : " · live"}</p>
-              <OpsTable items={feedItems} go={go} />
+              <p className="text-[11px] text-neutral-500 mb-2">
+                {kindFilter
+                  ? `${shownFeed.length} ${KIND_LABEL[kindFilter] ?? kindFilter}${shownFeed.length === 1 ? "" : "s"} of ${feedItems.length} loaded · newest first`
+                  : `${data.total} actions · newest first · live`}
+              </p>
+              {shownFeed.length === 0
+                ? <p className="text-xs text-neutral-600 py-6 text-center">no {KIND_LABEL[kindFilter] ?? kindFilter} in the latest {feedItems.length}{feedNext != null ? " — load more to search further back" : ""}</p>
+                : <OpsTable items={shownFeed} go={go} />}
               {feedNext != null && <button onClick={loadMoreFeed} className="mt-3 w-full rounded-none border border-neutral-800 bg-neutral-950 py-2 text-xs font-bold text-neutral-300 hover:bg-neutral-900 hover:border-neutral-700">Load more</button>}
             </div>
           )}
