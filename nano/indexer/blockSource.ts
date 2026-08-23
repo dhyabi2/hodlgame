@@ -99,6 +99,68 @@ async function fallbackPending(account: string): Promise<string[]> {
 export class NanoRpcSource implements BlockSource, CounterpartyReader {
   constructor(private apiKey: string) {}
 
+  // Request-scoped memo. A NanoRpcSource is created fresh per request (compute()
+  // makes a new one each call), so this dedupes listBlocks WITHIN one request —
+  // not across requests. compute() calls collectEvents up to twice (watched,
+  // then watched+extra after the discovery pass), and the discovery pass queries
+  // pools; without this, every watched account's uncached best-view frontier
+  // check (3 account_info calls) runs twice. This is "compute once per request,"
+  // fully debuggable: the memo dies with the instance, so every new request
+  // still replays live from chain — there is no stale cross-request cache.
+  private blockMemo = new Map<string, Promise<NanoBlock[]>>();
+  // Request-scoped best-frontier hints (account → frontier hash), populated by
+  // warmFrontiers via ONE batch call per source instead of 3 account_info per
+  // account. Also request-scoped (dies with the instance).
+  private frontierHint = new Map<string, string>();
+
+  /**
+   * Prefetch the best frontier for MANY accounts in ~3 RPC calls instead of
+   * 3 per account. Uses the batch `accounts_frontiers` action from all three
+   * permitted views; when they AGREE (the common case) the frontier is settled
+   * cheaply, and only accounts whose views DISAGREE fall back to the precise
+   * per-account best-view (which needs block heights to pick the furthest tip).
+   * Preserves the exact freshness guarantee — max observed frontier wins — while
+   * collapsing the per-request account_info storm. Degrades gracefully: any
+   * account left unhinted just takes the original per-account path in listBlocks,
+   * so an endpoint that doesn't support accounts_frontiers changes nothing but
+   * speed. Call before collectChains; safe to call repeatedly (skips hinted).
+   */
+  async warmFrontiers(accounts: string[]): Promise<void> {
+    const need = accounts.filter((a) => !this.frontierHint.has(a));
+    if (need.length === 0) return;
+    const af = async (call: RpcCall): Promise<Record<string, string>> => {
+      try {
+        const j = await call({ action: "accounts_frontiers", accounts: need });
+        return j && typeof j.frontiers === "object" && j.frontiers ? j.frontiers : {};
+      } catch { return {}; }
+    };
+    const [f0, f1, f2] = await Promise.all([
+      af((b) => nanoRpc(this.apiKey, b)),
+      af((b) => nanoRpc("", b)),
+      af((b) => fallbackRpc(b)),
+    ]);
+    const disagree: string[] = [];
+    for (const account of need) {
+      const hs = [f0[account], f1[account], f2[account]].filter((h) => typeof h === "string" && /^[0-9a-fA-F]{64}$/.test(h));
+      if (hs.length === 0) continue; // unopened/unknown everywhere → leave unhinted
+      if (new Set(hs.map((h) => h.toUpperCase())).size === 1) this.frontierHint.set(account, hs[0]);
+      else disagree.push(account); // views differ → resolve precisely by height
+    }
+    await Promise.all(disagree.map(async (account) => {
+      const view = async (fn: () => Promise<any>) => {
+        try { const i = await fn(); return { frontier: String(i?.frontier ?? ""), height: Number(i?.block_count ?? 0) }; }
+        catch { return { frontier: "", height: 0 }; }
+      };
+      const views = await Promise.all([
+        view(() => nanoRpc(this.apiKey, { action: "account_info", account })),
+        view(() => nanoRpc("", { action: "account_info", account })),
+        view(() => fallbackRpc({ action: "account_info", account })),
+      ]);
+      const best = views.reduce((a, b) => (b.height > a.height ? b : a));
+      if (best.frontier) this.frontierHint.set(account, best.frontier);
+    }));
+  }
+
   /**
    * blocks_info with RETRIES for silently-omitted entries. Root-caused live
    * (2026-08-22): rpc.nano.to's batch blocks_info randomly OMITS some of the
@@ -189,6 +251,18 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
    * triggers when staleness is actually detected.
    */
   async listBlocks(account: string, limit = 20000): Promise<NanoBlock[]> {
+    // Serve the request-scoped memo if this account was already fetched in this
+    // request. A rejected fetch is intentionally NOT memoized (delete on throw)
+    // so a transient failure doesn't poison the rest of the request.
+    const key = `${account}|${limit}`;
+    const memo = this.blockMemo.get(key);
+    if (memo) return memo;
+    const p = this._listBlocks(account, limit).catch((e) => { this.blockMemo.delete(key); throw e; });
+    this.blockMemo.set(key, p);
+    return p;
+  }
+
+  private async _listBlocks(account: string, limit = 20000): Promise<NanoBlock[]> {
     // Best-view frontier selection. Final form of the stale-backend saga
     // (2026-08-22): a lagging backend can be SELF-CONSISTENTLY stale — old
     // frontier from account_info AND matching old history — so checking a
@@ -201,16 +275,24 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
     // and is retried on the other tier instead of silently serving the past.
     // A verified chain containing the highest observed frontier cannot be
     // stale by more than what NO available view has seen.
-    const view = async (fn: () => Promise<any>) => {
-      try { const i = await fn(); return { frontier: String(i?.frontier ?? ""), height: Number(i?.block_count ?? 0) }; }
-      catch { return { frontier: "", height: 0 }; }
-    };
-    const views = await Promise.all([
-      view(() => nanoRpc(this.apiKey, { action: "account_info", account })),
-      view(() => nanoRpc("", { action: "account_info", account })),
-      view(() => fallbackRpc({ action: "account_info", account })),
-    ]);
-    const best = views.reduce((a, b) => (b.height > a.height ? b : a));
+    // Fast path: warmFrontiers already resolved this account's best frontier in
+    // a batched call — skip the 3 per-account account_info round-trips.
+    let best: { frontier: string; height: number };
+    const hinted = this.frontierHint.get(account);
+    if (hinted) {
+      best = { frontier: hinted, height: 0 };
+    } else {
+      const view = async (fn: () => Promise<any>) => {
+        try { const i = await fn(); return { frontier: String(i?.frontier ?? ""), height: Number(i?.block_count ?? 0) }; }
+        catch { return { frontier: "", height: 0 }; }
+      };
+      const views = await Promise.all([
+        view(() => nanoRpc(this.apiKey, { action: "account_info", account })),
+        view(() => nanoRpc("", { action: "account_info", account })),
+        view(() => fallbackRpc({ action: "account_info", account })),
+      ]);
+      best = views.reduce((a, b) => (b.height > a.height ? b : a));
+    }
     if (!best.frontier) return []; // unopened / unknown everywhere
 
     // Three walk sources: nano.to keyed, nano.to keyless, and the FALLBACK

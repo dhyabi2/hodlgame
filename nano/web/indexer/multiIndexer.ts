@@ -398,6 +398,12 @@ export class MultiIndexer {
    * consumers either sort (canonicalOrder) or are order-independent — so the
    * folded state is byte-identical; only wall-clock changes. Was O(N) serial. */
   async collectChains(accounts: string[]): Promise<Map<string, DecodedChain>> {
+    // Batch-resolve every account's best frontier in ~3 RPC calls (if the source
+    // supports it) so the per-account fetches below skip their own frontier
+    // probes. Best-effort — a source without warmFrontiers, or an account it
+    // can't resolve, just takes the per-account path in listBlocks unchanged.
+    const warm = (this.source as Partial<{ warmFrontiers: (a: string[]) => Promise<void> }>).warmFrontiers;
+    if (warm) { try { await warm.call(this.source, accounts); } catch {} }
     const CONCURRENCY = 10;
     const out: (DecodedChain | null)[] = new Array(accounts.length).fill(null);
     let cursor = 0;
