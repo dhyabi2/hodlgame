@@ -1288,6 +1288,19 @@ function LockIcon({ size = 12 }: { size?: number }) {
   );
 }
 
+// Share glyph — two nodes joined to a hub, drawn in the same hairline stroke
+// as LockIcon so it reads as part of the mono black/white system, not an emoji.
+function ShareIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="inline-block shrink-0">
+      <circle cx="12" cy="3.5" r="2" />
+      <circle cx="4" cy="8" r="2" />
+      <circle cx="12" cy="12.5" r="2" />
+      <path d="M5.8 7 10.2 4.5M5.8 9l4.4 2.5" />
+    </svg>
+  );
+}
+
 /** Elegant loading skeleton for the Coins feed — a hero band + poster shelf +
  * grid mirroring the real layout, so the page doesn't jump when data lands. */
 function FeedSkeleton() {
@@ -1783,6 +1796,31 @@ function TokenDetail({
   })();
 
   const [amount, setAmount] = useState("");
+  const [shared, setShared] = useState(false);
+  // Share this coin via a REAL server route (/t/<id>) — not the #t= hash, which
+  // crawlers never see. That route serves per-coin OG tags + a branded OG image,
+  // so pasting the link anywhere (X, Telegram, Discord, iMessage) unfurls with
+  // the coin's name, symbol and picture. Native share sheet on mobile; clipboard
+  // copy with a toast everywhere else.
+  const doShare = async () => {
+    const url = `${typeof window !== "undefined" ? window.location.origin : "https://www.hodlgame.fun"}/t/${token.tokenId}`;
+    const title = `${tokName(token)} ${token.symbol ? `($${tokSym(token)})` : ""} · HodlGame`.trim();
+    const text = `${tokName(token)} — a zero-custody memecoin on Nano. Trade it on HodlGame.`;
+    try {
+      if (typeof navigator !== "undefined" && (navigator as any).share) {
+        await (navigator as any).share({ title, text, url });
+        return;
+      }
+    } catch { return; /* user cancelled the native sheet — do nothing */ }
+    try {
+      await navigator.clipboard.writeText(url);
+      setShared(true);
+      setTimeout(() => setShared(false), 1600);
+      say("link copied — paste it anywhere, it unfurls with the coin's card");
+    } catch {
+      say(url);
+    }
+  };
   const [tab, setTab] = useState<"trade" | "thread">("trade");
   const [side, setSide] = useState<"buy" | "sell">("buy"); // lifted so the mobile action bar can pick a side
   // Default to a sane 1% slippage and remember the user's last choice, so they
@@ -2145,6 +2183,15 @@ function TokenDetail({
                 {token.tokenId.slice(0, 6)}…{token.tokenId.slice(-4)} ⧉
               </button>
             </div>
+            <button
+              onClick={doShare}
+              title="Share this coin"
+              aria-label="Share this coin"
+              className="ml-auto shrink-0 self-start flex items-center gap-1.5 rounded-none border border-neutral-700 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-neutral-200 hover:border-white hover:text-white transition-colors"
+            >
+              <ShareIcon />
+              {shared ? "copied" : "share"}
+            </button>
           </div>
 
           <div className="mt-4 flex items-baseline gap-3 flex-wrap">
