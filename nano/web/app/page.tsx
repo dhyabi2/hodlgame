@@ -2749,6 +2749,77 @@ function TradePanel({
 }
 
 // Staking: real amount inputs (no more hardcoded amounts) plus a live readout
+// Elegant black/white confirm dialog for the taxed staking actions. Staking is
+// free but LOCKS value behind a 20% exit tax, so both actions get an explicit,
+// on-theme heads-up before anything is signed.
+function StakeConfirm({
+  kind,
+  amount,
+  decimals,
+  symbol,
+  onConfirm,
+  onCancel,
+}: {
+  kind: "stake" | "unstake";
+  amount: bigint;
+  decimals: number;
+  symbol: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const pct = (n: bigint) => (amount * n) / 100n;
+  const back = pct(80n); // received on unstake
+  const burn = pct(5n); // permanent deflation
+  const rebate = pct(15n); // to remaining stakers
+  const isUnstake = kind === "unstake";
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onCancel}>
+      <div className="w-full max-w-sm rounded-none border border-neutral-700 bg-neutral-950 p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2">
+          <LockIcon size={14} />
+          <h3 className="text-sm font-black uppercase tracking-wide text-white">
+            {isUnstake ? "Unstake — 20% exit tax" : "Staking locks a 20% exit tax"}
+          </h3>
+        </div>
+
+        {isUnstake ? (
+          <div className="space-y-2 text-[13px] text-neutral-300">
+            <p>Unstaking is taxed <span className="text-white font-black">20%</span>. On {fmtTok(amount.toString(), decimals)} {symbol}:</p>
+            <div className="rounded-none border border-neutral-800 divide-y divide-neutral-800 text-xs">
+              <Line k="you receive" v={`${fmtTok(back.toString(), decimals)} ${symbol}`} strong />
+              <Line k="burned forever (5%)" v={`${fmtTok(burn.toString(), decimals)} ${symbol}`} />
+              <Line k="paid to other stakers (15%)" v={`${fmtTok(rebate.toString(), decimals)} ${symbol}`} />
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-2 text-[13px] text-neutral-300">
+            <p>Staking itself is <span className="text-white font-black">free</span> and earns you XNO rebates.</p>
+            <p>But be aware: <span className="text-white font-black">unstaking later is taxed 20%</span> (5% burned, 15% shared to other stakers) — so you'd get back <span className="text-white font-black">{fmtTok(back.toString(), decimals)} {symbol}</span> of the {fmtTok(amount.toString(), decimals)} {symbol} you stake. Stake to hold.</p>
+          </div>
+        )}
+
+        <div className="flex gap-2 pt-1">
+          <button onClick={onCancel} className="flex-1 rounded-none border border-neutral-700 py-2 text-xs font-black uppercase tracking-wide text-neutral-300 hover:border-white hover:text-white">
+            Cancel
+          </button>
+          <button onClick={onConfirm} className="flex-1 rounded-none bg-white py-2 text-xs font-black uppercase tracking-wide text-black hover:bg-neutral-200">
+            {isUnstake ? "Unstake anyway" : "Stake"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Line({ k, v, strong = false }: { k: string; v: string; strong?: boolean }) {
+  return (
+    <div className="flex items-center justify-between px-3 py-2">
+      <span className="text-neutral-500">{k}</span>
+      <span className={"tabular-nums " + (strong ? "text-white font-black" : "text-neutral-300")}>{v}</span>
+    </div>
+  );
+}
+
 // of the connected account's staked balance and claimable XNO rebate rewards.
 function StakeBox({
   token,
@@ -2761,23 +2832,42 @@ function StakeBox({
 }) {
   const [stakeAmt, setStakeAmt] = useState("");
   const [unstakeAmt, setUnstakeAmt] = useState("");
+  const [confirm, setConfirm] = useState<{ kind: "stake" | "unstake"; raw: bigint } | null>(null);
   const staked = BigInt(token.myStaked || "0");
   const claimable = BigInt(token.myClaimable || "0");
   const bal = BigInt(token.myBalance || "0");
 
+  // Both actions open the tax-warning dialog first; nothing is signed until the
+  // user confirms in it.
   const doStake = () => {
     const raw = toRaw(stakeAmt, token.decimals);
     if (raw <= 0n) return;
-    sendOp(token.tokenId, { kind: "stake", amount: raw }, "stake").then(() => setStakeAmt(""));
+    setConfirm({ kind: "stake", raw });
   };
   const doUnstake = () => {
     const raw = toRaw(unstakeAmt, token.decimals);
     if (raw <= 0n) return;
-    sendOp(token.tokenId, { kind: "unstake", amount: raw }, "unstake").then(() => setUnstakeAmt(""));
+    setConfirm({ kind: "unstake", raw });
+  };
+  const runConfirmed = () => {
+    if (!confirm) return;
+    const { kind, raw } = confirm;
+    setConfirm(null);
+    sendOp(token.tokenId, { kind, amount: raw }, kind).then(() => (kind === "stake" ? setStakeAmt("") : setUnstakeAmt("")));
   };
 
   return (
     <div className="rounded-none border border-neutral-800 bg-neutral-950 p-3 space-y-3">
+      {confirm && (
+        <StakeConfirm
+          kind={confirm.kind}
+          amount={confirm.raw}
+          decimals={token.decimals}
+          symbol={tokSym(token)}
+          onConfirm={runConfirmed}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
       <div className="flex items-center justify-between text-[11px]">
         <span className="text-neutral-400 font-bold">Stake · earn XNO rebates</span>
         <span className="text-neutral-500">staked {fmtTok(token.myStaked, token.decimals)} {tokSym(token)}</span>

@@ -19,7 +19,21 @@ import * as nanocurrency from "nanocurrency";
  * answer (empty chain), never a reason to retry or to fail the whole walk. */
 class RpcNotFound extends Error {}
 
+// Serialize EVERY verify RPC call: the recompute walk fans out over many
+// accounts, and firing their /api/rpc calls concurrently hammered the rate-
+// limited proxy into 400s ("verify error: rpc blocks_info 400"). Chain each
+// call after the previous one settles so exactly one request is ever in flight
+// — gentle on the RPC, and the progress bar keeps the (now sequential) wait
+// legible. Only the verify path uses this module; the wallet has its own rpc.
+let rpcGate: Promise<unknown> = Promise.resolve();
 async function rpc(action: string, params: Record<string, unknown>, tries = 6): Promise<any> {
+  const run = () => rpcOnce(action, params, tries);
+  const next = rpcGate.then(run, run); // run after the previous call, success or fail
+  rpcGate = next.catch(() => {}); // a failure must not wedge the queue
+  return next;
+}
+
+async function rpcOnce(action: string, params: Record<string, unknown>, tries: number): Promise<any> {
   // The /api/rpc proxy flattens EVERY upstream outcome to a 400 — both a genuine
   // "Account not found" (an unopened account, terminal) and a transient blip
   // (timeout/throttle, retryable). Over a full multi-account walk these must be
