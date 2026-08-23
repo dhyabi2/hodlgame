@@ -305,6 +305,31 @@ function usePoll(fn: () => Promise<void> | void, intervalMs: number, deps: React
   }, deps);
 }
 
+// The XNO balance is read independently by several cards (the connected-wallet
+// card polls every 30s, the trade panel's MAX helper every 15s). A buy/sell is
+// an OUTGOING send, so the incoming-deposit websocket never fires for it and
+// each reader would otherwise sit on a stale balance until its own next poll —
+// exactly the "I bought but my wallet still shows 1" report. This tiny bus lets
+// any balance-mutating action (buy, sell, seed) ping every reader to re-read
+// account_info at once. It fires immediately AND again after a short delay so a
+// block the node processed but hasn't yet surfaced in account_info is still
+// caught without waiting for a poll.
+const walletDirtyListeners = new Set<() => void>();
+function markWalletDirty() {
+  const fire = () => { for (const fn of [...walletDirtyListeners]) { try { fn(); } catch {} } };
+  fire();
+  setTimeout(fire, 1500);
+}
+function useWalletDirty(fn: () => void) {
+  const ref = useRef(fn);
+  ref.current = fn;
+  useEffect(() => {
+    const h = () => ref.current();
+    walletDirtyListeners.add(h);
+    return () => { walletDirtyListeners.delete(h); };
+  }, []);
+}
+
 export default function Home() {
   const [keys, setKeys] = useState<Keys | null>(null);
   const [hasWallet, setHasWallet] = useState(false);
@@ -763,6 +788,7 @@ function ConnectedWallet({
       }
       if (announce) say(`received ${count} deposit${count === 1 ? "" : "s"} ✓`);
       setBalance(balance.toString());
+      if (count > 0) markWalletDirty(); // a receive changed the balance — refresh every reader now
     } catch (e: any) {
       if (announce) say("receive failed: " + (e?.message ?? e));
     } finally {
@@ -772,6 +798,9 @@ function ConnectedWallet({
   };
 
   useEffect(() => { refresh(); receiveAll(false); /* on unlock */ /* eslint-disable-next-line */ }, [keys.address]);
+  // Any balance-mutating action anywhere (a buy/sell in the trade panel is an
+  // OUTGOING send the websocket never sees) pings us to re-read immediately.
+  useWalletDirty(refresh);
   // A live websocket already receives deposits instantly; this poll is only a
   // safety net for a missed frame, so 30s (was 8s) + pause-when-hidden is plenty.
   usePoll(() => receiveAll(false), 30000, [keys.address]);
@@ -1761,11 +1790,13 @@ function TokenDetail({
 
   // Live XNO balance for the trade/seed MAX buttons — paused when hidden, 15s.
   useEffect(() => { if (!keys) setXnoBal("0"); }, [keys]);
-  usePoll(async () => {
-    if (!keys) return;
+  const readXnoBal = async () => {
+    if (!keys) { setXnoBal("0"); return; }
     try { const i = await rpc("account_info", { account: keys.address }); setXnoBal(i.balance ?? "0"); }
     catch { setXnoBal("0"); }
-  }, 15000, [keys?.address, busy]);
+  };
+  usePoll(readXnoBal, 15000, [keys?.address, busy]);
+  useWalletDirty(readXnoBal); // re-read the instant any buy/sell/seed/receive lands
 
   const myHolding = keys ? token.topHolders.find((h) => h.account === keys.address) : undefined;
   const isCreator = keys?.address === token.creator;
@@ -1817,6 +1848,7 @@ function TokenDetail({
       const r2 = await rpc("process", { json_block: "true", block: blk2 });
       say(`buy ✓ ${r2.hash.slice(0, 10)}…`);
       setAmount("");
+      markWalletDirty();
     } catch (e: any) {
       say("buy failed: " + e.message);
     }
@@ -1867,6 +1899,7 @@ function TokenDetail({
         say("buy ✓ — your XNO never left your wallet; it now backs your position as collateral");
       }
       setAmount("");
+      markWalletDirty();
     } catch (e: any) {
       say("buy failed: " + e.message);
     }
@@ -1892,6 +1925,7 @@ function TokenDetail({
       } else {
         await sendOp(token.tokenId, { kind: "sell", tokens: raw, minXno: 0n }, "sell");
       }
+      markWalletDirty();
     } catch (e: any) {
       say("sell failed: " + e.message);
     }
@@ -1916,6 +1950,7 @@ function TokenDetail({
       if (p.queued > 0n) parts.push(`${fmtXno(p.queued.toString())} XNO queued — the next buys pay it straight to your wallet`);
       say(`sold ✓ — ${parts.join(" · ")}`);
       setAmount("");
+      markWalletDirty();
     } catch (e: any) {
       say("sell failed: " + e.message);
     }
@@ -1951,6 +1986,7 @@ function TokenDetail({
       });
       const r2 = await rpc("process", { json_block: "true", block: blk2 });
       say(`liquidity seeded ✓ — trading is open`);
+      markWalletDirty();
       setSeedOverride({ poolXno: xnoRaw.toString(), poolTokens: tokRaw.toString() });
       setSeedXno(""); setSeedTokens(""); setSeedTouched(true);
       refreshDetail();
@@ -1977,6 +2013,7 @@ function TokenDetail({
       await submitBlock(fragA, 1n);
       const hash = await submitBlock(fragB, 1n);
       say(`starting price set ✓ — trading is open`);
+      markWalletDirty();
       // Optimistically mark the coin tradeable NOW so the banner/buy-guard clear
       // and the creator never re-seeds while the indexer catches up.
       setSeedOverride({ poolXno: xnoRaw.toString(), poolTokens: tokRaw.toString() });
