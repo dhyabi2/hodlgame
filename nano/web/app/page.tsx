@@ -15,7 +15,7 @@ import type { Op } from "../core/ops";
 import { Sparkline } from "./components/Sparkline";
 import Explorer from "./components/Explorer";
 import HalftoneGenome from "./components/HalftoneGenome";
-import { loadWallet, saveWallet, removeWallet, encryptSeed, decryptSeed } from "./lib/wallet";
+import { loadWallet, saveWallet, removeWallet, encryptSeed, decryptSeed, saveSessionKeys, loadSessionKeys, clearSessionKeys } from "./lib/wallet";
 import { useNanoWebsocket } from "./lib/nano-ws";
 import { QRCodeSVG } from "qrcode.react";
 import { toRaw, clampSlippage, isNanoAddr, fmtNum, fmtXno, fmtXnoPlain } from "./lib/trade";
@@ -355,16 +355,40 @@ export default function Home() {
   const unlock = (k: Keys) => {
     setKeys(k);
     setHasWallet(true);
+    // Persist for the browser session so a reload doesn't re-prompt (cleared on
+    // tab close). Storing only the derived keys — the at-rest secret stays the
+    // encrypted seed in localStorage.
+    saveSessionKeys(JSON.stringify(k));
   };
-  const lock = () => setKeys(null);
+  const lock = () => { setKeys(null); clearSessionKeys(); };
   const remove = () => {
     removeWallet();
+    clearSessionKeys();
     setHasWallet(false);
     setKeys(null);
   };
 
   useEffect(() => {
-    setHasWallet(Boolean(loadWallet()));
+    const hasW = Boolean(loadWallet());
+    setHasWallet(hasW);
+    // Restore an unlocked session across reloads (sessionStorage → cleared on
+    // tab close). Only if the encrypted wallet still exists, and only a
+    // well-formed key record — anything off falls back to a normal unlock.
+    if (hasW) {
+      const sess = loadSessionKeys();
+      if (sess) {
+        try {
+          const k = JSON.parse(sess) as Keys;
+          if (/^[0-9a-fA-F]{64}$/.test(k?.secretKey ?? "") && /^nano_[13][0-9a-z]{59}$/.test(k?.address ?? "")) {
+            setKeys(k);
+          } else {
+            clearSessionKeys();
+          }
+        } catch { clearSessionKeys(); }
+      }
+    } else {
+      clearSessionKeys(); // no wallet on disk → drop any stale session
+    }
     // Deep-link restore: #t=<tokenId> opens a coin directly (shareable);
     // #tab=<name> restores the last section. Survives refresh + sharing.
     try {

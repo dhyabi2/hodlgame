@@ -81,3 +81,25 @@ export function saveWallet(c: WalletCipher): void {
 export function removeWallet(): void {
   localStorage.removeItem(KEY);
 }
+
+// Session unlock: after the password decrypts the seed once, the derived keys
+// are held in sessionStorage so page reloads within the same browser session
+// don't demand the password again. sessionStorage is same-origin and is wiped
+// automatically when the tab/browser closes — so the unlock lasts exactly one
+// session and never persists to disk. The at-rest secret is still ONLY the
+// PBKDF2/AES-encrypted seed in localStorage; this holds the already-decrypted
+// keys for the life of the tab, the same exposure the in-memory React state
+// had, just surviving a refresh.
+const SESSION_KEY = "holdfun_session";
+
+export function saveSessionKeys(json: string): void {
+  try { sessionStorage.setItem(SESSION_KEY, json); } catch {}
+}
+
+export function loadSessionKeys(): string | null {
+  try { return sessionStorage.getItem(SESSION_KEY); } catch { return null; }
+}
+
+export function clearSessionKeys(): void {
+  try { sessionStorage.removeItem(SESSION_KEY); } catch {}
+}
