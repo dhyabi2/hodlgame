@@ -104,8 +104,14 @@ export async function feed(opts: { cursor?: number; limit?: number; kind?: strin
   // time (carry-forward in replay order) so it stays beside its causal
   // neighbour instead of sinking to epoch 0; ties break by reverse replay index
   // so the sort is total and deterministic.
+  // Drop synthetic `balance` observations: they're ledger-internal (head
+  // balance snapshots that prorate collateral, part of the state root) but not
+  // a user action, carry no block timestamp, and aren't in the kind chips — in
+  // the human activity feed they're pure noise that also can't be time-ordered.
+  // Every real op (buy/sell/launch/seedLiq/stake/…) has a real block time.
+  const real = deltas.filter((d) => d.kind !== "balance");
   let carry = 0;
-  const timed = deltas.map((d, i) => {
+  const timed = real.map((d, i) => {
     const t = d.timestamp && d.timestamp > 0 ? d.timestamp : carry;
     carry = t;
     return { d, i, t };
@@ -306,7 +312,7 @@ export async function trustDashboard() {
   const snap = await exportSnapshot();
   let snapshotAnchored = false;
   try { snapshotAnchored = isAnchored(await src.listBlocks(ANCHOR_ADDRESS), snap.hash); } catch {}
-  return { stateRoot: root, tokens: m.state.size, events: m.events.length, pools, snapshot: { hash: snap.hash, bytes: snap.json.length, anchored: snapshotAnchored }, anchor: ANCHOR_ADDRESS };
+  return { stateRoot: root, tokens: m.state.size, events: m.events.length, accounts: m.accounts, pools, snapshot: { hash: snap.hash, bytes: snap.json.length, anchored: snapshotAnchored }, anchor: ANCHOR_ADDRESS };
 }
 
 // ── Unified search ──────────────────────────────────────────────────────────

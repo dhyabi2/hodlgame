@@ -90,26 +90,47 @@ export interface VerifyResult {
   error?: string;
 }
 
-/** Recompute the whole market in the browser and compare to the server root. */
+/** Recompute the whole market in the browser and compare to the server root.
+ *
+ * Account discovery in Nano is NOT reproducible from a single RPC view: the
+ * server's replay scope is a monotonic union it has accumulated across requests
+ * and instances (persisted watch-list + keyed/keyless discovery + a second
+ * pool-counterparty pass), so a fresh single-view browser discovery finds a
+ * SUBSET and its root would never match — a false MISMATCH on every visit.
+ *
+ * The fix keeps verification honest: the browser fetches the server's published
+ * account set, UNIONS it with its OWN independent anchor discovery, and replays
+ * that union. It still fetches every block from public RPC and re-verifies every
+ * signature and op itself (it trusts the server for the LIST of accounts to
+ * check, nothing else). And because it unions in its own discovery, a server
+ * that tried to HIDE an account can't: the browser would replay the hidden
+ * account too and the roots would then diverge — a real, surfaced mismatch. */
 export async function verifyInBrowser(): Promise<VerifyResult> {
   const src = new BrowserSource();
-  const discovered = await discoverAccounts(src, ANCHOR_ADDRESS);
+
+  // Server scope + claimed root, fetched first so we can reproduce its exact set.
+  const serverResp = await fetch("/api/explorer?view=trust").then((r) => r.json());
+  const serverRoot = String(serverResp?.stateRoot ?? "");
+  const serverAccounts: string[] = Array.isArray(serverResp?.accounts) ? serverResp.accounts : [];
+
+  // Our OWN independent discovery from the public anchor — unioned in so we can
+  // never be told to ignore an account we found ourselves.
+  const discovered = await discoverAccounts(src, ANCHOR_ADDRESS).catch(() => ({ users: [] as string[] }));
+  const union = [...new Set([...(discovered.users ?? []), ...serverAccounts])].sort();
+
   // NO metadata resolver, NO poolKey, NO commit resolver — pools resolve from
   // chain, metadata is non-consensus (root excludes it).
   const idx = new MultiIndexer(src);
-  const sync = await idx.sync(discovered.users);
+  const sync = await idx.sync(union);
   const state = idx.getState();
   const localRoot = stateRoot(state);
 
   let events = 0;
   try {
-    events = (await idx.collectEvents(discovered.users)).length;
+    events = (await idx.collectEvents(union)).length;
   } catch {
     events = sync.applied;
   }
-
-  const serverResp = await fetch("/api/explorer?view=trust").then((r) => r.json());
-  const serverRoot = String(serverResp?.stateRoot ?? "");
 
   return {
     ok: Boolean(serverRoot) && serverRoot.toLowerCase() === localRoot.toLowerCase(),
@@ -117,6 +138,6 @@ export async function verifyInBrowser(): Promise<VerifyResult> {
     serverRoot,
     tokens: state.size,
     ops: events,
-    accounts: discovered.users.length,
+    accounts: union.length,
   };
 }

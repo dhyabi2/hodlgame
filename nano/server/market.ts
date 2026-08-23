@@ -72,6 +72,10 @@ export interface RawMarket {
   events: IndexedEvent[];
   idx: MultiIndexer;
   sellPayouts: ReturnType<typeof analyze>["sellPayouts"];
+  /** The exact account set replayed to produce `state`/root — published by the
+   * trust view so a browser can reproduce the SAME scope (and flag any account
+   * it discovers that this set omits). */
+  accounts: string[];
 }
 
 // Deliberately UNCACHED. This used to be a 2-second in-memory cache shared
@@ -114,6 +118,7 @@ async function computeFresh(): Promise<RawMarket> {
   // poolXno / trades stop flickering across instances and RPC backends.
   const src = new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache());
   const idx = new MultiIndexer(src, (id) => reg.get(id) ?? EMPTY_META, commit, poolKey);
+  let accounts = watched;
   let events = await idx.collectEvents(watched);
   // Second discovery pass: a creator's chain reveals each token's pool (the
   // seed-deposit link), even before the pool's own anchor hello lands — that
@@ -136,7 +141,8 @@ async function computeFresh(): Promise<RawMarket> {
     for (const h of cp.inbound) if (!watchedSet.has(h.sender)) extra.add(h.sender);
   }
   if (extra.size > 0) {
-    events = await idx.collectEvents([...watchedSet, ...extra].sort());
+    accounts = [...watchedSet, ...extra].sort();
+    events = await idx.collectEvents(accounts);
     // Persist the first-time buyers found this pass into the shared watch-list
     // so they're replayed from the base set next time (fire-and-forget) — this
     // is what stops a holder count from flickering as discovery varies.
@@ -148,7 +154,7 @@ async function computeFresh(): Promise<RawMarket> {
   const creators = new Map<string, string>();
   for (const [tokenId, s] of state) if (s.creator) creators.set(tokenId, s.creator);
   const metaAuthority = deriveMetaAuthority(idx.getMetaAnchors(), creators);
-  return { state, byToken, meta: reg, master, metaAuthority, events, idx, sellPayouts };
+  return { state, byToken, meta: reg, master, metaAuthority, events, idx, sellPayouts, accounts };
 }
 
 /** On-chain creator for a token (launch block signer), or null if the launch
