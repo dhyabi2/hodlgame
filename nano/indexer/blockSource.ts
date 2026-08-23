@@ -130,7 +130,12 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
     if (need.length === 0) return;
     const af = async (call: RpcCall): Promise<Record<string, string>> => {
       try {
-        const j = await call({ action: "accounts_frontiers", accounts: need });
+        // Per-source cap: a slow/rate-limited view resolves to "no data" fast
+        // rather than dragging the batch out (unhinted accounts just fall back).
+        const j = await Promise.race([
+          call({ action: "accounts_frontiers", accounts: need }),
+          new Promise<null>((r) => setTimeout(() => r(null), 3000)),
+        ]);
         return j && typeof j.frontiers === "object" && j.frontiers ? j.frontiers : {};
       } catch { return {}; }
     };

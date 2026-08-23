@@ -403,7 +403,12 @@ export class MultiIndexer {
     // probes. Best-effort — a source without warmFrontiers, or an account it
     // can't resolve, just takes the per-account path in listBlocks unchanged.
     const warm = (this.source as Partial<{ warmFrontiers: (a: string[]) => Promise<void> }>).warmFrontiers;
-    if (warm) { try { await warm.call(this.source, accounts); } catch {} }
+    if (warm) {
+      // Strictly bounded + best-effort: whatever it resolves in time hints the
+      // fetches below; anything unhinted just takes the per-account path. A slow
+      // or rate-limited source can NEVER stall the request beyond this cap.
+      try { await Promise.race([warm.call(this.source, accounts), new Promise((r) => setTimeout(r, 3500))]); } catch {}
+    }
     const CONCURRENCY = 10;
     const out: (DecodedChain | null)[] = new Array(accounts.length).fill(null);
     let cursor = 0;
