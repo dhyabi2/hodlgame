@@ -1904,6 +1904,13 @@ function TokenDetail({
   usePoll(readXnoBal, 15000, [keys?.address, busy]);
   useWalletDirty(readXnoBal); // re-read the instant any buy/sell/seed/receive lands
 
+  // After a trade, re-fetch this coin's state (your position, earmark, price,
+  // holders) right away and a few more times as the block cements — so "your
+  // HODL" / committed collateral update promptly, not on the next slow poll.
+  // (Consensus is enforced from SIGNED on-chain balances regardless of the UI;
+  // this is purely display freshness — see direct.test.ts §6.)
+  const bumpDetail = () => { refreshDetail(); for (const ms of [1500, 4000, 9000, 16000]) setTimeout(refreshDetail, ms); };
+
   const myHolding = keys ? token.topHolders.find((h) => h.account === keys.address) : undefined;
   const isCreator = keys?.address === token.creator;
 
@@ -1955,6 +1962,7 @@ function TokenDetail({
       say(`buy ✓ ${r2.hash.slice(0, 10)}…`);
       setAmount("");
       markWalletDirty();
+      bumpDetail();
     } catch (e: any) {
       say("buy failed: " + e.message);
     }
@@ -2006,6 +2014,7 @@ function TokenDetail({
       }
       setAmount("");
       markWalletDirty();
+      bumpDetail();
     } catch (e: any) {
       say("buy failed: " + e.message);
     }
@@ -2032,6 +2041,7 @@ function TokenDetail({
         await sendOp(token.tokenId, { kind: "sell", tokens: raw, minXno: 0n }, "sell");
       }
       markWalletDirty();
+      bumpDetail();
       setSellReceipt({ tokens: raw });
     } catch (e: any) {
       say("sell failed: " + e.message);
@@ -2058,6 +2068,7 @@ function TokenDetail({
       say(`sold ✓ — ${parts.join(" · ")}`);
       setAmount("");
       markWalletDirty();
+      bumpDetail();
       setSellReceipt({ tokens: raw, xnoOut: guarded });
     } catch (e: any) {
       say("sell failed: " + e.message);
