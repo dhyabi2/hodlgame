@@ -402,13 +402,11 @@ export class MultiIndexer {
     // supports it) so the per-account fetches below skip their own frontier
     // probes. Best-effort — a source without warmFrontiers, or an account it
     // can't resolve, just takes the per-account path in listBlocks unchanged.
-    const warm = (this.source as Partial<{ warmFrontiers: (a: string[]) => Promise<void> }>).warmFrontiers;
-    if (warm) {
-      // Strictly bounded + best-effort: whatever it resolves in time hints the
-      // fetches below; anything unhinted just takes the per-account path. A slow
-      // or rate-limited source can NEVER stall the request beyond this cap.
-      try { await Promise.race([warm.call(this.source, accounts), new Promise((r) => setTimeout(r, 3500))]); } catch {}
-    }
+    // NOTE: an accounts_frontiers batch prefetch was tried here but caused a
+    // cold-start latency regression (its in-flight promises competed with the
+    // per-account fetches on a cold serverless instance), so it's disabled. The
+    // per-account best-view frontier in listBlocks + the module-level
+    // FRONTIER_CACHE + the request-scoped block memo are the kept, safe wins.
     const CONCURRENCY = 10;
     const out: (DecodedChain | null)[] = new Array(accounts.length).fill(null);
     let cursor = 0;
