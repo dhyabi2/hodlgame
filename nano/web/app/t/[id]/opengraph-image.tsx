@@ -69,16 +69,16 @@ export default async function Image({ params }: { params: { id: string } }) {
             </div>
           )}
           <div style={{ display: "flex", flexDirection: "column", maxWidth: 780 }}>
-            <div style={{ fontSize: 82, fontWeight: 900, lineHeight: 1.02 }}>{name}</div>
+            <div style={{ display: "flex", fontSize: 82, fontWeight: 900, lineHeight: 1.02 }}>{name}</div>
             {symbol ? (
-              <div style={{ fontSize: 44, opacity: 0.65, marginTop: 14, letterSpacing: 3 }}>${symbol.toUpperCase()}</div>
+              <div style={{ display: "flex", fontSize: 44, opacity: 0.65, marginTop: 14, letterSpacing: 3 }}>${symbol.toUpperCase()}</div>
             ) : null}
           </div>
         </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
-          <div style={{ fontSize: 34, opacity: 0.8 }}>Zero-custody memecoin on Nano · feeless · instant</div>
-          <div style={{ fontSize: 44, fontWeight: 900, letterSpacing: 4 }}>HODLGAME</div>
+          <div style={{ display: "flex", fontSize: 34, opacity: 0.8 }}>Zero-custody memecoin on Nano · feeless · instant</div>
+          <div style={{ display: "flex", fontSize: 44, fontWeight: 900, letterSpacing: 4 }}>HODLGAME</div>
         </div>
       </div>
     ),
