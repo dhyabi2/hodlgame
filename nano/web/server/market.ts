@@ -85,7 +85,25 @@ export interface RawMarket {
 // story) — same root cause, smaller blast radius. Every call here replays
 // live from chain data; there is nothing for a cache to save that isn't
 // already a live, verified RPC round-trip away.
-async function compute(): Promise<RawMarket> {
+// In-flight coalescing (NOT a time cache — see the note above). A single warm
+// instance often gets a burst of overlapping callers: the Explorer alone fires
+// stats + feed + the SSE stream together, and token/state endpoints pile on. A
+// bare compute() would run that identical full chain walk once PER caller. This
+// shares ONE in-flight walk among everyone who asks while it's running, then
+// clears — so the very next request after it settles computes fresh. There is
+// no staleness window (unlike the deleted 2s cache): concurrent callers get the
+// same "computed just now" result, which is strictly MORE consistent, and a
+// caller arriving 1ms after settle still triggers a brand-new walk.
+let inFlight: Promise<RawMarket> | null = null;
+
+function compute(): Promise<RawMarket> {
+  if (inFlight) return inFlight;
+  const p = computeFresh().finally(() => { if (inFlight === p) inFlight = null; });
+  inFlight = p;
+  return p;
+}
+
+async function computeFresh(): Promise<RawMarket> {
   // Prologue reads are independent live sources — overlap them instead of
   // stacking three round-trips. Values are unchanged; only wall-clock differs.
   const [reg, commit, watched] = await Promise.all([loadRegistry(), commitResolver(), watchedAccounts()]);

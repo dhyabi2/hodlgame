@@ -96,7 +96,22 @@ export async function stats() {
 export async function feed(opts: { cursor?: number; limit?: number; kind?: string; token?: string } = {}) {
   const m = await raw();
   const { deltas } = replayWithDeltas(m.events);
-  let items = enrich(deltas, m).reverse(); // newest first
+  // Order strictly newest-first by the block's wall-clock time. Replay order is
+  // lamport/fixpoint — CAUSAL, not chronological — so a bare .reverse() left
+  // ops interleaved (e.g. launches, each on a different creator account, were
+  // ordered by discovery, not by launch time). Sort by real block time instead.
+  // A block missing local_timestamp (unconfirmed) inherits the previous op's
+  // time (carry-forward in replay order) so it stays beside its causal
+  // neighbour instead of sinking to epoch 0; ties break by reverse replay index
+  // so the sort is total and deterministic.
+  let carry = 0;
+  const timed = deltas.map((d, i) => {
+    const t = d.timestamp && d.timestamp > 0 ? d.timestamp : carry;
+    carry = t;
+    return { d, i, t };
+  });
+  timed.sort((a, b) => b.t - a.t || b.i - a.i);
+  let items = enrich(timed.map((x) => x.d), m);
   if (opts.kind) items = items.filter((d) => d.kind === opts.kind);
   if (opts.token) items = items.filter((d) => d.tokenId === opts.token!.toLowerCase());
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
