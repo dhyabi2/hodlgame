@@ -2183,15 +2183,6 @@ function TokenDetail({
                 {token.tokenId.slice(0, 6)}…{token.tokenId.slice(-4)} ⧉
               </button>
             </div>
-            <button
-              onClick={doShare}
-              title="Share this coin"
-              aria-label="Share this coin"
-              className="ml-auto shrink-0 self-start flex items-center gap-1.5 rounded-none border border-neutral-700 px-3 py-2 text-[11px] font-black uppercase tracking-wide text-neutral-200 hover:border-white hover:text-white transition-colors"
-            >
-              <ShareIcon />
-              {shared ? "copied" : "share"}
-            </button>
           </div>
 
           <div className="mt-4 flex items-baseline gap-3 flex-wrap">
@@ -2203,10 +2194,21 @@ function TokenDetail({
           </div>
 
           {token.description && <p className="text-sm text-neutral-300 mt-3">{token.description}</p>}
-          <div className="flex gap-3 mt-3">
+          <div className="flex items-center gap-3 mt-3">
             {token.website && <SocialLink href={token.website} label="website" />}
             {token.twitter && <SocialLink href={token.twitter} label="X" />}
             {token.telegram && <SocialLink href={token.telegram} label="telegram" />}
+            {/* Small icon-only share, inline with the socials (native sheet on
+                mobile, copy the /t/<id> unfurl link elsewhere). */}
+            <button
+              onClick={doShare}
+              title={shared ? "link copied — it unfurls with the coin's card" : "share this coin"}
+              aria-label="Share this coin"
+              className="inline-flex items-center gap-1 text-[11px] text-white hover:text-neutral-300"
+            >
+              <ShareIcon size={13} />
+              {shared && <span>copied</span>}
+            </button>
           </div>
 
           <div className="mt-4 grid grid-cols-3 border-y border-neutral-800 divide-x divide-neutral-800 text-center py-2">
