@@ -35,6 +35,13 @@ function circulatingRaw(s: State): bigint {
   return c > 0n ? c : 0n;
 }
 
+/** XNO-raw market cap = price × supply. Aggregators display CIRCULATING cap
+ * (price × circulating), not FDV (price × total) — the latter overstates value
+ * on a low-float coin, so we surface both explicitly. */
+function capOf(priceRaw: string, supplyRaw: bigint, decimals: number): bigint {
+  return (BigInt(priceRaw) * supplyRaw) / 10n ** BigInt(decimals);
+}
+
 /** 24h base (token) and quote (XNO) volume from the trade feed. */
 function vol24(a: TokenAnalytics, decimals: number, now: number): { base: bigint; quote: bigint } {
   const cutoff = now - DAY;
@@ -93,7 +100,8 @@ export async function tickers() {
       pool_tokens_raw: s.poolTokens.toString(),
       circulating_supply: fmtDec(circulatingRaw(s).toString(), dec),
       total_supply: fmtDec(s.supply.toString(), dec),
-      market_cap_xno: fmtDec(a?.marketCapRaw ?? "0", XNO_DECIMALS),
+      market_cap_xno: fmtDec(capOf(a?.priceRaw ?? "0", circulatingRaw(s), dec).toString(), XNO_DECIMALS),
+      fully_diluted_xno: fmtDec(capOf(a?.priceRaw ?? "0", s.supply, dec).toString(), XNO_DECIMALS),
       price_change_24h_pct: a ? priceChange24h(a, now) : null,
       holders: a?.holders.length ?? 0,
       created_at: a?.launchTime ?? null,
@@ -175,7 +183,8 @@ export async function assetMeta(tokenId: string) {
     twitter: reg.twitter ?? "",
     telegram: reg.telegram ?? "",
     price_xno: fmtDec(a?.priceRaw ?? "0", XNO_DECIMALS),
-    market_cap_xno: fmtDec(a?.marketCapRaw ?? "0", XNO_DECIMALS),
+    market_cap_xno: fmtDec(capOf(a?.priceRaw ?? "0", circulatingRaw(s), s.decimals).toString(), XNO_DECIMALS),
+    fully_diluted_xno: fmtDec(capOf(a?.priceRaw ?? "0", s.supply, s.decimals).toString(), XNO_DECIMALS),
     holders: a?.holders.length ?? 0,
     launch_time: a?.launchTime ?? null,
     explorer: `${SITE}/t/${tokenId}`,
