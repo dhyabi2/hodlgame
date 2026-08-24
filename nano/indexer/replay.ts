@@ -50,7 +50,13 @@ export function replay(events: ReplayEvent[]): ReplayResult {
  * is still byte-identical everywhere. Slippage guards keep any deferred
  * execution inside the bounds its signer already accepted.
  */
-export function fixpointOrder<T extends MultiBlock>(events: T[]): {
+export function fixpointOrder<T extends MultiBlock>(
+  events: T[],
+  // Called after each successful apply with the states around it — lets a
+  // consumer (explorer deltas) observe the SAME application order and
+  // validity as consensus, instead of re-deriving them with a divergent fold.
+  onApply?: (e: T, before: MultiState, after: MultiState) => void
+): {
   applied: T[];
   state: MultiState;
   invalid: { index: number; reason: string }[];
@@ -60,10 +66,12 @@ export function fixpointOrder<T extends MultiBlock>(events: T[]): {
   const deferred: { e: T; i: number }[] = [];
   const errs = new Map<number, string>();
   const tryApply = (p: { e: T; i: number }): boolean => {
+    const before = state;
     try {
       state = applyBlock(state, p.e);
       applied.push(p.e);
       errs.delete(p.i);
+      onApply?.(p.e, before, state);
       return true;
     } catch (err) {
       errs.set(p.i, err instanceof Error ? err.message : String(err));
@@ -75,8 +83,14 @@ export function fixpointOrder<T extends MultiBlock>(events: T[]): {
   // it becomes valid. A pass-based fixpoint is deterministic too, but a block
   // arriving later in canonical order could jump ahead of an earlier deferred
   // one and retroactively re-price already-observed history. With
-  // earliest-unlock anchoring, appending later events can never change where
+  // earliest-unlock anchoring, APPENDING later events can never change where
   // an earlier event applied — history stays stable as the chain grows.
+  // (Stability additionally requires that newly discovered blocks actually
+  // SORT after existing history. Lamport-only ordering violated that — a
+  // fresh externally-funded wallet's whole chain carried near-zero clocks and
+  // inserted before old events, re-pricing them until their own slippage
+  // guards invalidated them. canonicalOrder now sorts by the block's
+  // network-observed timestamp first, so new activity is new, not earlier.)
   const drainDeferred = () => {
     let progress = true;
     while (progress) {

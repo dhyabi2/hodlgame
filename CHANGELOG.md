@@ -6,6 +6,37 @@ everything lands on `main`.
 
 ## [Unreleased]
 
+### Fixed — 2026-08-24 · Time-primary canonical order (era cut) — stops retroactive position wipes
+- **Root cause** (user reports: a bought position vanished; a
+  stake "unstaked itself"): canonical order was Lamport-primary, and Lamport
+  clocks cannot order two externally funded wallets against each other (unknown
+  funding sources count 0). A fresh exchange-funded wallet's whole chain carried
+  near-zero clocks and sorted **before** days-older trades, re-pricing them on
+  every replay until their own `minTokens` slippage guards permanently
+  invalidated them — erasing bought positions (and any stake funded by them)
+  that users had already been shown.
+- **Fix**: `canonicalOrder` now sorts `(era, timestamp, lamport, height, hash,
+  sub)`. From `TIME_ORDER_ERA` (2026-08-24 ~14:00 UTC) on, the primary key is
+  the block's network-observed first-seen time — the order every client's quote
+  was actually made against — so newly discovered blocks *append* instead of
+  inserting into history. Balance observations inherit their block's timestamp;
+  head observations stamp `maxT+1` so they still fold last.
+- **Grandfather guarantee**: pre-era history keeps the legacy keys bit-exact
+  (timestamps below the cut are ignored), so no currently-served balance moves
+  at deploy. A seeded-random property test asserts the new comparator is
+  byte-identical to the legacy one on any pre-era event set. (A full-genesis
+  time re-sort was evaluated and rejected: prod's served states were never
+  consistent with any single order, so re-sorting history redistributes ~24
+  currently-visible holder balances.)
+- **Explorer consistency**: `replayWithDeltas` now folds in the same fixpoint
+  application order as consensus (via a new `fixpointOrder` `onApply` hook), so
+  the explorer can no longer flag an op `valid` (+tokens) while feed/holdings
+  say the account holds nothing; never-valid ops are flagged with their final
+  rejection reason.
+- Era-0 losses already baked into served state (invalidated queue-routed buys
+  that paid real XNO, erased stakes) are **not** restored by this change —
+  restitution is a separate operator decision.
+
 ### Added — 2026-08-22 · Direct-Settlement v2 (zero-custody)
 - **Zero-custody tokens** (launch opcode `0x0b`, the default in the create form):
   no pool account exists at all. Buys pay queued sellers **wallet-to-wallet**

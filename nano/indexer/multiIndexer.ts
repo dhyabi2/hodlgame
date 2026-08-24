@@ -103,8 +103,38 @@ export interface IndexedEvent {
  * indexer folds the same blocks into byte-identical state. Returns 0 only for
  * the same block (same hash), never relying on sort stability.
  */
+/** Era boundary (unix seconds, 2026-08-24 ~14:00 UTC). Blocks first seen
+ * before it keep the legacy lamport-primary order — freezing already-served
+ * history bit-exact, because re-ordering it retroactively redistributes
+ * balances users can already see. Blocks from this moment on order by
+ * network-observed time first (see canonicalOrder). A published constant, so
+ * every replayer draws the same line. */
+export const TIME_ORDER_ERA = 1_787_580_000;
+
 export function canonicalOrder(a: IndexedEvent, b: IndexedEvent): number {
-  // Causal first: Lamport clocks derived from the lattice itself (a receive
+  // Era first, then network-observed time within the new era. Lamport clocks
+  // alone cannot order two EXTERNALLY funded wallets against each other
+  // (unknown sources count 0), so a fresh exchange-funded wallet's whole
+  // history carried near-zero clocks and sorted BEFORE days-older trades —
+  // retroactively re-pricing them until their own minTokens slippage guard
+  // permanently invalidated them (reported live, 2026-08-24). The
+  // node's first-seen timestamp orders concurrent cross-wallet events the way
+  // traders actually experienced them: every client quoted against the state
+  // at its block's broadcast time, so time-order is the order under which
+  // those quotes stay honest. Pre-era history CANNOT be re-ordered the same
+  // way: it was served (and quoted against) under the legacy order, so it
+  // keeps the legacy keys and the exact state everyone already holds.
+  // Timestamps are ledger-persistent per node but NOT signature-covered — a
+  // hostile RPC could reorder same-second concurrency, never forge blocks —
+  // and the server's monotonic store pins first-fetched chains, so served
+  // history only refines forward. Blocks with no timestamp count as era 0 /
+  // time 0 and rely on the causal keys; validity is order-independent
+  // (fixpoint replay defers an op until its dependencies exist).
+  const ta = a.timestamp ?? 0, tb = b.timestamp ?? 0;
+  const ea = ta >= TIME_ORDER_ERA ? 1 : 0, eb = tb >= TIME_ORDER_ERA ? 1 : 0;
+  if (ea !== eb) return ea - eb;
+  if (ea === 1 && ta !== tb) return ta < tb ? -1 : 1;
+  // Causal: Lamport clocks derived from the lattice itself (a receive
   // happens-after its source send) order events across accounts the way value
   // actually flowed — a wallet funded after a launch sorts after it, however
   // young its chain is. Height alone made a fresh wallet's whole history sort
@@ -541,6 +571,14 @@ export class MultiIndexer {
       let maxLam = 0n;
       for (const v of lamMap.values()) if (v > maxLam) maxLam = v;
       const headLam = maxLam + 1n;
+      // Head observations must also dominate the PRIMARY (timestamp) sort key,
+      // for the same late-anchored-floor reason headLam exists.
+      let maxT = 0;
+      for (const { byHash } of decoded.values())
+        for (const b of byHash.values()) {
+          const t = b.timestamp ? Number(b.timestamp) : 0;
+          if (t > maxT) maxT = t;
+        }
       for (const { byHash } of decoded.values()) {
         let head: NanoBlock | null = null;
         for (const b of byHash.values()) {
@@ -550,6 +588,9 @@ export class MultiIndexer {
             op: { kind: "balance", raw: BigInt(b.balance) },
             sender: b.account,
             height: b.height,
+            // The block's own time, so the observation folds at the same
+            // primary key as the block's op (sub orders it strictly after).
+            timestamp: b.timestamp ? Number(b.timestamp) : undefined,
             hash: b.hash,
             sub: 1,
             lam: lamMap.get(b.hash) ?? 0n,
@@ -562,6 +603,7 @@ export class MultiIndexer {
             op: { kind: "balance", raw: BigInt(head.balance!) },
             sender: head.account,
             height: head.height,
+            timestamp: maxT + 1,
             hash: head.hash,
             sub: 2,
             lam: headLam,

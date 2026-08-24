@@ -3,7 +3,8 @@
 // over chain-derived data — deltas and edges are never stored as truth, they
 // re-derive deterministically on every request.
 
-import { applyBlock, multiEmpty, type MultiState } from "../core/multi";
+import type { MultiState } from "../core/multi";
+import { fixpointOrder } from "../indexer/replay";
 import type { State } from "../core/state";
 import type { IndexedEvent } from "../indexer/multiIndexer";
 import type { NanoBlock } from "../indexer/blockSource";
@@ -59,42 +60,45 @@ function mapDeltas(before: Map<string, bigint> | undefined, after: Map<string, b
   return out.sort((a, b) => (a.account < b.account ? -1 : 1));
 }
 
-/** Fold events into state, emitting a per-op diff of the touched token. */
+/** Fold events into state, emitting a per-op diff of the touched token.
+ *
+ * Folds in the SAME fixpoint application order as consensus (analytics/feed
+ * holdings), via fixpointOrder's onApply hook. A straight canonical-order fold
+ * here used to flag ops valid/invalid differently from the state everyone's
+ * holdings are served from — the explorer would show a buy as valid (+tokens)
+ * while the feed said the account held nothing. Never-valid ops are appended
+ * after the applied ones, flagged with their final rejection reason (their
+ * timestamps place them correctly in the time-sorted activity feed). */
 export function replayWithDeltas(events: IndexedEvent[]): { state: MultiState; deltas: OpDelta[] } {
-  let state = multiEmpty();
+  const base = (ev: IndexedEvent): OpDelta => ({
+    hash: ev.hash,
+    tokenId: ev.tokenId,
+    kind: ev.op.kind,
+    sender: ev.sender,
+    height: ev.height.toString(),
+    timestamp: ev.timestamp,
+    carriers: ev.carriers,
+    valid: true,
+    fields: {},
+    balances: [],
+    staked: [],
+  });
   const deltas: OpDelta[] = [];
-  for (const ev of events) {
-    const before = state.get(ev.tokenId);
-    const base: OpDelta = {
-      hash: ev.hash,
-      tokenId: ev.tokenId,
-      kind: ev.op.kind,
-      sender: ev.sender,
-      height: ev.height.toString(),
-      timestamp: ev.timestamp,
-      carriers: ev.carriers,
-      valid: true,
-      fields: {},
-      balances: [],
-      staked: [],
-    };
-    let next: MultiState;
-    try {
-      next = applyBlock(state, ev);
-    } catch (err) {
-      deltas.push({ ...base, valid: false, reason: err instanceof Error ? err.message : String(err) });
-      continue;
-    }
-    const after = next.get(ev.tokenId);
+  const { state, invalid } = fixpointOrder(events, (ev, beforeState, afterState) => {
+    const before = beforeState.get(ev.tokenId);
+    const after = afterState.get(ev.tokenId);
+    const d = base(ev);
     for (const f of SCALARS) {
       const b = (before?.[f] as bigint | undefined) ?? 0n;
       const a = (after?.[f] as bigint | undefined) ?? 0n;
-      if (b !== a) base.fields[f] = { before: b.toString(), after: a.toString() };
+      if (b !== a) d.fields[f] = { before: b.toString(), after: a.toString() };
     }
-    base.balances = mapDeltas(before?.balances, after?.balances);
-    base.staked = mapDeltas(before?.staked, after?.staked);
-    deltas.push(base);
-    state = next;
+    d.balances = mapDeltas(before?.balances, after?.balances);
+    d.staked = mapDeltas(before?.staked, after?.staked);
+    deltas.push(d);
+  });
+  for (const { index, reason } of invalid) {
+    deltas.push({ ...base(events[index]), valid: false, reason });
   }
   return { state, deltas };
 }

@@ -239,15 +239,29 @@ at sell.
 
 ## 9. Canonical order & replay (applies to all tokens)
 
-- **Order**: events sort by `(lamport, height, hash, sub)`. Lamport clocks are
-  derived from the lattice itself: `lam(b) = 1 + max(lam(previous),
-  lam(source send))` for receives/opens (unknown external sources count 0).
-  This orders cross-account events by how value actually flowed — a wallet
-  funded after a launch sorts after it, however young its chain is. `sub`
-  orders a block's op (0) before its own balance observation (1).
+- **Order**: events sort by `(era, timestamp?, lamport, height, hash, sub)`,
+  where `era` is 0 for blocks first seen before `TIME_ORDER_ERA` (a published
+  constant, 2026-08-24 ~14:00 UTC) and 1 after. Within era 1 the primary key
+  is the block's network-observed first-seen time (`local_timestamp`): every
+  trade was quoted against the state at its broadcast time, so time-order is
+  the order under which those quotes stay honest. Lamport clocks — `lam(b) =
+  1 + max(lam(previous), lam(source send))` for receives/opens (unknown
+  external sources count 0) — break same-second ties causally, but cannot be
+  primary: two externally funded wallets have no lattice edge between them,
+  so a fresh wallet's near-zero clocks would insert its trades *before*
+  days-older history and re-price it until the older trades' own slippage
+  guards invalidated them. Era-0 history ignores timestamps entirely (legacy
+  lamport-primary keys): it was already served — and quoted against — under
+  that order, so re-sorting it would redistribute balances users hold today.
+  `sub` orders a block's op (0) before its own balance observation (1).
+  Timestamps are ledger-persistent per node but not signature-covered: a
+  hostile RPC can reorder concurrency (never forge blocks), and validity is
+  order-independent (fixpoint deferral) — the operator's monotonic block
+  store pins first-fetched chains so served history only refines forward.
 - **Stable fixpoint replay**: events fold in canonical order; an op that is
   invalid *now* is deferred and retried after **every** subsequent successful
   apply, so it anchors at the **earliest point it becomes valid**. Appending
   later events can never change where an earlier event applied — history never
-  re-prices. Every replayer runs the identical procedure over the identical
-  ordered list, so state stays byte-identical.
+  re-prices (time-primary ordering is what guarantees newly discovered blocks
+  actually append rather than insert). Every replayer runs the identical
+  procedure over the identical ordered list, so state stays byte-identical.
