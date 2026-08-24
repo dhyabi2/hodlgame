@@ -598,7 +598,10 @@ export default function Home() {
                   )}
                 </button>
                 {notifOpen && (
-                  <div className="absolute right-0 top-9 z-30 w-72 border border-neutral-700 bg-black p-2">
+                  // Mobile: the bell sits mid-header, so an anchored 288px panel
+                  // runs off-screen — pin it full-width under the header instead;
+                  // sm+ gets the anchored dropdown.
+                  <div className="fixed inset-x-3 top-14 z-30 border border-neutral-700 bg-black p-2 sm:absolute sm:inset-x-auto sm:right-0 sm:top-9 sm:w-72">
                     <p className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wide text-neutral-500">Notifications</p>
                     {notifs.length === 0 ? (
                       <p className="px-1 py-2 text-xs text-neutral-500">nothing yet — incoming XNO shows up here</p>
