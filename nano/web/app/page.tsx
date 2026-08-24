@@ -386,6 +386,31 @@ export default function Home() {
 
   // Transient status message (auto-dismisses) — no persistent debug log in the UI.
   const say = (s: string) => { setToast(s); setTimeout(() => setToast((t) => (t === s ? "" : t)), 3500); };
+
+  // ── Incoming-payment notifications (header bell, site-wide) ───────────────
+  // The wallet tab already auto-receives; this makes an incoming XNO send
+  // visible from ANY tab: a persistent per-account list (last 20, localStorage)
+  // with an unread badge on the bell. Keyed by send hash so the wallet tab's
+  // own websocket/toast can't duplicate entries here.
+  const [notifs, setNotifs] = useState<{ id: string; amountRaw: string; time: number; read: boolean }[]>([]);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifKey = keys ? `holdfun-notifs-${keys.address}` : null;
+  useEffect(() => {
+    if (!notifKey) { setNotifs([]); return; }
+    try { setNotifs(JSON.parse(localStorage.getItem(notifKey) || "[]")); } catch { setNotifs([]); }
+  }, [notifKey]);
+  const saveNotifs = (next: { id: string; amountRaw: string; time: number; read: boolean }[]) => {
+    try { if (notifKey) localStorage.setItem(notifKey, JSON.stringify(next)); } catch {}
+    return next;
+  };
+  useNanoWebsocket(keys?.address ?? null, keys?.publicKey ?? null, (amountRaw, hash) => {
+    setNotifs((prev) => (prev.some((n) => n.id === hash) ? prev : saveNotifs([{ id: hash, amountRaw, time: Date.now(), read: false }, ...prev].slice(0, 20))));
+  });
+  const unreadNotifs = notifs.filter((n) => !n.read).length;
+  const toggleNotifs = () => {
+    setNotifOpen((v) => !v);
+    setNotifs((prev) => (prev.some((n) => !n.read) ? saveNotifs(prev.map((n) => ({ ...n, read: true }))) : prev));
+  };
   // One-tap unlock from anywhere: locked actions open an in-place sheet instead
   // of bouncing the user to the Wallet tab and losing their place.
   const promptUnlock = () => setUnlockOpen(true);
@@ -559,6 +584,36 @@ export default function Home() {
             <a className="hover:text-white whitespace-nowrap" href="/pro">Chart / Trade ↗</a>
           </nav>
           <div className="ml-auto flex items-center gap-3 shrink-0">
+            {keys && (
+              <div className="relative">
+                <button className="relative block text-neutral-300 hover:text-white" title="notifications" onClick={toggleNotifs}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+                    <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+                  </svg>
+                  {unreadNotifs > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-0.5 bg-white text-black text-[10px] font-black leading-4 text-center">
+                      {unreadNotifs > 9 ? "9+" : unreadNotifs}
+                    </span>
+                  )}
+                </button>
+                {notifOpen && (
+                  <div className="absolute right-0 top-9 z-30 w-72 border border-neutral-700 bg-black p-2">
+                    <p className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wide text-neutral-500">Notifications</p>
+                    {notifs.length === 0 ? (
+                      <p className="px-1 py-2 text-xs text-neutral-500">nothing yet — incoming XNO shows up here</p>
+                    ) : (
+                      notifs.slice(0, 10).map((n) => (
+                        <div key={n.id} className="flex items-center justify-between gap-2 border-t border-neutral-900 px-1 py-1.5">
+                          <span className="text-xs text-white">↓ received {fmtXno(n.amountRaw)} XNO</span>
+                          <span className="shrink-0 text-[10px] text-neutral-500">{timeAgo(n.time)}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             <GitHubLink />
             <button
               className="rounded-none bg-white px-3 py-1.5 text-xs font-black uppercase tracking-wide text-black hover:bg-neutral-200"
@@ -814,6 +869,38 @@ function ConnectedWallet({
     }
   };
 
+  // ── Recent activity (send/receive history from the ledger) ────────────────
+  // 1-raw sends are protocol op carriers (buys/sells/transfers encode data in
+  // the link), not value transfers — surfaced only as a muted count so the
+  // list reads like a payments history, not a block dump.
+  const [hist, setHist] = useState<{ type: string; amountRaw: string; account: string; time: number; hash: string }[]>([]);
+  const [histOps, setHistOps] = useState(0);
+  const loadHistory = async () => {
+    try {
+      const r = await rpc("account_history", { account: keys.address, count: "50" });
+      const entries: any[] = Array.isArray(r.history) ? r.history : [];
+      const value: { type: string; amountRaw: string; account: string; time: number; hash: string }[] = [];
+      let ops = 0;
+      for (const e of entries) {
+        const amt = BigInt(e?.amount ?? "0");
+        if ((e?.type === "send" || e?.type === "receive") && amt > 2n) {
+          value.push({
+            type: e.type,
+            amountRaw: amt.toString(),
+            account: String(e.account ?? ""),
+            time: Number(e.local_timestamp ?? 0),
+            hash: String(e.hash ?? ""),
+          });
+        } else ops++;
+      }
+      setHist(value.slice(0, 12));
+      setHistOps(ops);
+    } catch {
+      setHist([]); // unopened account has no history yet
+      setHistOps(0);
+    }
+  };
+
   // Receive every pending block so incoming XNO becomes spendable. Opens the
   // account with the first block if it has never been used. Idempotent, and
   // guarded so the poll, the websocket, and the button can never run it
@@ -870,10 +957,10 @@ function ConnectedWallet({
     }
   };
 
-  useEffect(() => { refresh(); receiveAll(false); /* on unlock */ /* eslint-disable-next-line */ }, [keys.address]);
+  useEffect(() => { refresh(); loadHistory(); receiveAll(false); /* on unlock */ /* eslint-disable-next-line */ }, [keys.address]);
   // Any balance-mutating action anywhere (a buy/sell in the trade panel is an
   // OUTGOING send the websocket never sees) pings us to re-read immediately.
-  useWalletDirty(refresh);
+  useWalletDirty(() => { refresh(); loadHistory(); });
   // A live websocket already receives deposits instantly; this poll is only a
   // safety net for a missed frame, so 30s (was 8s) + pause-when-hidden is plenty.
   usePoll(() => receiveAll(false), 30000, [keys.address]);
@@ -1183,6 +1270,42 @@ function ConnectedWallet({
           )}
         </div>
       )}
+
+      <div className="rounded-none border border-neutral-800 bg-neutral-950 p-3">
+        <div className="mb-1 flex items-center justify-between">
+          <p className="text-[11px] text-neutral-500">recent activity</p>
+          <button className="text-[10px] font-bold uppercase tracking-wide text-neutral-500 hover:text-white" onClick={loadHistory}>
+            refresh
+          </button>
+        </div>
+        {hist.length === 0 ? (
+          <p className="py-1 text-xs text-neutral-600">no transfers yet</p>
+        ) : (
+          <div className="divide-y divide-neutral-900">
+            {hist.map((h) => (
+              <div key={h.hash} className="flex items-center gap-2.5 py-1.5">
+                <span className={"w-4 text-center text-sm font-black " + (h.type === "receive" ? "text-white" : "text-neutral-400")}>
+                  {h.type === "receive" ? "↓" : "↑"}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-neutral-200">
+                    {h.type === "receive" ? "received" : "sent"} {fmtXno(h.amountRaw)} XNO
+                  </p>
+                  <p className="truncate font-mono text-[10px] text-neutral-500">
+                    {h.type === "receive" ? "from" : "to"} {short(h.account)}
+                  </p>
+                </div>
+                <span className="shrink-0 text-[10px] text-neutral-500">{h.time ? timeAgo(h.time) : ""}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {histOps > 0 && (
+          <p className="mt-1 text-[10px] text-neutral-600">
+            {histOps} protocol op{histOps === 1 ? "" : "s"} hidden (1-raw data blocks — trades, stakes, transfers)
+          </p>
+        )}
+      </div>
 
       <button className="w-full rounded-none border border-neutral-800 px-4 py-3 text-sm font-bold text-neutral-200 hover:border-white" onClick={lock}>
         Lock
