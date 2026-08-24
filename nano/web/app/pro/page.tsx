@@ -26,7 +26,7 @@ import { useXnoUsd, fmtUsd } from "../lib/usd";
 
 interface PricePoint { time: number; priceRaw: string; marketCapRaw: string }
 interface Trade { kind: "buy" | "sell"; account: string; amountRaw: string; priceRaw: string; xnoRaw?: string; time: number }
-interface Holder { account: string; balanceRaw: string; pct: number }
+interface Holder { account: string; balanceRaw: string; stakedRaw?: string; pct: number }
 interface Token {
   tokenId: string; name: string; symbol: string; decimals: number; image: string;
   creator: string; supply: string; treasury: string;
@@ -106,7 +106,7 @@ export default function ProPage() {
   usePoll(async () => {
     const j = await (await fetch(`/api/state?account=${keys?.address ?? ""}`)).json();
     // Hide imageless pre-fix test launches from the picker too.
-    const list: Token[] = (j.tokens ?? []).filter((t: Token) => t.image || BigInt(t.myBalance || "0") > 0n);
+    const list: Token[] = (j.tokens ?? []).filter((t: Token) => t.image || BigInt(t.myBalance || "0") + BigInt(t.myStaked || "0") > 0n);
     setTokens(list);
     // Functional update so a ?token= already set is never clobbered.
     if (list.length) setTokenId((prev) => prev ?? list[0].tokenId);

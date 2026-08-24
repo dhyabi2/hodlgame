@@ -8,8 +8,9 @@ import { clampDecimals } from "./validate";
 
 export interface Holder {
   account: string;
-  balanceRaw: string;
-  pct: number; // percent of supply, 0..100
+  balanceRaw: string; // liquid (unstaked) balance
+  stakedRaw: string; // staked portion — still theirs, still a holding
+  pct: number; // percent of supply held (liquid + staked), 0..100
 }
 
 export interface TradeEvent {
@@ -158,13 +159,27 @@ export function analyze(events: IndexedEvent[]): Analytics {
     if (!st.launched) continue;
     const price = priceOf(st.poolXno, st.poolTokens, st.decimals);
     const mc = marketCapOf(price, st.supply, st.decimals);
-    const holders: Holder[] = [...st.balances]
-      .map(([account, bal]) => ({
-        account,
-        balanceRaw: bal.toString(),
-        pct: st.supply > 0n ? Number((bal * 10000n) / st.supply) / 100 : 0,
-      }))
-      .sort((a, b) => (BigInt(b.balanceRaw) > BigInt(a.balanceRaw) ? 1 : -1));
+    // A holding = liquid balance + staked. Staking moves tokens out of
+    // `balances`, so a balances-only list made every fully-staked holder
+    // vanish (and undercounted holders / percentages). Zero-position
+    // accounts (sold out, fully transferred) are not holders.
+    const accounts = new Set([...st.balances.keys(), ...st.staked.keys()]);
+    const holders: Holder[] = [...accounts]
+      .map((account) => {
+        const bal = st.balances.get(account) ?? 0n;
+        const stk = st.staked.get(account) ?? 0n;
+        const total = bal + stk;
+        return {
+          account,
+          balanceRaw: bal.toString(),
+          stakedRaw: stk.toString(),
+          pct: st.supply > 0n ? Number((total * 10000n) / st.supply) / 100 : 0,
+          total,
+        };
+      })
+      .filter((h) => h.total > 0n)
+      .sort((a, b) => (b.total > a.total ? 1 : b.total < a.total ? -1 : a.account < b.account ? -1 : 1))
+      .map(({ total: _t, ...h }) => h);
 
     byToken.set(tokenId, {
       tokenId,

@@ -95,7 +95,7 @@ function traders(t: TokenView): number {
 // (The raw holders count is still shown as a stat, but not what boards rank on.)
 function sigHolders(t: TokenView): number {
   const px = BigInt(t.poolXno), pt = BigInt(t.poolTokens);
-  return t.topHolders.filter((h) => h.account !== t.pool && redeemable(BigInt(h.balanceRaw), px, pt) > 0n).length;
+  return t.topHolders.filter((h) => h.account !== t.pool && redeemable(BigInt(h.balanceRaw) + BigInt(h.stakedRaw ?? "0"), px, pt) > 0n).length;
 }
 
 export function computeLeaderboards(tokens: TokenView[], nowMs: number, limit = 10): Leaderboards {
@@ -163,7 +163,7 @@ export function computeLeaderboards(tokens: TokenView[], nowMs: number, limit = 
     const poolXno = BigInt(t.poolXno), poolTokens = BigInt(t.poolTokens);
     for (const h of t.topHolders) {
       if (h.account === t.pool) continue; // never rank a pool account as a holder
-      const value = redeemable(BigInt(h.balanceRaw), poolXno, poolTokens);
+      const value = redeemable(BigInt(h.balanceRaw) + BigInt(h.stakedRaw ?? "0"), poolXno, poolTokens);
       if (value <= 0n) continue;
       const e = hmap.get(h.account) ?? { value: 0n, tokens: 0 };
       e.value += value; e.tokens++;

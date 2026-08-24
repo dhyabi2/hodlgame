@@ -49,8 +49,9 @@ interface Trade {
 
 interface Holder {
   account: string;
-  balanceRaw: string;
-  pct: number;
+  balanceRaw: string; // liquid
+  stakedRaw?: string; // staked portion (still a holding)
+  pct: number; // of supply, liquid + staked
 }
 
 interface Comment {
@@ -1730,13 +1731,14 @@ function Feed({ tokens, loaded = true, onSelect, myAddress, usd, onCreate }: { t
   // A coin must carry an image to be shown (pre-image-fix test launches are
   // hidden everywhere) — unless YOU hold it, so owners can always reach it.
   const eligible = tokens.filter(
-    (t) => (Boolean(t.image) && (Boolean(t.name || t.symbol) || BigInt(t.poolXno) > 0n || BigInt(t.buyVolume) > 0n)) || BigInt(t.myBalance) > 0n
+    (t) => (Boolean(t.image) && (Boolean(t.name || t.symbol) || BigInt(t.poolXno) > 0n || BigInt(t.buyVolume) > 0n)) || BigInt(t.myBalance) + BigInt(t.myStaked || "0") > 0n
   );
   // Zero-cap = no starting price set yet (market cap 0 / unseeded). Hidden by
   // default so the feed shows only real, tradeable coins — but you always see
   // ones you hold or created, and a button at the end reveals the rest.
   const isZeroCap = (t: Token) => BigInt(t.marketCap || "0") <= 0n;
-  const mineOrMade = (t: Token) => BigInt(t.myBalance || "0") > 0n || (!!myAddress && t.creator === myAddress);
+  // A position = liquid + staked; a fully-staked coin is still "mine".
+  const mineOrMade = (t: Token) => BigInt(t.myBalance || "0") + BigInt(t.myStaked || "0") > 0n || (!!myAddress && t.creator === myAddress);
   const hiddenZeroCap = eligible.filter((t) => isZeroCap(t) && !mineOrMade(t));
   const live = showZeroCap ? eligible : eligible.filter((t) => !isZeroCap(t) || mineOrMade(t));
 
@@ -1765,7 +1767,7 @@ function Feed({ tokens, loaded = true, onSelect, myAddress, usd, onCreate }: { t
   const fresh = [...live].sort((a, b) => b.createdAt - a.createdAt).slice(0, 12);
   const movers = live.filter((t) => t.change24h != null).sort((a, b) => (b.change24h ?? 0) - (a.change24h ?? 0)).slice(0, 12);
   // "Your Coins" — the continue-watching slot: shown first when non-empty.
-  const mine = live.filter((t) => BigInt(t.myBalance) > 0n);
+  const mine = live.filter((t) => BigInt(t.myBalance) + BigInt(t.myStaked || "0") > 0n);
 
   // SEE ALL → jump to the All-coins grid pre-sorted for that shelf.
   const seeAll = (s: typeof sort) => {
@@ -3454,7 +3456,12 @@ function HoldersPanel({ holders, creator, decimals }: { holders: Holder[]; creat
               {i + 1}. {short(h.account)} {h.account === creator && <span className="text-white">dev</span>}
             </span>
             <div className="flex items-center gap-2">
-              <span className="text-neutral-400">{fmtTok(h.balanceRaw, decimals)}</span>
+              <span className="text-neutral-400">
+                {fmtTok((BigInt(h.balanceRaw) + BigInt(h.stakedRaw ?? "0")).toString(), decimals)}
+                {BigInt(h.stakedRaw ?? "0") > 0n && (
+                  <span className="text-neutral-600"> · {fmtTok(h.stakedRaw, decimals)} staked</span>
+                )}
+              </span>
               <span className="text-neutral-500 w-12 text-right">{h.pct.toFixed(2)}%</span>
             </div>
           </div>
@@ -3968,7 +3975,7 @@ function CreateToken({
 }
 
 function Portfolio({ tokens, onSelect, account, sendOp, busy, usd }: { tokens: Token[]; onSelect: (id: string) => void; account?: string; sendOp: (tokenId: string, op: Op, label: string) => Promise<void>; busy: boolean; usd: number | null }) {
-  const mine = tokens.filter((t) => BigInt(t.myBalance) > 0n);
+  const mine = tokens.filter((t) => BigInt(t.myBalance) + BigInt(t.myStaked || "0") > 0n);
   // Every token game where this wallet has withdrawable in-game XNO — scanned
   // from the whole replayed ledger so forgotten coins are never left behind.
   // Direct tokens settle at sell — the withdraw op does not exist for them.
@@ -4020,7 +4027,7 @@ function Portfolio({ tokens, onSelect, account, sendOp, busy, usd }: { tokens: T
       <h2 className="text-sm font-bold text-neutral-400">Your holdings</h2>
       <div className="space-y-2">
         {mine.map((t) => {
-          const valueRaw = (BigInt(t.myBalance) * BigInt(t.price)) / 10n ** BigInt(t.decimals);
+          const valueRaw = ((BigInt(t.myBalance) + BigInt(t.myStaked || "0")) * BigInt(t.price)) / 10n ** BigInt(t.decimals);
           return (
             <button
               key={t.tokenId}
@@ -4030,7 +4037,10 @@ function Portfolio({ tokens, onSelect, account, sendOp, busy, usd }: { tokens: T
               <Avatar image={t.image} symbol={tokSym(t)} size={40} />
               <div className="min-w-0 flex-1">
                 <p className="font-bold text-sm truncate">{tokName(t)} <span className="text-[11px] font-normal text-neutral-500">${tokSym(t)}</span></p>
-                <p className="text-[11px] text-neutral-500">{fmtTok(t.myBalance, t.decimals)} {tokSym(t)}</p>
+                <p className="text-[11px] text-neutral-500">
+                  {fmtTok((BigInt(t.myBalance) + BigInt(t.myStaked || "0")).toString(), t.decimals)} {tokSym(t)}
+                  {BigInt(t.myStaked || "0") > 0n && <span className="text-neutral-600"> · {fmtTok(t.myStaked, t.decimals)} staked</span>}
+                </p>
               </div>
               <div className="text-right">
                 <p className="text-sm font-bold">{fmtXno(valueRaw.toString())} XNO</p>
