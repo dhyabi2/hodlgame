@@ -43,6 +43,7 @@ interface Trade {
   account: string;
   amountRaw: string;
   priceRaw: string;
+  xnoRaw?: string; // XNO actually paid (buy) / realized (sell)
   time: number;
 }
 
@@ -3408,8 +3409,10 @@ function ActionBtn({ children, onClick, disabled }: { children: ReactNode; onCli
 }
 
 function TradesPanel({ trades, decimals, usd }: { trades: Trade[]; decimals: number; usd: number | null }) {
-  // XNO value of a trade = token amount × price-per-whole-token.
-  const tradeXno = (t: Trade) => ((BigInt(t.amountRaw) * BigInt(t.priceRaw)) / 10n ** BigInt(decimals)).toString();
+  // XNO actually exchanged (server-provided). Fallback for legacy payloads:
+  // tokens × price — a mark-to-market at the POST-trade price, which on a thin
+  // pool overstates a buy that moved its own price (1 XNO read as "99.9").
+  const tradeXno = (t: Trade) => t.xnoRaw ?? ((BigInt(t.amountRaw) * BigInt(t.priceRaw)) / 10n ** BigInt(decimals)).toString();
   return (
     <div className="rounded-none border border-neutral-800 bg-neutral-950 p-4">
       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400 mb-2">Recent trades</p>

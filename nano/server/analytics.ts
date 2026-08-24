@@ -17,6 +17,11 @@ export interface TradeEvent {
   account: string;
   amountRaw: string;
   priceRaw: string;
+  /** XNO actually exchanged (raw): what a buy PAID / what a sell realized.
+   * The UI must show this, never amountRaw × post-trade price — on a thin
+   * pool a buy moves its own price so far that the mark-to-market read
+   * "99.9 XNO" for a 1 XNO buy (user report, 2026-08-24). */
+  xnoRaw: string;
   time: number;
 }
 
@@ -133,14 +138,14 @@ export function analyze(events: IndexedEvent[]): Analytics {
       // buy's tokens received = pre.poolTokens − post.poolTokens.
       const tokensGot = pre ? pre.poolTokens - st.poolTokens : 0n;
       const t = tradesMap.get(ev.tokenId) ?? [];
-      t.push({ kind: "buy", account: ev.sender, amountRaw: tokensGot.toString(), priceRaw: price.toString(), time: timeFor(ev.tokenId, ev) });
+      t.push({ kind: "buy", account: ev.sender, amountRaw: tokensGot.toString(), priceRaw: price.toString(), xnoRaw: ev.op.xno.toString(), time: timeFor(ev.tokenId, ev) });
       tradesMap.set(ev.tokenId, t);
       // Volume in XNO-raw (the value spent) so buy and sell volume share units.
       buyVol.set(ev.tokenId, (buyVol.get(ev.tokenId) ?? 0n) + ev.op.xno);
     } else if (ev.op.kind === "sell") {
       const price = priceOf(st.poolXno, st.poolTokens, st.decimals);
       const t = tradesMap.get(ev.tokenId) ?? [];
-      t.push({ kind: "sell", account: ev.sender, amountRaw: ev.op.tokens.toString(), priceRaw: price.toString(), time: timeFor(ev.tokenId, ev) });
+      t.push({ kind: "sell", account: ev.sender, amountRaw: ev.op.tokens.toString(), priceRaw: price.toString(), xnoRaw: (sellXno ?? 0n).toString(), time: timeFor(ev.tokenId, ev) });
       tradesMap.set(ev.tokenId, t);
       // Volume in XNO-raw (value received) so it matches buyVolume's units;
       // was token-raw, which made buy+sell volume meaningless to sum/rank.

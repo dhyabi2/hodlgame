@@ -25,7 +25,7 @@ import { loadWallet, decryptSeed } from "../lib/wallet";
 import { useXnoUsd, fmtUsd } from "../lib/usd";
 
 interface PricePoint { time: number; priceRaw: string; marketCapRaw: string }
-interface Trade { kind: "buy" | "sell"; account: string; amountRaw: string; priceRaw: string; time: number }
+interface Trade { kind: "buy" | "sell"; account: string; amountRaw: string; priceRaw: string; xnoRaw?: string; time: number }
 interface Holder { account: string; balanceRaw: string; pct: number }
 interface Token {
   tokenId: string; name: string; symbol: string; decimals: number; image: string;
@@ -443,7 +443,7 @@ function buildVolume(trades: Trade[], tf: number, dec: number): Map<number, { bu
   const m = new Map<number, { buy: number; sell: number }>();
   for (const tr of trades) {
     const bucket = Math.floor(tr.time / tf) * tf;
-    const xno = (Number(BigInt(tr.amountRaw)) / 10 ** dec) * priceNum(tr.priceRaw);
+    const xno = tr.xnoRaw != null ? Number(BigInt(tr.xnoRaw)) / 1e30 : (Number(BigInt(tr.amountRaw)) / 10 ** dec) * priceNum(tr.priceRaw);
     const e = m.get(bucket) ?? { buy: 0, sell: 0 };
     if (tr.kind === "buy") e.buy += xno; else e.sell += xno;
     m.set(bucket, e);
@@ -851,7 +851,8 @@ function DepthCurve({ token }: { token: Token }) {
 function Tape({ token, keys }: { token: Token; keys: Keys | null }) {
   const trades = [...token.trades].reverse();
   const usd = useXnoUsd();
-  const tradeXno = (t: Trade) => ((BigInt(t.amountRaw) * BigInt(t.priceRaw)) / 10n ** BigInt(token.decimals)).toString();
+  // XNO actually exchanged; legacy fallback = tokens × post-trade price.
+  const tradeXno = (t: Trade) => t.xnoRaw ?? ((BigInt(t.amountRaw) * BigInt(t.priceRaw)) / 10n ** BigInt(token.decimals)).toString();
   return (
     <div className="flex h-full flex-col">
       <p className="mb-2 text-sm font-bold text-neutral-300">Trades</p>
