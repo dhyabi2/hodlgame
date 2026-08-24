@@ -743,7 +743,7 @@ function PositionCard({ token, keys, busy, setBusy, say }: { token: Token; keys:
         <Row2 l="holding" r={`${fmtTok(token.myBalance, token.decimals)}`} />
         <Row2 l="value" r={`${fmtXno(valueRaw.toString())} XNO`} />
         <Row2 l="staked" r={`${fmtTok(token.myStaked, token.decimals)}`} />
-        <Row2 l="claimable" r={`${fmtXno(token.myClaimable)} XNO`} rClass="text-white" />
+        <Row2 l="claimable" r={`${fmtTok(token.myClaimable, token.decimals)} ${token.symbol || "tokens"}`} rClass="text-white" />
         {token.direct ? (
           <>
             <Row2 l="collateral" r={`${fmtXno(token.myEarmark)} XNO`} />
@@ -753,6 +753,11 @@ function PositionCard({ token, keys, busy, setBusy, say }: { token: Token; keys:
           <Row2 l="game balance" r={`${fmtXno(token.myCredit)} XNO`} />
         )}
       </div>
+      <p className="border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-[10px] leading-relaxed text-neutral-400">
+        <span className="font-bold text-white">Staking pays:</span> 15% of whatever anyone unstakes goes to stakers (all of it if you're
+        the only one; otherwise split by staked amount, not holdings), paid in {token.symbol || "tokens"}. 5% of every unstake is burned,
+        so your share of supply grows. Staking is free; unstaking costs the 20%.
+      </p>
       <div className="flex gap-1">
         <input className={inpSm} placeholder="stake" inputMode="decimal" value={stakeAmt} onChange={(e) => setStakeAmt(e.target.value)} />
         {[25, 50, 100].map((p) => (
@@ -774,7 +779,7 @@ function PositionCard({ token, keys, busy, setBusy, say }: { token: Token; keys:
         disabled={busy || claimable <= 0n || !keys}
         onClick={() => keys && run(() => sendOp(keys, token.tokenId, { kind: "claim" }), "claim")}
       >
-        Claim {fmtXno(token.myClaimable)} XNO
+        Claim {fmtTok(token.myClaimable, token.decimals)} {token.symbol || "tokens"}
       </button>
       <button
         className="w-full rounded-none bg-white py-1.5 text-[11px] font-black uppercase text-black hover:bg-neutral-200 disabled:opacity-40"

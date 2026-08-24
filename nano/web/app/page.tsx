@@ -3165,7 +3165,7 @@ function StakeConfirm({
           </div>
         ) : (
           <div className="space-y-2 text-[13px] text-neutral-300">
-            <p>Staking itself is <span className="text-white font-black">free</span> and earns you XNO rebates.</p>
+            <p>Staking itself is <span className="text-white font-black">free</span> and earns you a share of every other holder's exit tax, paid in {symbol}.</p>
             <p>But be aware: <span className="text-white font-black">unstaking later is taxed 20%</span> (5% burned, 15% shared to other stakers) — so you'd get back <span className="text-white font-black">{fmtTok(back.toString(), decimals)} {symbol}</span> of the {fmtTok(amount.toString(), decimals)} {symbol} you stake. Stake to hold.</p>
           </div>
         )}
@@ -3331,9 +3331,16 @@ function StakeBox({
         />
       )}
       <div className="flex items-center justify-between text-[11px]">
-        <span className="text-neutral-400 font-bold">Stake · earn XNO rebates</span>
+        <span className="text-neutral-400 font-bold">Stake · earn from unstakers</span>
         <span className="text-neutral-500">staked {fmtTok(token.myStaked, token.decimals)} {tokSym(token)}</span>
       </div>
+      <p className="rounded-none border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] leading-relaxed text-neutral-300">
+        <span className="font-black text-white">How staking pays:</span> you get <span className="font-black text-white">15%</span> of whatever
+        anyone unstakes, paid in {tokSym(token)}. If you're the only one staking, you get all of it; if many are staking, it's split by
+        each person's <span className="font-black text-white">staked</span> amount — not by total holdings. Another{" "}
+        <span className="font-black text-white">5%</span> of every unstake is burned, so supply keeps decreasing and your share grows.
+        Staking is free; unstaking is what pays the 20%.
+      </p>
 
       <div className="flex gap-2">
         <div className="flex-1 space-y-1">
@@ -3387,7 +3394,7 @@ function StakeBox({
       )}
 
       <div className="flex items-center justify-between border-t border-neutral-800 pt-2">
-        <span className="text-[11px] text-neutral-500">claimable ≈ <span className="text-white font-bold">{fmtXno(token.myClaimable)} XNO</span></span>
+        <span className="text-[11px] text-neutral-500">claimable ≈ <span className="text-white font-bold">{fmtTok(token.myClaimable, token.decimals)} {tokSym(token)}</span></span>
         <button
           className="rounded-none bg-neutral-900 border border-neutral-600 px-3 py-1.5 text-[11px] font-bold text-white hover:bg-neutral-800 disabled:opacity-40"
           disabled={busy || claimable <= 0n}
