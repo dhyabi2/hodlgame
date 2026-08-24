@@ -65,12 +65,12 @@ export async function stats() {
   for (const [tokenId, s] of m.state) {
     const a = m.byToken.get(tokenId);
     tvl += s.poolXno;
-    holders += s.balances.size;
+    holders += a?.holders.length ?? s.balances.size; // liquid + staked, non-zero
     if (a) {
       for (const t of a.trades) if (now - t.time <= 86400) vol24 += BigInt(t.amountRaw);
       tokens.push({
         tokenId, ...meta(tokenId, m.meta.get(tokenId)),
-        priceRaw: a.priceRaw, marketCapRaw: a.marketCapRaw, holders: s.balances.size,
+        priceRaw: a.priceRaw, marketCapRaw: a.marketCapRaw, holders: a.holders.length,
         change24h: changePct(a.series, 86400), createdAt: a.launchTime,
       });
     }
@@ -222,13 +222,21 @@ export async function tokenExplorer(tokenId: string, holderCursor = 0) {
   const { deltas } = replayWithDeltas(m.events);
   const a = m.byToken.get(tokenId);
   const supply = s.supply;
-  const allHolders = [...s.balances.entries()].sort((x, y) => (y[1] > x[1] ? 1 : -1));
-  const holders = allHolders.slice(holderCursor, holderCursor + 50).map(([account, bal]) => ({
-    account, balance: bal.toString(), pct: supply > 0n ? Number((bal * 10_000n) / supply) / 100 : 0,
+  // One holder list for the whole app: analytics' (liquid + staked, sorted by
+  // total). A balances-only list here dropped stakers and disagreed with the
+  // coin page's Top holders.
+  const allHolders = (a?.holders ?? []).map((h) => ({
+    account: h.account,
+    total: BigInt(h.balanceRaw) + BigInt(h.stakedRaw ?? "0"),
+    staked: h.stakedRaw ?? "0",
+    pct: h.pct,
   }));
-  // Concentration: top-10 share of circulating (balances).
-  const circ = [...s.balances.values()].reduce((x, y) => x + y, 0n);
-  const top10 = allHolders.slice(0, 10).reduce((x, [, y]) => x + y, 0n);
+  const holders = allHolders.slice(holderCursor, holderCursor + 50).map((h) => ({
+    account: h.account, balance: h.total.toString(), staked: h.staked, pct: h.pct,
+  }));
+  // Concentration: top-10 share of circulating (all holdings, liquid + staked).
+  const circ = allHolders.reduce((x, h) => x + h.total, 0n);
+  const top10 = allHolders.slice(0, 10).reduce((x, h) => x + h.total, 0n);
   const top10Pct = circ > 0n ? Number((top10 * 10_000n) / circ) / 100 : 0;
 
   const poolPub = m.idx.getChainPools().get(tokenId) ?? null;

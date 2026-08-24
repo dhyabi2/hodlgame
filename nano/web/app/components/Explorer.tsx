@@ -532,7 +532,11 @@ function TokenDetailX({ d, go }: { d: any; go: (v: View) => void }) {
         {holders.map((h: any) => (
           <div key={h.account} className="flex items-center justify-between text-xs py-1 border-t border-neutral-800/60">
             <span className={`${mono} ${linkC}`} onClick={() => go({ kind: "account", q: h.account })}>{short(h.account, 12)}</span>
-            <span>{fmtTok(h.balance, d.decimals)} <span className="text-neutral-500">({h.pct.toFixed(2)}%)</span></span>
+            <span>
+              {fmtTok(h.balance, d.decimals)}
+              {h.staked && BigInt(h.staked) > 0n && <span className="text-neutral-600"> · {fmtTok(h.staked, d.decimals)} staked</span>}{" "}
+              <span className="text-neutral-500">({h.pct.toFixed(2)}%)</span>
+            </span>
           </div>
         ))}
         {hnext != null && <button onClick={moreHolders} className="mt-3 w-full rounded-none border border-neutral-800 bg-neutral-950 py-2 text-xs font-bold text-neutral-300 hover:bg-neutral-900 hover:border-neutral-700">Load more</button>}

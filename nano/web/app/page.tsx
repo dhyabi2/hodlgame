@@ -3449,23 +3449,26 @@ function HoldersPanel({ holders, creator, decimals }: { holders: Holder[]; creat
   return (
     <div className="rounded-none border border-neutral-800 bg-neutral-950 p-4">
       <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400 mb-2">Top holders</p>
-      <div className="space-y-1.5 max-h-72 overflow-y-auto">
-        {top.map((h, i) => (
-          <div key={i} className="flex items-center justify-between text-xs">
-            <span className="text-neutral-500 font-mono flex items-center gap-1">
-              {i + 1}. {short(h.account)} {h.account === creator && <span className="text-white">dev</span>}
-            </span>
-            <div className="flex items-center gap-2">
-              <span className="text-neutral-400">
-                {fmtTok((BigInt(h.balanceRaw) + BigInt(h.stakedRaw ?? "0")).toString(), decimals)}
-                {BigInt(h.stakedRaw ?? "0") > 0n && (
-                  <span className="text-neutral-600"> · {fmtTok(h.stakedRaw, decimals)} staked</span>
-                )}
+      {/* Fixed columns (rank+address | holding | %) with tabular digits so the
+          list reads as a table; the staked portion sits as a small second
+          line under the holding instead of stretching the amount column. */}
+      <div className="space-y-1 max-h-72 overflow-y-auto">
+        {top.map((h, i) => {
+          const staked = BigInt(h.stakedRaw ?? "0");
+          const total = BigInt(h.balanceRaw) + staked;
+          return (
+            <div key={i} className="grid grid-cols-[1fr_auto_3rem] items-center gap-x-3 text-xs">
+              <span className="text-neutral-500 font-mono truncate">
+                {i + 1}. {short(h.account)} {h.account === creator && <span className="text-white">dev</span>}
               </span>
-              <span className="text-neutral-500 w-12 text-right">{h.pct.toFixed(2)}%</span>
+              <span className="text-right tabular-nums text-neutral-400 leading-tight">
+                {fmtTok(total.toString(), decimals)}
+                {staked > 0n && <span className="block text-[10px] text-neutral-600">{fmtTok(staked.toString(), decimals)} staked</span>}
+              </span>
+              <span className="text-right tabular-nums text-neutral-500">{h.pct.toFixed(2)}%</span>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
