@@ -646,7 +646,7 @@ export default function Home() {
           </div>
         ) : (
           <div className="w-full max-w-xl mx-auto space-y-4">
-            <WalletPanel keys={keys} hasWallet={hasWallet} unlock={unlock} lock={lock} remove={remove} say={say} />
+            <WalletPanel keys={keys} hasWallet={hasWallet} unlock={unlock} lock={lock} remove={remove} say={say} tokens={tokens} />
             {keys && <Portfolio tokens={tokens} onSelect={(id) => setSelectedId(id)} account={keys.address} sendOp={sendOp} busy={busy} usd={usd} />}
           </div>
         )}
@@ -781,11 +781,13 @@ function ConnectedWallet({
   lock,
   remove,
   say,
+  tokens,
 }: {
   keys: Keys;
   lock: () => void;
   remove: () => void;
   say: (s: string) => void;
+  tokens: Token[];
 }) {
   const [balance, setBalance] = useState<string | null>(null);
   const [receiving, setReceiving] = useState(false);
@@ -795,6 +797,13 @@ function ConnectedWallet({
   const [revealPw, setRevealPw] = useState("");
   const [revealed, setRevealed] = useState("");
   const [revealErr, setRevealErr] = useState("");
+  // ── Send (XNO or a held token) ────────────────────────────────────────────
+  const [showSend, setShowSend] = useState(false);
+  const [sendAsset, setSendAsset] = useState<"XNO" | string>("XNO"); // "XNO" | tokenId
+  const [sendTo, setSendTo] = useState("");
+  const [sendAmt, setSendAmt] = useState("");
+  const [sending, setSending] = useState(false);
+  const [ackFloor, setAckFloor] = useState(false);
 
   const refresh = async () => {
     try {
@@ -905,6 +914,96 @@ function ConnectedWallet({
     setRevealErr("");
   };
 
+  const heldTokens = tokens.filter((t) => BigInt(t.myBalance || "0") > 0n);
+  const selToken = sendAsset === "XNO" ? null : heldTokens.find((t) => t.tokenId === sendAsset) ?? null;
+  // XNO the chain requires this account to KEEP: the sum of Direct-Settlement
+  // earmark floors across all tokens (the multi-token layer checks the sum —
+  // core/multi.ts). A send that dips below it voids positions proportionally
+  // ("collateral defection"), so the form warns and requires an explicit
+  // opt-in instead of letting a user shrink their own coins by accident.
+  const floorLocked = tokens.reduce((s, t) => s + BigInt(t.myFloor || "0"), 0n);
+  const availXno = (() => {
+    if (balance == null) return 0n;
+    const a = BigInt(balance) - floorLocked;
+    return a > 0n ? a : 0n;
+  })();
+  // Exact raw → decimal string (no display truncation), so MAX round-trips
+  // through toRaw() without losing dust.
+  const fmtExact = (raw: bigint, dec: number) => {
+    const d = 10n ** BigInt(dec);
+    const frac = (raw % d).toString().padStart(dec, "0").replace(/0+$/, "");
+    return frac ? `${raw / d}.${frac}` : (raw / d).toString();
+  };
+  const xnoDips = (() => {
+    if (sendAsset !== "XNO" || balance == null) return false;
+    try {
+      const raw = toRaw(sendAmt, 30);
+      return raw > 0n && BigInt(balance) - raw < floorLocked;
+    } catch {
+      return false;
+    }
+  })();
+
+  async function doSend() {
+    const to = sendTo.trim();
+    if (!isNanoAddr(to)) return say("recipient must be a valid nano_ address");
+    if (to === keys.address) return say("that is your own address");
+    setSending(true);
+    try {
+      if (sendAsset === "XNO") {
+        const raw = toRaw(sendAmt, 30);
+        if (raw <= 0n) return say("enter XNO amount");
+        const info = await rpc("account_info", { account: keys.address, representative: "true" });
+        if (!info.frontier) return say("nothing to send — wallet is empty");
+        const bal = BigInt(info.balance);
+        if (raw > bal) return say(`you only have ${fmtXno(info.balance)} XNO`);
+        if (bal - raw < floorLocked && !ackFloor) return say("this send dips into position collateral — tick the confirmation first");
+        const work = (await rpc("work_generate", { hash: info.frontier, difficulty: "fffffff800000000" })).work;
+        const blk = buildBlock(keys.secretKey, {
+          work,
+          previous: info.frontier,
+          representative: info.representative,
+          balance: (bal - raw).toString(),
+          link: nanocurrency.derivePublicKey(to),
+        });
+        const r = await rpc("process", { json_block: "true", block: blk });
+        say(`sent ${fmtXno(raw.toString())} XNO ✓ ${String(r.hash).slice(0, 10)}…`);
+      } else {
+        if (!selToken) return say("pick an asset to send");
+        const raw = toRaw(sendAmt, selToken.decimals);
+        if (raw <= 0n) return say("enter amount");
+        if (raw > BigInt(selToken.myBalance || "0")) return say(`you only hold ${fmtTok(selToken.myBalance, selToken.decimals)} ${tokSym(selToken)}`);
+        // On-chain token transfer: a fragment pair (to: 32B + amount), each
+        // carrier a 1-raw send — same op the coin page's transfer uses.
+        const [fragA, fragB] = encodeFragLinks(selToken.tokenId, { kind: "transfer", to, amount: raw });
+        let hash = "";
+        for (const link of [fragA, fragB]) {
+          const info = await rpc("account_info", { account: keys.address, representative: "true" });
+          if (!info.frontier) return say("fund your wallet with a little XNO first — token ops cost 1 raw each");
+          const work = (await rpc("work_generate", { hash: info.frontier, difficulty: "fffffff800000000" })).work;
+          const blk = buildBlock(keys.secretKey, {
+            work,
+            previous: info.frontier,
+            representative: info.representative,
+            balance: (BigInt(info.balance) - 1n).toString(),
+            link,
+          });
+          hash = (await rpc("process", { json_block: "true", block: blk })).hash;
+        }
+        say(`sent ${fmtTok(raw.toString(), selToken.decimals)} ${tokSym(selToken)} ✓ ${hash.slice(0, 10)}…`);
+      }
+      setSendAmt("");
+      setSendTo("");
+      setAckFloor(false);
+      markWalletDirty();
+      await refresh();
+    } catch (e: any) {
+      say("send failed: " + (e?.message ?? e));
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
     <div className="rounded-none border border-neutral-800 bg-neutral-950 p-5 space-y-4">
       <div className="flex items-end justify-between gap-3">
@@ -965,13 +1064,19 @@ function ConnectedWallet({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <button
           className="rounded-none border border-neutral-800 py-3 text-sm font-bold text-neutral-200 hover:border-white disabled:opacity-40"
           disabled={receiving}
           onClick={() => receiveAll(true)}
         >
-          {receiving ? "receiving…" : "Receive pending"}
+          {receiving ? "receiving…" : "Receive"}
+        </button>
+        <button
+          className={"rounded-none border py-3 text-sm font-bold hover:border-white " + (showSend ? "border-white text-white" : "border-neutral-800 text-neutral-200")}
+          onClick={() => setShowSend((v) => !v)}
+        >
+          Send
         </button>
         <button
           className="rounded-none border border-neutral-800 py-3 text-sm font-bold text-neutral-200 hover:border-white"
@@ -980,6 +1085,75 @@ function ConnectedWallet({
           Back up seed
         </button>
       </div>
+
+      {showSend && (
+        <div className="rounded-none border border-neutral-700 bg-neutral-900 p-3 space-y-2">
+          <p className="text-[11px] font-bold text-neutral-300">Send from this wallet</p>
+          <select
+            className={inputC}
+            value={sendAsset}
+            onChange={(e) => { setSendAsset(e.target.value); setSendAmt(""); setAckFloor(false); }}
+          >
+            <option value="XNO">XNO — {balance == null ? "…" : fmtXno(balance)}</option>
+            {heldTokens.map((t) => (
+              <option key={t.tokenId} value={t.tokenId}>
+                {tokSym(t)} — {fmtTok(t.myBalance, t.decimals)}
+              </option>
+            ))}
+          </select>
+          <input className={inputC} placeholder="recipient (nano_…)" value={sendTo} onChange={(e) => setSendTo(e.target.value)} />
+          <div className="flex gap-2">
+            <input
+              className={inputC + " flex-1"}
+              inputMode="decimal"
+              placeholder={sendAsset === "XNO" ? "amount (XNO)" : `amount (${selToken ? tokSym(selToken) : "tokens"})`}
+              value={sendAmt}
+              onChange={(e) => setSendAmt(e.target.value)}
+            />
+            <button
+              className="rounded-none border border-neutral-800 px-3 text-[11px] font-black text-neutral-300 hover:border-white"
+              onClick={() =>
+                setSendAmt(
+                  sendAsset === "XNO"
+                    ? fmtExact(availXno, 30)
+                    : selToken
+                      ? fmtExact(BigInt(selToken.myBalance || "0"), selToken.decimals)
+                      : ""
+                )
+              }
+            >
+              MAX
+            </button>
+          </div>
+          {sendAsset === "XNO" && floorLocked > 0n && (
+            <p className="text-[11px] text-neutral-500">
+              {fmtXno(floorLocked.toString())} XNO backs your coin positions as collateral — free to send:{" "}
+              {fmtXno(availXno.toString())} XNO. MAX fills the free part.
+            </p>
+          )}
+          {xnoDips && (
+            <label className="flex items-start gap-2 text-[11px] text-white">
+              <input type="checkbox" className="mt-0.5" checked={ackFloor} onChange={(e) => setAckFloor(e.target.checked)} />
+              <span>
+                This send dips into that collateral. The chain will accept it, but your coin positions shrink
+                proportionally to what leaves — I understand.
+              </span>
+            </label>
+          )}
+          {selToken?.direct && (
+            <p className="text-[11px] text-neutral-500">
+              sending {tokSym(selToken)} moves the tokens only — your XNO collateral stays locked until you sell.
+            </p>
+          )}
+          <button className={btn + " w-full"} disabled={sending} onClick={doSend}>
+            {sending ? "sending…" : `Send ${sendAsset === "XNO" ? "XNO" : selToken ? tokSym(selToken) : ""}`}
+          </button>
+          <p className="text-[10px] text-neutral-500">
+            sends are irreversible — double-check the recipient address. Token transfers appear for the recipient
+            after the next index refresh (~seconds).
+          </p>
+        </div>
+      )}
 
       {reveal && (
         <div className="rounded-none border border-neutral-700 bg-neutral-900 p-3 space-y-2">
@@ -1024,6 +1198,7 @@ function WalletPanel({
   lock,
   remove,
   say,
+  tokens,
 }: {
   keys: Keys | null;
   hasWallet: boolean;
@@ -1031,6 +1206,7 @@ function WalletPanel({
   lock: () => void;
   remove: () => void;
   say: (s: string) => void;
+  tokens: Token[];
 }) {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -1093,7 +1269,7 @@ function WalletPanel({
   }
 
   if (keys) {
-    return <ConnectedWallet keys={keys} lock={lock} remove={remove} say={say} />;
+    return <ConnectedWallet keys={keys} lock={lock} remove={remove} say={say} tokens={tokens} />;
   }
 
   if (hasWallet) {

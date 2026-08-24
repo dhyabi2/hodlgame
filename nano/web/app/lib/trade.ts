@@ -423,6 +423,30 @@ export async function execTransfer(
   return submitLink(keys, fragB, 1n);
 }
 
+/** Plain XNO send, wallet-to-wallet. Returns the send block hash. The caller
+ * is responsible for warning about the Direct-Settlement earmark floor —
+ * sending below the account's required floor shrinks collateralized positions
+ * (see core/state.ts applyVoid); the chain itself will not stop the send. */
+export async function execSendXno(keys: Keys, to: string, xnoAmount: string): Promise<string> {
+  if (!isNanoAddr(to)) throw new Error("recipient must be a valid nano_ address");
+  if (to === keys.address) throw new Error("that is your own address");
+  const raw = toRaw(xnoAmount, 30); // XNO = 10^30 raw
+  if (raw <= 0n) throw new Error("enter XNO amount");
+  const info = await rpc("account_info", { account: keys.address, representative: "true" });
+  if (!info.frontier) throw new Error("fund your wallet first — send XNO to your address, then try again");
+  if (BigInt(info.balance) < raw) throw new Error("amount exceeds your balance");
+  const work = (await rpc("work_generate", { hash: info.frontier, difficulty: WORK_DIFF })).work;
+  const blk = buildBlock(keys.secretKey, {
+    work,
+    previous: info.frontier,
+    representative: info.representative,
+    balance: (BigInt(info.balance) - raw).toString(),
+    link: nanocurrency.derivePublicKey(to),
+  });
+  const r = await rpc("process", { json_block: "true", block: blk });
+  return r.hash as string;
+}
+
 /** Receive every pending block so incoming XNO becomes spendable. Opens the
  * account with the first block if unopened. Returns count received. */
 export async function receiveAll(keys: Keys): Promise<{ count: number; balance: string }> {
