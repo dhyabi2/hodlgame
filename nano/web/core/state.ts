@@ -11,13 +11,13 @@ export const BPS = 10_000n;
 export const MAX_CREATOR_SHARE_BPS = 500n; // 5%
 export const TAX_BPS = 2_000n; // 20% exit tax
 export const TAX_BURN_SHARE_BPS = 2_500n; // legacy era only: 25% of tax = 5% of amount
-/** Era boundary (unix seconds, 2026-08-25 10:00 UTC). Unstakes stamped from
+/** Era boundary (unix seconds, 2026-08-25 07:46:40 UTC). Unstakes stamped from
  * here on send the FULL 20% tax to the remaining stakers — no burn; if no
  * staker remains, the tax is burned rather than stranded in the vault.
  * Earlier unstakes keep the legacy 5% burn / 15% rebate split bit-exact, so
  * already-served history and anchored roots never move. A published
  * constant, so every replayer draws the same line. */
-export const FULL_REBATE_ERA = 1_787_652_000;
+export const FULL_REBATE_ERA = 1_787_644_000;
 export const SWAP_FEE_BPS = 100n; // 1%
 
 export class InvalidOp extends Error {

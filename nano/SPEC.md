@@ -109,7 +109,7 @@ BPS = 10_000
 MAX_CREATOR_SHARE_BPS = 500        // 5%
 TAX_BPS = 2_000                    // 20% exit tax
 TAX_BURN_SHARE_BPS = 2_500         // LEGACY era only: 25% of tax = 5% of amount, burned
-FULL_REBATE_ERA = 1_787_652_000    // unstakes stamped ≥ this: whole tax to stakers, no burn
+FULL_REBATE_ERA = 1_787_644_000    // unstakes stamped ≥ this: whole tax to stakers, no burn
 SWAP_FEE_BPS = 100                 // 1%
 ```
 

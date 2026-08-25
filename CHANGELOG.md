@@ -7,7 +7,7 @@ everything lands on `main`.
 ## [Unreleased]
 
 ### Changed — 2026-08-25 · Unstake tax: full 20% to stakers, no burn (era-gated)
-- From `FULL_REBATE_ERA` (2026-08-25 10:00 UTC) the whole 20% exit tax goes to
+- From `FULL_REBATE_ERA` (2026-08-25 07:46 UTC) the whole 20% exit tax goes to
   the remaining stakers; nothing is burned. If the last staker leaves, the tax
   is burned instead of stranding in the reward vault (previously 15% could be
   orphaned that way). Unstakes before the boundary keep the legacy 5% burn /
