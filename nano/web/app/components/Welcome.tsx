@@ -31,7 +31,7 @@ const MECHANISMS: { n: string; title: string; body: string }[] = [
   {
     n: "02",
     title: "Quitters pay the holders",
-    body: "Leaving early has a price — 20% of every unstake. A quarter of that tax is burned forever, so everyone's share of the coin grows. The rest is paid out, in real XNO, to everyone still staked. Elsewhere, the fastest exit wins. Here, patience is the strategy that gets paid.",
+    body: "Leaving early has a price — 20% of every unstake, and every bit of it is paid out, in the coin itself, to everyone still staked. Elsewhere, the fastest exit wins. Here, patience is the strategy that gets paid.",
   },
   {
     n: "03",

@@ -3143,8 +3143,7 @@ function StakeConfirm({
 }) {
   const pct = (n: bigint) => (amount * n) / 100n;
   const back = pct(80n); // received on unstake
-  const burn = pct(5n); // permanent deflation
-  const rebate = pct(15n); // to remaining stakers
+  const rebate = pct(20n); // the whole tax, to remaining stakers
   const isUnstake = kind === "unstake";
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" onClick={onCancel}>
@@ -3161,14 +3160,13 @@ function StakeConfirm({
             <p>Unstaking is taxed <span className="text-white font-black">20%</span>. On {fmtTok(amount.toString(), decimals)} {symbol}:</p>
             <div className="rounded-none border border-neutral-800 divide-y divide-neutral-800 text-xs">
               <Line k="you receive" v={`${fmtTok(back.toString(), decimals)} ${symbol}`} strong />
-              <Line k="burned forever (5%)" v={`${fmtTok(burn.toString(), decimals)} ${symbol}`} />
-              <Line k="paid to other stakers (15%)" v={`${fmtTok(rebate.toString(), decimals)} ${symbol}`} />
+              <Line k="paid to other stakers (20%)" v={`${fmtTok(rebate.toString(), decimals)} ${symbol}`} />
             </div>
           </div>
         ) : (
           <div className="space-y-2 text-[13px] text-neutral-300">
             <p>Staking itself is <span className="text-white font-black">free</span> and earns you a share of every other holder's exit tax, paid in {symbol}.</p>
-            <p>But be aware: <span className="text-white font-black">unstaking later is taxed 20%</span> (5% burned, 15% shared to other stakers) — so you'd get back <span className="text-white font-black">{fmtTok(back.toString(), decimals)} {symbol}</span> of the {fmtTok(amount.toString(), decimals)} {symbol} you stake. Stake to hold.</p>
+            <p>But be aware: <span className="text-white font-black">unstaking later is taxed 20%</span> (all of it shared to the other stakers) — so you'd get back <span className="text-white font-black">{fmtTok(back.toString(), decimals)} {symbol}</span> of the {fmtTok(amount.toString(), decimals)} {symbol} you stake. Stake to hold.</p>
           </div>
         )}
 
@@ -3244,8 +3242,7 @@ function PaperHandsReceipt({
             <>
               <Line k="unstaked" v={`${fmtTok(tokens.toString(), decimals)} ${symbol}`} />
               <Line k="you kept (80%)" v={`${fmtTok(pct(80n).toString(), decimals)} ${symbol}`} strong />
-              <Line k="burned forever (5%)" v={`−${fmtTok(pct(5n).toString(), decimals)}`} />
-              <Line k="paid to hodlers (15%)" v={`−${fmtTok(pct(15n).toString(), decimals)}`} />
+              <Line k="paid to hodlers (20%)" v={`−${fmtTok(pct(20n).toString(), decimals)}`} />
             </>
           ) : (
             <>
@@ -3337,11 +3334,11 @@ function StakeBox({
         <span className="text-neutral-500">staked {fmtTok(token.myStaked, token.decimals)} {tokSym(token)}</span>
       </div>
       <p className="rounded-none border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] leading-relaxed text-neutral-300">
-        <span className="font-black text-white">How staking pays:</span> you get <span className="font-black text-white">15%</span> of whatever
-        anyone unstakes, paid in {tokSym(token)}. If you're the only one staking, you get all of it; if many are staking, it's split by
-        each person's <span className="font-black text-white">staked</span> amount — not by total holdings. Another{" "}
-        <span className="font-black text-white">5%</span> of every unstake is burned, so supply keeps decreasing and your share grows.
-        Staking is free; unstaking is what pays the 20%.
+        <span className="font-black text-white">How staking pays:</span> every unstake is taxed{" "}
+        <span className="font-black text-white">20%</span>, and all of it goes to the stakers who stay, paid in {tokSym(token)}. If you're
+        the only one staking, you get all of it; if many are staking, it's split by each person's{" "}
+        <span className="font-black text-white">staked</span> amount — not by total holdings. Nothing is burned. Staking is free;
+        unstaking is what pays the 20%.
       </p>
 
       <div className="flex gap-2">
@@ -3392,7 +3389,7 @@ function StakeBox({
         <ActionBtn disabled={busy || staked <= 0n} onClick={doUnstake}>Unstake</ActionBtn>
       </div>
       {unstakeAmt && Number(unstakeAmt) > 0 && (
-        <p className="text-[10px] text-white">20% exit tax on unstake (5% burned, 15% to stakers)</p>
+        <p className="text-[10px] text-white">20% exit tax on unstake — all of it goes to the remaining stakers</p>
       )}
 
       <div className="flex items-center justify-between border-t border-neutral-800 pt-2">

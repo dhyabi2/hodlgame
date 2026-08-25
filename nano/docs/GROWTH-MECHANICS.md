@@ -19,7 +19,7 @@
 ## The one idea everything else hangs on
 
 HodlGame already has a **positive-sum-to-hold / value-leaks-on-exit** core: the
-20% unstake tax burns 5% and pays **15% pro-rata to everyone still staked**. So
+20% unstake tax is paid **in full, pro-rata, to everyone still staked**. So
 in any token with real interest, the Nash equilibrium for a rational holder is:
 
 > **hold, and recruit more holders** — because (a) your rebate grows every time
@@ -87,7 +87,7 @@ the protocol, not extracting from it.
 **Deterministic encoding.** A one-time `referred-by` op (first-write-wins,
 immutable) binds `referee → referrer` in replayed state; the indexer builds an
 immutable `ReferralMap` from public blocks. On each unstake, settlement splits
-the tax `5% burn / 13% stakers / 2% referrer` and credits the referrer's banked
+the tax `18% stakers / 2% referrer` and credits the referrer's banked
 XNO (claimed with the existing `claim` op; on legacy pooled tokens paid from pool custody — on v2 zero-custody tokens rewards are token-denominated and settle like any other position). All
 arithmetic, fully re-derivable.
 

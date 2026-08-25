@@ -6,6 +6,15 @@ everything lands on `main`.
 
 ## [Unreleased]
 
+### Changed — 2026-08-25 · Unstake tax: full 20% to stakers, no burn (era-gated)
+- From `FULL_REBATE_ERA` (2026-08-25 10:00 UTC) the whole 20% exit tax goes to
+  the remaining stakers; nothing is burned. If the last staker leaves, the tax
+  is burned instead of stranding in the reward vault (previously 15% could be
+  orphaned that way). Unstakes before the boundary keep the legacy 5% burn /
+  15% rebate split bit-exact — the state machine now receives the carrier
+  block's timestamp purely to pick the era, so history and anchored roots do
+  not move. Docs, previews, receipts and the staking explainer updated.
+
 ### Fixed — 2026-08-24 · Time-primary canonical order (era cut) — stops retroactive position wipes
 - **Root cause** (user reports: a bought position vanished; a
   stake "unstaked itself"): canonical order was Lamport-primary, and Lamport

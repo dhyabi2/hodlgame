@@ -754,9 +754,9 @@ function PositionCard({ token, keys, busy, setBusy, say }: { token: Token; keys:
         )}
       </div>
       <p className="border border-neutral-800 bg-neutral-900 px-2 py-1.5 text-[10px] leading-relaxed text-neutral-400">
-        <span className="font-bold text-white">Staking pays:</span> 15% of whatever anyone unstakes goes to stakers (all of it if you're
-        the only one; otherwise split by staked amount, not holdings), paid in {token.symbol || "tokens"}. 5% of every unstake is burned,
-        so your share of supply grows. Staking is free; unstaking costs the 20%.
+        <span className="font-bold text-white">Staking pays:</span> every unstake is taxed 20% and all of it goes to the stakers who stay
+        (all of it if you're the only one; otherwise split by staked amount, not holdings), paid in {token.symbol || "tokens"}. Nothing is
+        burned. Staking is free; unstaking costs the 20%.
       </p>
       <div className="flex gap-1">
         <input className={inpSm} placeholder="stake" inputMode="decimal" value={stakeAmt} onChange={(e) => setStakeAmt(e.target.value)} />

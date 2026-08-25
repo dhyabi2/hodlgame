@@ -57,7 +57,7 @@ verify the server with their own machine.
 | **Zero custody** (v2 tokens) | No pool account exists. Buys pay queued sellers wallet-to-wallet or self-collateralize in the buyer's own wallet (earmarks, policed against signed block balances). Sells settle principal instantly from the seller's own collateral; only realized appreciation queues, paid by future buys with a coverage haircut. |
 | **Anti-rug, mechanical** | A creator dumping the 5% into fresh virtual liquidity receives exactly **zero** until real buyers commit real collateral. |
 | **Holding is the game** | Staking earns a share of the XNO rebate vault, distributed **pro-rata by stake** (a bounded `rewardPerShare` accumulator — *not* block height, which an account can inflate). |
-| **Exit tax** | **Unstaking** pays a 20% tax: **5% burned** (permanent deflation) + **15% redistributed** to everyone still staked. |
+| **Exit tax** | **Unstaking** pays a 20% tax, **redistributed in full** to everyone still staked (pro-rata by stake). Nothing is burned; if the last staker leaves, the tax is burned rather than stranded. |
 | **Consensus decimals** | A token's decimals are pinned in its launch block byte, so every indexer agrees on scale without trusting metadata. |
 | **Keyless ledger** | v2 tokens have **no pool account at all**; legacy pooled tokens' accounts are derived from chain data. There is no admin key over the token ledger. |
 

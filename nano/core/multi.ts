@@ -13,6 +13,9 @@ export interface MultiBlock {
   op: Op;
   sender: string;
   height: bigint;
+  /** Carrier block's network-observed time (seconds). Consensus input only
+   * for era-gated rules (state.ts FULL_REBATE_ERA); absent → legacy. */
+  timestamp?: number;
 }
 
 export function multiEmpty(): MultiState {
@@ -52,7 +55,7 @@ function applyBalanceObservation(m: MultiState, account: string, raw: bigint): M
 /** Apply one op to the token's own state (launching it on first use). */
 export function applyBlock(m: MultiState, b: MultiBlock): MultiState {
   if (b.op.kind === "balance") return applyBalanceObservation(m, b.sender, b.op.raw);
-  const next = applyOp(tokenState(m, b.tokenId), b.op, b.sender, b.height);
+  const next = applyOp(tokenState(m, b.tokenId), b.op, b.sender, b.height, b.timestamp);
   next.id = b.tokenId;
   const out = new Map(m);
   out.set(b.tokenId, next);

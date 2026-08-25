@@ -88,7 +88,7 @@ the master seed alone (`core/../server/custody.ts`).
 ```
 State {
   id, name, symbol, decimals, image, launched
-  supply              // total outstanding; only ever decreases (burn)
+  supply              // total outstanding; only ever decreases (legacy burn / last-staker burn)
   creator, creatorShare
   balances: account -> tokens
   staked:   account -> tokens
@@ -108,7 +108,8 @@ PRECISION = 10^12
 BPS = 10_000
 MAX_CREATOR_SHARE_BPS = 500        // 5%
 TAX_BPS = 2_000                    // 20% exit tax
-TAX_BURN_SHARE_BPS = 2_500         // 25% of tax = 5% of amount, burned
+TAX_BURN_SHARE_BPS = 2_500         // LEGACY era only: 25% of tax = 5% of amount, burned
+FULL_REBATE_ERA = 1_787_652_000    // unstakes stamped ≥ this: whole tax to stakers, no burn
 SWAP_FEE_BPS = 100                 // 1%
 ```
 
@@ -138,8 +139,12 @@ SWAP_FEE_BPS = 100                 // 1%
 totalStaked += amount` (settle `rewardDebt` first).
 
 **unstake(amount)** — `staked[from] >= amount`; settle points.
-- `tax = amount*TAX_BPS/BPS`; `burn = tax*TAX_BURN_SHARE_BPS/BPS`;
-  `rebate = tax-burn`; `toUser = amount-tax`.
+- `tax = amount*TAX_BPS/BPS`; `toUser = amount-tax`. Era by the carrier
+  block's timestamp: **before `FULL_REBATE_ERA`** `burn =
+  tax*TAX_BURN_SHARE_BPS/BPS`, `rebate = tax-burn` (legacy 5%/15%, kept
+  bit-exact); **from `FULL_REBATE_ERA`** `burn = 0`, `rebate = tax` while any
+  stake remains after the unstake, else `burn = tax` (never stranded in the
+  vault).
 - `supply -= burn` (permanent deflation); `rebateVault += rebate`;
   `balances[from] += toUser`; `staked[from] -= amount; totalStaked -= amount`.
 

@@ -147,9 +147,11 @@ HodlGame inverts that with two protocol rules:
 - **Staking pays holders.** Stake your tokens to earn a share of the reward
   vault, distributed **pro‑rata by stake** using a bounded `rewardPerShare`
   accumulator (not block height, which an account could inflate).
-- **Quitters pay the stayers.** **Unstaking costs a 20% exit tax: 5% is burned
-  forever** (so everyone's share of the supply grows) and **15% is redistributed
-  to everyone still staked**, in real value.
+- **Quitters pay the stayers.** **Unstaking costs a 20% exit tax, and all of
+  it is redistributed to everyone still staked**, pro-rata by stake, in the
+  coin's own tokens. (If the last staker leaves, the tax is burned rather than
+  stranded. Before 2026-08-25 the split was 5% burn / 15% to stakers; that
+  history replays unchanged.)
 
 The house edge points at the *quitters*, not at you. Patience is the strategy
 that gets paid — hence "the game where holding wins."

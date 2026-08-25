@@ -22,7 +22,7 @@ top-level [README](../README.md) has the feature overview and architecture diagr
 core/       deterministic core (no network, no keys) — the trust model
   ops.ts        operation types (incl. Direct-Settlement launch 0x0b + balance observations)
   state.ts      state machine: launch (5% cap), transfer, buy/sell (AMM),
-                stake/unstake (20% unstake tax = 5% burn + 15% rebate), claim, liquidity;
+                stake/unstake (20% unstake tax, paid in full to remaining stakers), claim, liquidity;
                 direct tokens: earmarks, ratchet floors, queue + coverage haircut, voiding
   oplink.ts     compact op <-> 32-byte block link (decimals pinned in the launch byte)
   fraglink.ts   two-amount ops (sell/transfer/buy/seedLiq/addLiq) across chained blocks
