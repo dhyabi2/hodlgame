@@ -1,6 +1,6 @@
 # Proposal: HodlGame Static — a serverless launchpad + DEX in one HTML page
 
-**Status:** proposal (not started) · **Scope:** separate project/repo · **Author:** drafted 2026-08-25
+**Status:** parked — future consideration only, not scheduled for implementation (owner decision 2026-08-25) · **Scope:** separate project/repo · **Author:** drafted 2026-08-25
 
 ## 1. One-paragraph summary
 
