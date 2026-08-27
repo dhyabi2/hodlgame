@@ -5,6 +5,7 @@ import { applyBlock, multiEmpty, type MultiState } from "../core/multi";
 import { fixpointOrder } from "../indexer/replay";
 import type { IndexedEvent } from "../indexer/multiIndexer";
 import { clampDecimals } from "./validate";
+import { emptyExitLedger, preExit, recordExit, type ExitLedger, type PreExit } from "./exits";
 
 export interface Holder {
   account: string;
@@ -45,6 +46,8 @@ export interface TokenAnalytics {
   series: PricePoint[];
   buyVolumeRaw: string;
   sellVolumeRaw: string;
+  /** "Exit Pays You": every unstake as a verifiable payout event (server/exits.ts). */
+  exits: ExitLedger;
 }
 
 /** XNO-raw price of one whole token. */
@@ -79,6 +82,7 @@ export function analyze(events: IndexedEvent[]): Analytics {
   const tradesMap = new Map<string, TradeEvent[]>();
   const buyVol = new Map<string, bigint>();
   const sellVol = new Map<string, bigint>();
+  const exitsMap = new Map<string, ExitLedger>();
 
   const timeFor = (tokenId: string, ev: IndexedEvent): number => {
     const t = ev.timestamp ?? Number(ev.height);
@@ -103,6 +107,10 @@ export function analyze(events: IndexedEvent[]): Analytics {
       if (!pre.direct) out = sellXno;
     }
 
+    // Snapshot stakes before an unstake so the exit payout can be attributed
+    // to each remaining staker with the ledger's own rounding.
+    const preX: PreExit | null = ev.op.kind === "unstake" && pre ? preExit(pre) : null;
+
     let next;
     try {
       next = applyBlock(s, ev);
@@ -115,6 +123,12 @@ export function analyze(events: IndexedEvent[]): Analytics {
 
     if (ev.op.kind === "launch") {
       launchTime.set(ev.tokenId, ev.timestamp ?? Number(ev.height));
+    }
+
+    if (preX && ev.op.kind === "unstake") {
+      const led = exitsMap.get(ev.tokenId) ?? emptyExitLedger();
+      recordExit(led, preX, st, { tokenId: ev.tokenId, hash: ev.hash, sender: ev.sender, amount: ev.op.amount, time: timeFor(ev.tokenId, ev) });
+      exitsMap.set(ev.tokenId, led);
     }
 
     // Exact XNO-out computed at the sell's execution point (pre-sell reserves),
@@ -194,6 +208,7 @@ export function analyze(events: IndexedEvent[]): Analytics {
       series: seriesMap.get(tokenId) ?? [],
       buyVolumeRaw: (buyVol.get(tokenId) ?? 0n).toString(),
       sellVolumeRaw: (sellVol.get(tokenId) ?? 0n).toString(),
+      exits: exitsMap.get(tokenId) ?? emptyExitLedger(),
     });
   }
 

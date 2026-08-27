@@ -6,6 +6,7 @@ import { MultiIndexer, type IndexedEvent } from "../indexer/multiIndexer";
 import { deriveAddress } from "nanocurrency";
 import { NanoRpcSource } from "../indexer/blockSource";
 import { analyze, type PricePoint, type TokenAnalytics } from "./analytics";
+import { exitView, type ExitView } from "./exits";
 import { tokenPoolKeys } from "./custody";
 import { loadRegistry, EMPTY_META } from "./tokens";
 import { commentsFor, type Comment } from "./comments";
@@ -56,6 +57,12 @@ export interface TokenView {
   sellVolume: string;
   holders: number;
   pool: string | null;
+  // ── "Exit Pays You" ───────────────────────────────────────────────────────
+  // Every unstake, as a verifiable payout to the people who stayed. `exits` is
+  // the recent tape (newest first; stripped on list views), `exitStats` the
+  // totals incl. what THIS viewer has earned from others leaving.
+  exits: ExitView[];
+  exitStats: { count: number; paidRaw: string; burnedRaw: string; myEarnedRaw: string; lastTime: number };
   spark: PricePoint[];
   series: PricePoint[];
   trades: TokenAnalytics["trades"];
@@ -267,6 +274,14 @@ async function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, accoun
     holders: a.holders.length,
     // Direct tokens have no pool account — by design, forever.
     pool: s?.direct ? null : raw.master ? tokenPoolKeys(raw.master, tokenId).address : null,
+    exits: a.exits.events.slice(-30).reverse().map((e) => exitView(e, account)),
+    exitStats: {
+      count: a.exits.events.length,
+      paidRaw: a.exits.paidRaw.toString(),
+      burnedRaw: a.exits.burnedRaw.toString(),
+      myEarnedRaw: account ? (a.exits.earned.get(account) ?? 0n).toString() : "0",
+      lastTime: a.exits.events.length ? a.exits.events[a.exits.events.length - 1].time : 0,
+    },
     spark: a.series.slice(-48),
     series: a.series,
     trades: a.trades,
@@ -287,6 +302,7 @@ export async function feed(account = ""): Promise<TokenView[]> {
     v.trades = [];
     v.topHolders = [];
     v.comments = [];
+    v.exits = v.exits.slice(0, 3); // home firehose: the latest exits per coin
     out.push(v);
   }
   return out.sort((x, y) => (BigInt(y.marketCap) > BigInt(x.marketCap) ? 1 : -1));

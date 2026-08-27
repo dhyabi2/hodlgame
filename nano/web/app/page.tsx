@@ -54,6 +54,22 @@ interface Holder {
   pct: number; // of supply, liquid + staked
 }
 
+// "Exit Pays You" — one unstake, as a payout to the people who stayed.
+interface ExitRecipient { account: string; gotRaw: string; stakeRaw: string; yieldBps: number }
+interface ExitView {
+  hash: string;
+  time: number;
+  account: string; // who left
+  amountRaw: string;
+  taxRaw: string;
+  rebateRaw: string;
+  burnRaw: string;
+  remainingStakedRaw: string;
+  paidCount: number;
+  top: ExitRecipient[];
+  mine: ExitRecipient | null;
+}
+
 interface Comment {
   id: string;
   tokenId: string;
@@ -101,6 +117,8 @@ interface Token {
   sellVolume: string;
   holders: number;
   pool: string | null;
+  exits: ExitView[];
+  exitStats: { count: number; paidRaw: string; burnedRaw: string; myEarnedRaw: string; lastTime: number };
   spark: PricePoint[];
   series: PricePoint[];
   trades: Trade[];
@@ -1674,6 +1692,47 @@ function priceOfSeed(xnoRaw: bigint, tokenRaw: bigint, decimals: number): bigint
  * future-unknowable seed = SHA-256(UTC-date · your address) indexed into the
  * eligible set. Nobody (us included) can curate or rig it toward/against you,
  * and anyone can recompute it. Provably-fair serendipity, not an opaque feed. */
+// ── "Exit Pays You" firehose ─────────────────────────────────────────────────
+// The latest exits across every coin, newest first: who left which coin and
+// how much of their 20% landed on the people who stayed. Each item opens the
+// coin, so a visitor lands on the page where they can become a stayer.
+function ExitTicker({ tokens, myAddress, onSelect }: { tokens: Token[]; myAddress?: string; onSelect: (id: string) => void }) {
+  const items = tokens
+    .flatMap((t) => (t.exits ?? []).map((e) => ({ e, t })))
+    .filter(({ e }) => e.paidCount > 0 && BigInt(e.rebateRaw || "0") > 0n)
+    .sort((a, b) => b.e.time - a.e.time)
+    .slice(0, 12);
+  if (items.length === 0) return null;
+  const mineTotal = myAddress ? items.reduce((n, { e }) => n + (e.mine ? BigInt(e.mine.gotRaw) : 0n), 0n) : 0n;
+  return (
+    <div className="rounded-none border border-neutral-800 bg-black">
+      <div className="flex items-center justify-between px-3 pt-2 text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">
+        <span>Exits paying stayers · live</span>
+        {mineTotal > 0n && <span className="text-white">you were paid in {items.filter(({ e }) => e.mine && BigInt(e.mine.gotRaw) > 0n).length} of these</span>}
+      </div>
+      <div className="flex gap-2 overflow-x-auto px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {items.map(({ e, t }) => {
+          const paid = !!e.mine && BigInt(e.mine.gotRaw) > 0n;
+          return (
+            <button
+              key={e.hash}
+              onClick={() => onSelect(t.tokenId)}
+              className={"shrink-0 rounded-none border px-2.5 py-1.5 text-left font-mono text-[11px] leading-snug hover:border-white " + (paid ? "border-white bg-white text-black" : "border-neutral-800 text-neutral-300")}
+            >
+              <span className="font-black">${tokSym(t)}</span>
+              <span className={paid ? "text-neutral-700" : "text-neutral-500"}> · {myAddress && e.account === myAddress ? "you" : short(e.account)} left · </span>
+              <span className="tabular-nums">{fmtTok(e.rebateRaw, t.decimals)}</span>
+              <span className={paid ? "text-neutral-700" : "text-neutral-500"}> → {e.paidCount} stayer{e.paidCount === 1 ? "" : "s"}</span>
+              {paid && <span className="font-black"> · you +{fmtTok(e.mine!.gotRaw, t.decimals)}</span>}
+              <span className={"block text-[10px] " + (paid ? "text-neutral-700" : "text-neutral-600")}>{timeAgo(e.time)}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function UnavoidablePick({ coins, myAddress, onSelect }: { coins: Token[]; myAddress?: string; onSelect: (id: string) => void }) {
   const [pick, setPick] = useState<Token | null>(null);
   const [show, setShow] = useState(false);
@@ -1825,6 +1884,7 @@ function Feed({ tokens, loaded = true, onSelect, myAddress, usd, onCreate }: { t
         </div>
       ) : (
         <>
+          <ExitTicker tokens={tokens} myAddress={myAddress} onSelect={onSelect} />
           <UnavoidablePick coins={live} myAddress={myAddress} onSelect={onSelect} />
           {featured && <HeroCard t={featured} usd={usd} onSelect={onSelect} />}
           {mine.length > 0 && <FeedRow title="Your Coins" tokens={mine} usd={usd} onSelect={onSelect} />}
@@ -3056,7 +3116,7 @@ function TradePanel({
         {busy ? "…" : side === "buy" ? (token.direct && !token.queueHead ? "Buy (XNO stays in your wallet)" : "Buy (send XNO)") : "Sell tokens"}
       </button>
 
-      <StakeBox token={token} busy={busy} sendOp={sendOp} />
+      <StakeBox token={token} busy={busy} sendOp={sendOp} myAddress={address ?? undefined} />
 
       {/* Direct-Settlement surfaces: queued payout position + collateral. */}
       {token.direct && BigInt(token.myQueueOwed || "0") > 0n && (
@@ -3266,15 +3326,157 @@ function PaperHandsReceipt({
   );
 }
 
+
+// ── "Exit Pays You" ──────────────────────────────────────────────────────────
+// The rule no other launchpad has, made visible: every unstake is a receipt
+// showing who left, how much of their 20% went to the people who stayed, and
+// what THIS viewer got. Every number is ledger-exact (server/exits.ts) and
+// every row links to the unstake block, so a screenshot is a verifiable claim.
+const yieldPct = (bps: number) => (bps >= 100 ? (bps / 100).toFixed(bps >= 1000 ? 0 : 1) : (bps / 100).toFixed(2)) + "%";
+function ExitPaysYou({ token, myAddress, onStake }: { token: Token; myAddress?: string; onStake: () => void }) {
+  const exits = token.exits ?? [];
+  const stats = token.exitStats ?? { count: 0, paidRaw: "0", burnedRaw: "0", myEarnedRaw: "0", lastTime: 0 };
+  const sym = tokSym(token);
+  const dec = token.decimals;
+  const staked = BigInt(token.myStaked || "0");
+  const bal = BigInt(token.myBalance || "0");
+  const mine = BigInt(stats.myEarnedRaw || "0");
+  const paid = BigInt(stats.paidRaw || "0");
+  const [open, setOpen] = useState(false);
+  const shown = open ? exits : exits.slice(0, 3);
+  // Newest exit gets a one-shot weight pulse so a live payout is felt, not just listed.
+  const newest = exits[0]?.hash;
+  const [pulse, setPulse] = useState<string | null>(null);
+  useEffect(() => {
+    if (!newest) return;
+    setPulse(newest);
+    const t = setTimeout(() => setPulse(null), 2500);
+    return () => clearTimeout(t);
+  }, [newest]);
+
+  return (
+    <div className="rounded-none border border-neutral-700 bg-black p-3 space-y-2">
+      <div className="flex items-end justify-between gap-2">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.2em] text-neutral-400">
+            {myAddress && mine > 0n ? "Exit tax paid to you" : "Exit tax paid to stayers"}
+          </p>
+          <p className="text-xl font-black tabular-nums leading-tight text-white">
+            {myAddress && mine > 0n ? "+" : ""}{fmtTok((myAddress && mine > 0n ? mine : paid).toString(), dec)} <span className="text-xs font-bold text-neutral-400">{sym}</span>
+          </p>
+        </div>
+        <div className="text-right text-[10px] text-neutral-500 leading-tight">
+          <p>{stats.count} exit{stats.count === 1 ? "" : "s"}</p>
+          {myAddress && mine > 0n && <p>of {fmtTok(paid.toString(), dec)} paid out</p>}
+          {stats.lastTime > 0 && <p>last {timeAgo(stats.lastTime)}</p>}
+        </div>
+      </div>
+
+      {exits.length === 0 ? (
+        <p className="text-[11px] text-neutral-500 leading-relaxed">
+          Waiting for the first exit. Whoever unstakes first hands 20% to everyone still staked — at the moment that's{" "}
+          {BigInt(token.totalStaked || "0") > 0n ? <>the current stakers{staked > 0n ? ", you included" : ""}</> : "nobody"}.
+        </p>
+      ) : (
+        <div className="divide-y divide-neutral-900 border-y border-neutral-900 font-mono text-[11px]">
+          {shown.map((e) => {
+            const me = e.mine;
+            const isMe = !!myAddress && e.account === myAddress;
+            const top = e.top[0];
+            return (
+              <a
+                key={e.hash}
+                href={`https://nanexplorer.com/nano/block/${e.hash}`}
+                target="_blank"
+                rel="noreferrer"
+                title="the unstake block on Nano — verify it yourself"
+                className={"block py-1.5 leading-snug transition-opacity hover:bg-neutral-950 " + (pulse === e.hash ? "opacity-100" : "opacity-90")}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate">
+                    <span className={isMe ? "text-white font-black" : "text-neutral-400"}>{isMe ? "you" : short(e.account)}</span>
+                    <span className="text-neutral-500"> left · </span>
+                    <span className="text-neutral-300">−{fmtTok(e.taxRaw, dec)}</span>
+                    <span className="text-neutral-500"> tax → </span>
+                    {e.paidCount > 0 ? (
+                      <span className="text-neutral-300">{e.paidCount} stayer{e.paidCount === 1 ? "" : "s"}</span>
+                    ) : (
+                      <span className="text-neutral-500">nobody staked · burned</span>
+                    )}
+                  </span>
+                  <span className="shrink-0 text-neutral-600">{timeAgo(e.time)}</span>
+                </div>
+                {me && BigInt(me.gotRaw) > 0n ? (
+                  <p className={"flex items-center justify-between gap-2 tabular-nums " + (pulse === e.hash ? "text-white font-black" : "text-neutral-200 font-bold")}>
+                    <span>you +{fmtTok(me.gotRaw, dec)} {sym} <span className="text-neutral-500 font-normal">(+{yieldPct(me.yieldBps)} on your stake)</span></span>
+                    <button
+                      className="shrink-0 text-[10px] font-black uppercase tracking-wide text-neutral-500 hover:text-white"
+                      title="share a verifiable receipt of this payout"
+                      onClick={(ev) => {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        // Receipt card: every figure on it is the ledger's own
+                        // number for this unstake block, so it's a claim anyone
+                        // can re-verify — the whole point of sharing it.
+                        void shareCard({
+                          filename: `hodlgame-exit-receipt-${e.hash.slice(0, 8)}.png`,
+                          title: "Exit tax receipt",
+                          headline: `+${fmtTok(me.gotRaw, dec)} $${sym}`,
+                          subline: `${short(e.account)} left. I stayed. They paid me.`,
+                          rows: [
+                            { label: "their exit tax (20%)", value: `${fmtTok(e.taxRaw, dec)} ${sym}` },
+                            { label: "split between", value: `${e.paidCount} stayer${e.paidCount === 1 ? "" : "s"}` },
+                            { label: "my cut", value: `+${yieldPct(me.yieldBps)} on my stake` },
+                          ],
+                          footer: `every exit pays the stayers · hodlgame.fun/t/${token.tokenId.slice(0, 8)}… · block ${e.hash.slice(0, 10)}…`,
+                        });
+                      }}
+                    >
+                      share ↗
+                    </button>
+                  </p>
+                ) : top ? (
+                  <p className="text-neutral-500 tabular-nums">
+                    biggest cut {short(top.account)} +{fmtTok(top.gotRaw, dec)} <span>(+{yieldPct(top.yieldBps)})</span>
+                  </p>
+                ) : null}
+              </a>
+            );
+          })}
+        </div>
+      )}
+      {exits.length > 3 && (
+        <button className="text-[10px] font-bold uppercase tracking-wide text-neutral-500 hover:text-white" onClick={() => setOpen((o) => !o)}>
+          {open ? "fewer" : `all ${exits.length} exits`}
+        </button>
+      )}
+
+      {myAddress && staked <= 0n && bal > 0n && (
+        <button
+          className="w-full rounded-none bg-white py-2 text-[11px] font-black uppercase tracking-wide text-black hover:bg-neutral-200"
+          onClick={onStake}
+        >
+          Stake to get paid by the next exit
+        </button>
+      )}
+      {myAddress && staked <= 0n && bal <= 0n && (
+        <p className="text-[10px] text-neutral-500">Holders who don't stake get none of this. Buy, stake, and every exit pays you.</p>
+      )}
+    </div>
+  );
+}
+
 // of the connected account's staked balance and claimable XNO rebate rewards.
 function StakeBox({
   token,
   busy,
   sendOp,
+  myAddress,
 }: {
   token: Token;
   busy: boolean;
   sendOp: (tokenId: string, op: Op, label: string) => Promise<void>;
+  myAddress?: string;
 }) {
   const [stakeAmt, setStakeAmt] = useState("");
   const [unstakeAmt, setUnstakeAmt] = useState("");
@@ -3340,6 +3542,8 @@ function StakeBox({
         <span className="font-black text-white">staked</span> amount — not by total holdings. Nothing is burned. Staking is free;
         unstaking is what pays the 20%.
       </p>
+
+      <ExitPaysYou token={token} myAddress={myAddress} onStake={() => setStakeAmt(fmtTok(bal.toString(), token.decimals))} />
 
       <div className="flex gap-2">
         <div className="flex-1 space-y-1">
