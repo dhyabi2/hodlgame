@@ -405,7 +405,7 @@ export default function Home() {
   const [unlockOpen, setUnlockOpen] = useState(false);
 
   // Transient status message (auto-dismisses) — no persistent debug log in the UI.
-  const say = (s: string) => { setToast(s); setTimeout(() => setToast((t) => (t === s ? "" : t)), 3500); };
+  const say = (s: string, ms = 3500) => { setToast(s); setTimeout(() => setToast((t) => (t === s ? "" : t)), ms); };
 
   // ── Incoming-payment notifications (header bell, site-wide) ───────────────
   // The wallet tab already auto-receives; this makes an incoming XNO send
@@ -864,7 +864,7 @@ function ConnectedWallet({
   keys: Keys;
   lock: () => void;
   remove: () => void;
-  say: (s: string) => void;
+  say: (s: string, ms?: number) => void;
   tokens: Token[];
 }) {
   const [balance, setBalance] = useState<string | null>(null);
@@ -1351,7 +1351,7 @@ function WalletPanel({
   unlock: (k: Keys) => void;
   lock: () => void;
   remove: () => void;
-  say: (s: string) => void;
+  say: (s: string, ms?: number) => void;
   tokens: Token[];
 }) {
   const [password, setPassword] = useState("");
@@ -2177,7 +2177,7 @@ function TokenDetail({
   token: Token;
   keys: Keys | null;
   busy: boolean;
-  say: (s: string) => void;
+  say: (s: string, ms?: number) => void;
   usd: number | null;
   submitBlock: (link: string, delta: bigint) => Promise<string>;
   ensureHello: () => Promise<void>;
@@ -2343,39 +2343,87 @@ function TokenDetail({
     if (raw <= 0n) return say("enter XNO amount");
     if (BigInt(token.poolXno) <= 0n) return say(isCreator ? "set your starting price first — use the banner above (it's free, virtual reserve)" : "not tradeable yet — the creator hasn't set a starting price");
     const slip = clampSlippage(slippage);
+    const minFor = (pool: { poolXno: string; poolTokens: string }, xno: bigint) => {
+      const expected = quoteBuy(pool.poolXno, pool.poolTokens, xno);
+      return slip > 0 ? (expected * BigInt(Math.round((100 - slip) * 100))) / 10000n : 0n;
+    };
+    // One queued seller = one wallet-to-wallet send + chained op. Returns the
+    // XNO actually paid.
+    const payQueued = async (head: { account: string; owedRaw: string }, pool: { poolXno: string; poolTokens: string }, want: bigint) => {
+      const owed = BigInt(head.owedRaw);
+      const pay = want < owed ? want : owed;
+      const info = await rpc("account_info", { account: keys!.address, representative: "true" });
+      if (!info.frontier) throw new Error("fund your wallet first — send XNO to your address, then try again");
+      if (BigInt(info.balance) < pay + 1n) throw new Error("not enough XNO in your wallet");
+      const minTokens = minFor(pool, pay);
+      const w1 = (await rpc("work_generate", { hash: info.frontier, difficulty: "fffffff800000000" })).work;
+      const blk1 = buildBlock(keys!.secretKey, {
+        work: w1, previous: info.frontier, representative: info.representative,
+        balance: (BigInt(info.balance) - pay).toString(),
+        link: nanocurrency.derivePublicKey(head.account),
+      });
+      const r1 = await rpc("process", { json_block: "true", block: blk1 });
+      const w2 = (await rpc("work_generate", { hash: r1.hash, difficulty: "fffffff800000000" })).work;
+      const blk2 = buildBlock(keys!.secretKey, {
+        work: w2, previous: r1.hash, representative: info.representative,
+        balance: (BigInt(info.balance) - pay - 1n).toString(),
+        link: encodeOpLink(token.tokenId, { kind: "buy", xno: 0n, minTokens }),
+      });
+      await rpc("process", { json_block: "true", block: blk2 });
+      return pay;
+    };
+    // Queue empty: nothing moves — the amount stays in this wallet as collateral.
+    const selfEarmark = async (pool: { poolXno: string; poolTokens: string; myFloor?: string }, xno: bigint) => {
+      const info = await rpc("account_info", { account: keys!.address, representative: "true" });
+      if (!info.frontier) throw new Error("fund your wallet first — send XNO to your address, then try again");
+      const need = xno + BigInt(pool.myFloor || "0") + 2n;
+      if (BigInt(info.balance) < need) throw new Error("not enough XNO — in a zero-custody coin your buy amount stays in YOUR wallet as collateral, so it must actually be there");
+      const [fragA, fragB] = encodeFragLinks(token.tokenId, { kind: "buy", xno, minTokens: minFor(pool, xno) });
+      await submitBlock(fragA, 1n);
+      await submitBlock(fragB, 1n);
+    };
     try {
       await ensureHello();
-      const info = await rpc("account_info", { account: keys.address, representative: "true" });
-      if (!info.frontier) return say("fund your wallet first — send XNO to your address, then try again");
-      if (token.queueHead) {
-        const owed = BigInt(token.queueHead.owedRaw);
-        const pay = raw < owed ? raw : owed;
-        const expected = quoteBuy(token.poolXno, token.poolTokens, pay);
-        const minTokens = slip > 0 ? (expected * BigInt(Math.round((100 - slip) * 100))) / 10000n : 0n;
-        const w1 = (await rpc("work_generate", { hash: info.frontier, difficulty: "fffffff800000000" })).work;
-        const blk1 = buildBlock(keys.secretKey, {
-          work: w1, previous: info.frontier, representative: info.representative,
-          balance: (BigInt(info.balance) - pay).toString(),
-          link: nanocurrency.derivePublicKey(token.queueHead.account),
-        });
-        const r1 = await rpc("process", { json_block: "true", block: blk1 });
-        const w2 = (await rpc("work_generate", { hash: r1.hash, difficulty: "fffffff800000000" })).work;
-        const blk2 = buildBlock(keys.secretKey, {
-          work: w2, previous: r1.hash, representative: info.representative,
-          balance: (BigInt(info.balance) - pay - 1n).toString(),
-          link: encodeOpLink(token.tokenId, { kind: "buy", xno: 0n, minTokens }),
-        });
-        await rpc("process", { json_block: "true", block: blk2 });
-        say(`buy ✓ — ${fmtXno(pay.toString())} XNO paid a waiting seller directly, wallet to wallet`);
+      let remaining = raw;
+      let paidToSellers = 0n;
+      let sellersPaid = 0;
+      let collateral = 0n;
+      let view: { poolXno: string; poolTokens: string; myFloor?: string; queueHead: { account: string; owedRaw: string } | null } = token;
+      // Up-front honesty: a queue means part (or all) of this buy goes to
+      // waiting sellers first, one send each — say so before signing anything.
+      if (view.queueHead) {
+        const owed = BigInt(view.queueHead.owedRaw);
+        say(owed >= raw
+          ? `${fmtXno(raw.toString())} XNO → paying a waiting seller directly, wallet to wallet…`
+          : `${fmtXno(raw.toString())} XNO: ${fmtXno(owed.toString())} pays the waiting seller first, then the rest fills — one send each…`);
+      }
+      // Pay queued sellers head-by-head (re-reading the queue each time, since
+      // every payment changes it), then self-earmark whatever is left.
+      for (let i = 0; i < 6 && remaining > 0n; i++) {
+        if (view.queueHead) {
+          const pay = await payQueued(view.queueHead, view, remaining);
+          remaining -= pay;
+          paidToSellers += pay;
+          sellersPaid++;
+          if (remaining <= 0n) break;
+          say(`${fmtXno(pay.toString())} XNO paid seller ${sellersPaid} · ${fmtXno(remaining.toString())} XNO still to fill…`);
+          const j = await (await fetch(`/api/token?token=${token.tokenId}&account=${keys.address}`)).json();
+          if (!j.token) break;
+          view = j.token;
+        } else {
+          await selfEarmark(view, remaining);
+          collateral = remaining;
+          remaining = 0n;
+        }
+      }
+      const filled = raw - remaining;
+      const parts: string[] = [];
+      if (paidToSellers > 0n) parts.push(`${fmtXno(paidToSellers.toString())} XNO paid ${sellersPaid} waiting seller${sellersPaid === 1 ? "" : "s"} wallet to wallet`);
+      if (collateral > 0n) parts.push(`${fmtXno(collateral.toString())} XNO stays in your wallet as collateral`);
+      if (remaining > 0n) {
+        say(`buy partly filled: ${fmtXno(filled.toString())} of ${fmtXno(raw.toString())} XNO (${parts.join("; ")}). ${fmtXno(remaining.toString())} XNO NOT bought — the sellers' queue is still being paid; try again for the rest.`, 15000);
       } else {
-        const need = raw + BigInt(token.myFloor || "0") + 2n;
-        if (BigInt(info.balance) < need) return say("not enough XNO — in a zero-custody coin your buy amount stays in YOUR wallet as collateral, so it must actually be there");
-        const expected = quoteBuy(token.poolXno, token.poolTokens, raw);
-        const minTokens = slip > 0 ? (expected * BigInt(Math.round((100 - slip) * 100))) / 10000n : 0n;
-        const [fragA, fragB] = encodeFragLinks(token.tokenId, { kind: "buy", xno: raw, minTokens });
-        await submitBlock(fragA, 1n);
-        await submitBlock(fragB, 1n);
-        say("buy ✓ — your XNO never left your wallet; it now backs your position as collateral");
+        say(`buy ✓ ${fmtXno(filled.toString())} XNO — ${parts.join("; ")}`, 9000);
       }
       setAmount("");
       markWalletDirty();
@@ -3106,12 +3154,38 @@ function TradePanel({
           </div>
         );
       })()}
-      {token.direct && side === "buy" && token.queueHead && (
-        <p className="text-[11px] text-neutral-500">
-          your XNO goes straight to the seller ahead in line — wallet to wallet, up to{" "}
-          <span className="tabular-nums text-neutral-300">{fmtXno(token.queueHead.owedRaw)} XNO</span>
-        </p>
-      )}
+      {token.direct && side === "buy" && token.queueHead && (() => {
+        // A queue changes what a buy DOES: the first slice pays the seller
+        // ahead in line (wallet to wallet), only the rest becomes collateral.
+        // Show the exact split for the amount typed, loudly — a partial fill
+        // that only lived in a grey footnote was read as "I paid less than I
+        // bought" (user report, 2026-08-28).
+        const owed = BigInt(token.queueHead.owedRaw);
+        const queued = BigInt(token.queueTotal || "0");
+        const want = toRaw(amount, 30);
+        const toSeller = want > 0n ? (want < owed ? want : owed) : owed;
+        const rest = want > toSeller ? want - toSeller : 0n;
+        return (
+          <div className="rounded-none border border-white bg-neutral-950 p-3 text-[11px] leading-relaxed">
+            <p className="text-[10px] font-black uppercase tracking-[0.2em] text-white">Sellers are waiting in line</p>
+            {want > 0n ? (
+              <p className="mt-1 text-neutral-200">
+                Your <span className="font-black text-white tabular-nums">{fmtXno(want.toString())} XNO</span> buy fills in parts:{" "}
+                <span className="font-black text-white tabular-nums">{fmtXno(toSeller.toString())} XNO</span> goes straight to the seller ahead in line (wallet to wallet)
+                {rest > 0n && (
+                  <>, then <span className="font-black text-white tabular-nums">{fmtXno(rest.toString())} XNO</span> {queued > owed ? "pays the next sellers in line and whatever is left" : ""} stays in your wallet as collateral</>
+                )}
+                . You get tokens for the full amount.
+              </p>
+            ) : (
+              <p className="mt-1 text-neutral-200">
+                The next <span className="font-black text-white tabular-nums">{fmtXno(owed.toString())} XNO</span> of any buy goes straight to the seller ahead in line, wallet to wallet
+                {queued > owed && <> ({fmtXno(queued.toString())} XNO queued in total)</>}; anything above that stays in your wallet as collateral. You get tokens either way.
+              </p>
+            )}
+          </div>
+        );
+      })()}
       <button className={btn} disabled={busy} onClick={side === "buy" ? buy : sell}>
         {busy ? "…" : side === "buy" ? (token.direct && !token.queueHead ? "Buy (XNO stays in your wallet)" : "Buy (send XNO)") : "Sell tokens"}
       </button>
@@ -3721,7 +3795,7 @@ function CommentThread({ tokenId, comments, keys, isDev }: { tokenId: string; co
 // Creator-only: (re)publish a coin's off-chain metadata for an existing token —
 // so a coin whose name/image failed to save at launch (or needs updating) can be
 // fixed without re-launching. Same signed-update path as CreateToken.
-function EditCoinInfo({ token, keys, say }: { token: Token; keys: Keys; say: (s: string) => void }) {
+function EditCoinInfo({ token, keys, say }: { token: Token; keys: Keys; say: (s: string, ms?: number) => void }) {
   const [open, setOpen] = useState(!token.name && !token.symbol); // auto-open if unnamed
   const [name, setName] = useState(token.name);
   const [symbol, setSymbol] = useState(token.symbol);
@@ -3971,7 +4045,7 @@ function CreateToken({
 }: {
   busy: boolean;
   setBusy: (b: boolean) => void;
-  say: (s: string) => void;
+  say: (s: string, ms?: number) => void;
   keys: Keys | null;
   submitBlock: (link: string, delta: bigint) => Promise<string>;
   promptUnlock: () => void;
