@@ -11,6 +11,7 @@ import {
   closeFutures,
   emptyFutures,
   openFutures,
+  recordSample,
   sweepFutures,
   type FutState,
 } from "./futures";
@@ -281,10 +282,12 @@ function cloneState(s0: State): State {
   };
 }
 
-// Deterministic liquidation pass after any op that moves the virtual price.
-// A pure no-op for tokens with no open pairs (all pre-futures history).
-function afterPriceChange(s: State) {
-  if (s.futures.pairs.length > 0) sweepFutures(s, s.futures);
+// After any op that moves the virtual price: record a TWAP sample (only once
+// the token has futures activity) and run the deterministic liquidation pass.
+// A pure no-op for tokens with no futures activity (all pre-futures history).
+function afterPriceChange(s: State, timestamp: number | undefined) {
+  recordSample(s, s.futures, timestamp);
+  if (s.futures.pairs.length > 0) sweepFutures(s, s.futures, timestamp);
 }
 
 // `timestamp` is the carrier block's network-observed time (seconds); it only
@@ -338,7 +341,7 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
         s.poolXno += op.xno;
         s.poolTokens -= out;
         set(s.balances, sender, get(s.balances, sender) + out);
-        afterPriceChange(s);
+        afterPriceChange(s, timestamp);
         s.height = height;
         return s;
       }
@@ -379,7 +382,7 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
         set(s.earmarkFloor, sender, (s.earmarkFloor.get(sender) ?? 0n) + op.xno);
       }
       ratchetFloors(s);
-      afterPriceChange(s);
+      afterPriceChange(s, timestamp);
       s.height = height;
       return s;
     }
@@ -399,7 +402,7 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
         // Proceeds become in-game credit (see State.xnoCredit) — the real XNO
         // stays in the pool account until the seller explicitly withdraws.
         set(s.xnoCredit, sender, get(s.xnoCredit, sender) + out);
-        afterPriceChange(s);
+        afterPriceChange(s, timestamp);
         s.height = height;
         return s;
       }
@@ -449,7 +452,7 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
       // netted + own collateral released + queued (post-haircut) claim.
       if (usePre + net + credited < op.minXno) throw new InvalidOp("slippage");
       ratchetFloors(s);
-      afterPriceChange(s);
+      afterPriceChange(s, timestamp);
       s.height = height;
       return s;
     }
@@ -459,8 +462,8 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
       if (!s.launched) throw new InvalidOp("not launched");
       // Era-gated: unstamped or pre-era futures ops are invalid everywhere.
       if (timestamp == null || timestamp < FUTURES_ERA) throw new InvalidOp("futures not active");
-      if (op.kind === "futOpen") openFutures(s, s.futures, sender, op.side, op.size, op.margin);
-      else closeFutures(s, s.futures, sender, op.size);
+      if (op.kind === "futOpen") openFutures(s, s.futures, sender, op.side, op.size, op.margin, timestamp);
+      else closeFutures(s, s.futures, sender, op.size, timestamp);
       s.height = height;
       return s;
     }
@@ -552,7 +555,7 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
       s.poolXno += op.xno;
       s.poolTokens += op.tokens;
       if (s.direct) ratchetFloors(s);
-      afterPriceChange(s);
+      afterPriceChange(s, timestamp);
       s.height = height;
       return s;
     }

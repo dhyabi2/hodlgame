@@ -6,6 +6,17 @@ everything lands on `main`.
 
 ## [Unreleased]
 
+### Added — 2026-08-30 · Futures Block 2: TWAP reference + adverse pricing (manipulation resistance)
+- A one-op pump/crash can no longer liquidate anyone or be cashed out: the
+  reference is a 10-minute **time**-weighted average of spot (network
+  timestamps are already consensus input), takers enter at the worse of
+  spot/TWAP, closers settle at the worse for themselves, and liquidation
+  requires a breach at **both** spot and TWAP (settling loser-favourably).
+  Holding a pump for the window lets everyone else sell into it — the real cost.
+- Sampling starts only at a token's first `futOpen`, bounded to 64 samples, so
+  no historical root changes (re-verified against the live production root).
+- Open-interest cap is now also depth-aware: `≤ 50%` of the token reserve.
+
 ### Added — 2026-08-30 · Futures Block 1: token-margined inverse positions (consensus, era-gated)
 - New ops `futOpen (0x0c, fragment)` / `futClose (0x0d, compact)`: open a long
   or short on any token with margin posted **in the token itself** — the only

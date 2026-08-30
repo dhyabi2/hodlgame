@@ -13,7 +13,7 @@
 
 import { strict as assert } from "node:assert";
 import { applyOp, emptyState, type State } from "./state";
-import { FUTURES_ERA, LONG, SHORT, MAX_LEVERAGE, lockedMargin, markPrice, pnlTokens } from "./futures";
+import { FUTURES_ERA, LONG, SHORT, MAX_LEVERAGE, lockedMargin, markPrice, pnlTokens, twapPrice } from "./futures";
 import { encodeFragLinks, assembleFrag, isFragA } from "./fraglink";
 import { encodeOpLink, decodeOpLink } from "./oplink";
 import { stateRoot } from "./canonical";
@@ -103,15 +103,19 @@ function conserved(s: State) {
   assert.equal(p.short.account, B);
   assert.equal(p.entry, markPrice(s));
   conserved(s);
-  // price up: a big buy by C
+  // price up: a big buy by C, then HELD for a full TWAP window (a later op
+  // stamps the end of the holding period) so the move is real, not a blip.
   const entry = p.entry;
-  s = applyOp(s, { kind: "buy", xno: 300_000_000n, minTokens: 0n }, C, next());
-  const mark = markPrice(s);
-  assert.ok(mark > entry);
-  const expect = pnlTokens(LONG, 4_000_000n, entry, mark);
-  assert.ok(expect > 0n && expect <= 2_000_000n, `pnl ${expect}`);
+  s = applyOp(s, { kind: "buy", xno: 300_000_000n, minTokens: 0n }, C, next(), T + 601);
+  s = applyOp(s, { kind: "buy", xno: 1n, minTokens: 0n }, C, next(), T + 1202);
+  const spotNow = markPrice(s);
+  assert.ok(spotNow > entry);
   if (s.futures.pairs.length === 1) {
-    s = close(s, A); // A closes → pays fee to B
+    const tw = twapPrice(s, s.futures, T + 1203);
+    const settle = spotNow < tw ? spotNow : tw; // long closer gets the lower
+    const expect = pnlTokens(LONG, 4_000_000n, entry, settle);
+    assert.ok(expect > 0n && expect <= 2_000_000n, `pnl ${expect}`);
+    s = close(s, A, 0n, T + 1203); // A closes → pays fee to B
     const fee = (4_000_000n * 50n) / 10_000n;
     assert.equal(bal(s, A), a0 + expect - fee);
     assert.equal(bal(s, B), b0 - expect + fee);
@@ -189,6 +193,74 @@ function conserved(s: State) {
   assert.equal(x.queue.length, base.queue.length);
   assert.equal(x.rebateVault, base.rebateVault);
   console.log("6 ok: deterministic root; spot XNO invariants untouched");
+}
+
+// ── 7. Block 2: TWAP reference — a one-op pump cannot liquidate or pay out ──
+{
+  // Sampling starts at the first futOpen; nothing is recorded before that.
+  let s = seeded();
+  // C pumps hard first (so dumping it all later crashes spot by ~70%).
+  s = applyOp(s, { kind: "buy", xno: 1_000_000_000n, minTokens: 0n }, C, next(), T - 1);
+  assert.equal(s.futures.samples.length, 0, "no samples before activity");
+  const tid = "cd".repeat(16);
+  const rootBefore = stateRoot(new Map([[tid, s]]));
+  assert.equal(rootBefore, stateRoot(new Map([[tid, { ...s, futures: emptyState().futures }]])), "root untouched");
+
+  const t0 = T;
+  const a0 = bal(s, A), b0 = bal(s, B); // pre-open balances
+  s = open(s, A, LONG, 5_000_000n, 1_000_000n, t0); // max leverage
+  s = open(s, B, SHORT, 5_000_000n, 5_000_000n, t0);
+  assert.equal(s.futures.samples.length, 1, "first open records a sample");
+  const entry = s.futures.pairs[0].entry;
+  // One second later a whale crashes spot by ~40% inside a single op: spot says
+  // "liquidate the long", the 10-minute TWAP still says the old price → no
+  // liquidation, no payout to the short.
+  s = applyOp(s, { kind: "sell", tokens: bal(s, C), minXno: 0n }, C, next(), t0 + 1);
+  assert.ok(markPrice(s) < (entry * 70n) / 100n, "spot crashed");
+  assert.equal(s.futures.pairs.length, 1, "TWAP blocks the one-op liquidation");
+  // The short cannot cash the crash either: closing settles at the closer-
+  // adverse price (max of spot, twap ≈ entry) → ~zero pnl, minus the fee.
+  const sTry = close(s, B, 0n, t0 + 2);
+  assert.ok(bal(sTry, B) - b0 <= 0n, "short gains nothing from a one-op crash");
+  // Same crash held for the whole window (others could have sold into it)
+  // does liquidate — at the price more favourable to the loser, loss ≤ margin.
+  s = applyOp(s, { kind: "buy", xno: 1n, minTokens: 0n }, C, next(), t0 + 601);
+  assert.equal(s.futures.pairs.length, 0, "sustained move liquidates");
+  const aLoss = a0 - bal(s, A);
+  assert.ok(aLoss > 0n && aLoss <= 1_000_000n, `loss capped: ${aLoss}`);
+  assert.equal(bal(s, B) - b0, aLoss, "zero-sum");
+  conserved(s);
+  console.log("7 ok: TWAP — one-op pump is powerless, sustained move settles");
+}
+
+// ── 8. Block 2: taker-adverse entry, samples bounded, pool-depth OI cap ─────
+{
+  let s = seeded();
+  s = open(s, A, SHORT, 1_000_000n, 1_000_000n, T);
+  // pump spot up, then a long taker enters: entry = max(spot, twap) = spot
+  s = applyOp(s, { kind: "buy", xno: 200_000_000n, minTokens: 0n }, C, next(), T + 5);
+  const spot = markPrice(s);
+  const tw = twapPrice(s, s.futures, T + 6);
+  assert.ok(tw < spot, "twap lags the pump");
+  s = open(s, B, LONG, 1_000_000n, 1_000_000n, T + 6);
+  assert.equal(s.futures.pairs[0].entry, spot, "long taker pays the higher (spot) price");
+  // a short taker gets the LOWER of spot/twap
+  s = applyOp(s, { kind: "sell", tokens: bal(s, C) / 2n, minXno: 0n }, C, next(), T + 7);
+  s = open(s, A, LONG, 500_000n, 500_000n, T + 8); // rests
+  const sp2 = markPrice(s);
+  const tw2 = twapPrice(s, s.futures, T + 9);
+  s = open(s, C, SHORT, 500_000n, 500_000n, T + 9);
+  assert.equal(s.futures.pairs[1].entry, sp2 < tw2 ? sp2 : tw2, "short taker gets the lower price");
+  // samples bounded and pruned
+  for (let i = 0; i < 200; i++) s = applyOp(s, { kind: "buy", xno: 1000n, minTokens: 0n }, C, next(), T + 10 + i);
+  assert.ok(s.futures.samples.length <= 64, "bounded samples");
+  s = applyOp(s, { kind: "buy", xno: 1000n, minTokens: 0n }, C, next(), T + 5000);
+  assert.ok(s.futures.samples.length <= 2, "old samples pruned past the window");
+  // depth-aware cap: OI ≤ 50% of pool token reserve
+  const capPool = s.poolTokens / 2n;
+  assert.throws(() => open(s, B, SHORT, capPool + 1n, capPool / 4n + 1n, T + 5001), /open interest|insufficient/);
+  conserved(s);
+  console.log("8 ok: taker-adverse entry, bounded samples, depth-aware OI cap");
 }
 
 console.log("✅ futures tests passed");
