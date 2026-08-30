@@ -161,6 +161,29 @@ verifiable and none of it can be faked.
 
 ---
 
+## 4b. Futures without a contract (token-margined)
+
+Every "trustless perp" on a chain without scripts is secretly a custodian:
+someone must hold a key that can seize the loser's collateral. HodlGame sidesteps
+this with one observation — **the token itself is replay state**. Nano can't
+take XNO from anyone, but the deterministic ledger *can* move tokens, because
+the ledger is the only place they exist. So margin is posted in the token, a
+loss is a balance move inside the state machine, and nobody ever holds
+anything.
+
+- Open a long or short (`futOpen`) with up to 5× leverage; your margin is locked
+  from your token balance and matched FIFO against the opposite side.
+- The price is the token's own replay-computed spot — no oracle, nothing
+  external — paired with a **mark** that follows traded volume rather than the
+  last tick, so a single large trade can't liquidate anyone. Deliberately, that
+  mark contains no clock: block timestamps differ from node to node, so letting
+  them weight a price would make two honest replayers disagree.
+- Close (`futClose`) settles both sides at the current price; a losing side can
+  never lose more than it locked, so the system is solvent with no insurance
+  fund. Liquidation is a deterministic sweep every replayer runs identically.
+- It is a closed loop in token units: XNO, earmarks and the sellers' queue are
+  untouched. Spec §10.
+
 ## 5. Ordering, determinism, and the hard problems
 
 Because balances depend on *order*, and Nano only totally-orders *within* an

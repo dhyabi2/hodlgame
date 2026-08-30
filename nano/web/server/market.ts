@@ -5,7 +5,7 @@
 import { MultiIndexer, type IndexedEvent } from "../indexer/multiIndexer";
 import { deriveAddress } from "nanocurrency";
 import { NanoRpcSource } from "../indexer/blockSource";
-import { analyze, type PricePoint, type TokenAnalytics } from "./analytics";
+import { analyze, type PricePoint, type TokenAnalytics, type DuelEvent } from "./analytics";
 import { exitView, type ExitView } from "./exits";
 import { tokenPoolKeys } from "./custody";
 import { loadRegistry, EMPTY_META } from "./tokens";
@@ -16,6 +16,7 @@ import { watchedAccounts, persistWatched } from "./operator";
 import { StoreBlockCache } from "./sharedCache";
 import { deriveMetaAuthority, type MetaAuthorityState } from "../core/metaAnchor";
 import { claimableReward } from "../core/state";
+import { futuresActive, markPrice, refPrice, type FutState } from "../core/futures";
 
 export interface TokenView {
   tokenId: string;
@@ -63,11 +64,92 @@ export interface TokenView {
   // totals incl. what THIS viewer has earned from others leaving.
   exits: ExitView[];
   exitStats: { count: number; paidRaw: string; burnedRaw: string; myEarnedRaw: string; lastTime: number };
+  // ── Futures (core/futures.ts, SPEC §10) ───────────────────────────────────
+  // Token-margined inverse positions. Prices are ×PRECISION (XNO raw per token
+  // unit). `twap` is the display-time reference (Date.now()); consensus
+  // recomputes it at each op's own timestamp.
+  futures: FuturesView;
   spark: PricePoint[];
   series: PricePoint[];
   trades: TokenAnalytics["trades"];
   topHolders: TokenAnalytics["holders"];
   comments: Comment[];
+}
+
+export interface FuturesView {
+  active: boolean;
+  spot: string;
+  twap: string;
+  oiLong: string; // tokens: resting long size + all pair sizes
+  oiShort: string;
+  longWaiting: string; // resting (unmatched) long size — what a short taker can hit
+  shortWaiting: string;
+  openPairs: number; // count only — list views strip `pairs` but still show ⚔
+  book: { id: string; account: string; side: 0 | 1; size: string; margin: string }[];
+  pairs: { id: string; size: string; entry: string; long: { account: string; margin: string }; short: { account: string; margin: string } }[];
+  // Settled duels (newest first, last 20) — every row is a verifiable receipt
+  // tied to the block that settled it.
+  recent: DuelEvent[];
+  duelCount: number;
+  // THIS viewer's record across the token's full duel history. `opponents` is
+  // the number of DISTINCT wallets beaten — self-dueling two wallets can never
+  // grow it past 1, so it is the status number that resists sybils.
+  myRecord: { wins: number; losses: number; liquidated: number; opponents: number; netPnl: string };
+}
+
+function futuresView(s: { poolXno: bigint; poolTokens: bigint; futures: FutState } | undefined, duels: DuelEvent[], account: string): FuturesView {
+  const empty: FuturesView = {
+    active: false, spot: "0", twap: "0", oiLong: "0", oiShort: "0", longWaiting: "0", shortWaiting: "0", openPairs: 0, book: [], pairs: [],
+    recent: [], duelCount: 0, myRecord: { wins: 0, losses: 0, liquidated: 0, opponents: 0, netPnl: "0" },
+  };
+  if (!s) return empty;
+  const rec = { wins: 0, losses: 0, liquidated: 0, opponents: 0, netPnl: "0" };
+  if (account) {
+    const beaten = new Set<string>();
+    let net = 0n;
+    for (const d of duels) {
+      const mineLong = d.long === account, mineShort = d.short === account;
+      if (!mineLong && !mineShort) continue;
+      const pnl = mineLong ? BigInt(d.longPnl) : -BigInt(d.longPnl);
+      net += pnl;
+      if (pnl > 0n) { rec.wins++; beaten.add(mineLong ? d.short : d.long); }
+      else if (pnl < 0n) { rec.losses++; if (d.kind === 1) rec.liquidated++; }
+    }
+    rec.opponents = beaten.size;
+    rec.netPnl = net.toString();
+  }
+  const f = s.futures;
+  const st = s as any;
+  const spot = markPrice(st);
+  // The reference is pure consensus state — no clock, so this view is exactly
+  // what every replayer computes.
+  const twap = refPrice(st, f);
+  let lw = 0n, sw = 0n, paired = 0n;
+  for (const o of f.book) if (o.side === 0) lw += o.size; else sw += o.size;
+  for (const p of f.pairs) paired += p.size;
+  return {
+    active: futuresActive(f),
+    spot: spot.toString(),
+    twap: twap.toString(),
+    oiLong: (lw + paired).toString(),
+    oiShort: (sw + paired).toString(),
+    longWaiting: lw.toString(),
+    shortWaiting: sw.toString(),
+    openPairs: f.pairs.length,
+    // Bounded like `pairs` below: the consensus book is length-capped, but the
+    // payload must never scale with it (this ships in the home feed too).
+    book: f.book.slice(-60).map((o) => ({ id: o.id.toString(), account: o.account, side: o.side, size: o.size.toString(), margin: o.margin.toString() })),
+    pairs: f.pairs.slice(-60).map((p) => ({
+      id: p.id.toString(),
+      size: p.size.toString(),
+      entry: p.entry.toString(),
+      long: { account: p.long.account, margin: p.long.margin.toString() },
+      short: { account: p.short.account, margin: p.short.margin.toString() },
+    })),
+    recent: duels.slice(-20).reverse(),
+    duelCount: duels.length,
+    myRecord: rec,
+  };
 }
 
 export interface RawMarket {
@@ -282,6 +364,7 @@ async function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, accoun
       myEarnedRaw: account ? (a.exits.earned.get(account) ?? 0n).toString() : "0",
       lastTime: a.exits.events.length ? a.exits.events[a.exits.events.length - 1].time : 0,
     },
+    futures: futuresView(s ?? undefined, a.duels, account),
     spark: a.series.slice(-48),
     series: a.series,
     trades: a.trades,
@@ -303,6 +386,8 @@ export async function feed(account = ""): Promise<TokenView[]> {
     v.topHolders = [];
     v.comments = [];
     v.exits = v.exits.slice(0, 3); // home firehose: the latest exits per coin
+    // Card views need only the ⚔ count and the depth totals — never the lists.
+    v.futures = { ...v.futures, book: [], pairs: [], recent: [] };
     out.push(v);
   }
   return out.sort((x, y) => (BigInt(y.marketCap) > BigInt(x.marketCap) ? 1 : -1));
@@ -320,6 +405,7 @@ export async function ranksFeed(account = ""): Promise<TokenView[]> {
     const v = await toView(tokenId, a, raw, account, false);
     v.series = [];
     v.comments = [];
+    v.futures = { ...v.futures, book: [], pairs: [], recent: [] };
     out.push(v);
   }
   return out.sort((x, y) => (BigInt(y.marketCap) > BigInt(x.marketCap) ? 1 : -1));

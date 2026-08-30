@@ -6,6 +6,96 @@ everything lands on `main`.
 
 ## [Unreleased]
 
+### Changed — 2026-08-31 · Futures hardening after an adversarial review (pre-launch)
+Four independent hostile reviews (economics, determinism, arithmetic, DoS) plus
+a randomised fuzz were run against the futures engine before any deploy. Every
+confirmed finding is fixed, with a regression test for each:
+- **The reference price no longer uses a clock.** A block's timestamp is
+  `local_timestamp` — per-node and not signature-covered — so a time-weighted
+  average made *continuous* consensus money out of it: two replayers a second
+  apart would compute different balances and different roots, breaking
+  in-browser verification. It is replaced by a **volume-anchored mark**
+  (`mark += (spot − mark) × min(1, 4·Δreserve/reserve)`), which is a pure
+  function of the ordered block list. It also weights the token side, so the
+  creator-only `addLiq(xno = 0, …)` — which moves spot for free — can no longer
+  leave a stale reference for a maker to harvest a taker against.
+- **An entry-price guard is now mandatory** on `futOpen`, and closing nothing
+  is a no-op instead of an invalid op. The fixpoint defers invalid ops and
+  retries them later, so both could otherwise fire at a price the signer never
+  quoted.
+- **No position can be too small to liquidate**, and none can hide: minimum
+  order value, enforced on every fill and residue; `sellValueOf` and
+  `applyVoid` now count futures margin, so margin can't cloak a
+  Direct-Settlement position and collapse its collateral floor.
+- **Dust-chunked closes are dead**: a partial close must take and leave at
+  least the minimum, or it closes the whole position — otherwise slicing
+  rounded pnl, margin and fee all to zero.
+- **Bounded by count, not just value** (Nano is feeless): book capped per side
+  and per account, pairs capped, receipts carry a unique sequence number, and
+  the API/feed payloads no longer scale with the book.
+- Open interest is now capped at 10% of the token reserve (was 50%), shrinking
+  what a price manipulator could win. The era gate is written as a positive
+  test so a NaN/absent timestamp fails it.
+Verified after every change: 35/35 suite, 14 futures invariant groups, ~39k
+fuzzed ops with zero failures, and the replay root still **bit-identical to the
+live production root**.
+
+### Changed — 2026-08-31 · Futures UI: standard exchange layout
+Reworked to the conventions traders already know instead of bespoke ones:
+Long/Short tabs, leverage chips, an Amount field with 25/50/75/100%, a standard
+order summary (order value, entry, mark, liq. price, fee), a slippage control
+(which is what sets the on-chain guard) and one coloured Buy/Long · Sell/Short
+button. "Duels" are now Positions, Open orders and Trade history; the receipt
+reads "Position closed / Liquidated".
+
+### Added — 2026-08-30 · Futures Block 4: duel receipts, records, and the settled tape
+- Every settlement (close or liquidation) now writes a consensus **receipt**
+  (`futures.settled`, bounded to 32): pair id, both wallets, size, entry,
+  settlement price, exact pnl moved, kind and closer — regression-tested to
+  match the wallets' actual balance changes.
+- The server fold derives the FULL duel history per token; the token page
+  shows the settled tape, your record (`W · L`, liquidations, net pnl) and the
+  sybil-resistant status number: **distinct wallets beaten** (self-dueling two
+  wallets can never grow it past 1).
+- **Duel Receipt** modal pops when your duel settles — "DUEL WON." /
+  "DUEL LOST. HONOR INTACT." — with the settling block link, share text and a
+  one-click **Rematch**. Coin cards show ⚔ open-duel count.
+
+### Added — 2026-08-30 · Futures Block 3: trade it from the token page
+- New **Futures** panel under staking: LONG/SHORT, margin in the token, 1–5×
+  leverage; shows the taker-adverse entry (worse of spot/TWAP) and the exact
+  liquidation price before you commit (two-click confirm).
+- "Shorts waiting / Longs waiting" depth bars — click one to take the other
+  side; your resting orders and open positions with live pnl and FIFO-aware
+  Close; every open pair listed as a public duel (long wallet vs short wallet).
+- `TokenView.futures` (server): spot, TWAP, open interest per side, waiting
+  size per side, book and pairs. Explorer labels `open futures` / `close
+  futures` ops.
+
+### Added — 2026-08-30 · Futures Block 2: TWAP reference + adverse pricing (manipulation resistance)
+- A one-op pump/crash can no longer liquidate anyone or be cashed out: the
+  reference is a 10-minute **time**-weighted average of spot (network
+  timestamps are already consensus input), takers enter at the worse of
+  spot/TWAP, closers settle at the worse for themselves, and liquidation
+  requires a breach at **both** spot and TWAP (settling loser-favourably).
+  Holding a pump for the window lets everyone else sell into it — the real cost.
+- Sampling starts only at a token's first `futOpen`, bounded to 64 samples, so
+  no historical root changes (re-verified against the live production root).
+- Open-interest cap is now also depth-aware: `≤ 50%` of the token reserve.
+
+### Added — 2026-08-30 · Futures Block 1: token-margined inverse positions (consensus, era-gated)
+- New ops `futOpen (0x0c, fragment)` / `futClose (0x0d, compact)`: open a long
+  or short on any token with margin posted **in the token itself** — the only
+  collateral Nano consensus can enforce (tokens exist only as replay state), so
+  the derivative is zero-custody, oracle-free and solvent by construction.
+- FIFO matching with partial fills, symmetric close (closer pays 0.5% to the
+  party it closes), deterministic liquidation at 5% maintenance on every
+  price-moving op, 5× max leverage, 25%-of-supply open-interest cap per side.
+- Era-gated (`FUTURES_ERA` 2026-08-30 14:26 UTC) and root-stable: the canonical
+  root only gains a `futures` key once a token has activity. Verified
+  bit-identical against the **live production root** on the full ledger
+  (26 accounts, 1,021 blocks, 21 tokens). Spec §10; `core/futures.test.ts`.
+
 ### Changed — 2026-08-25 · Unstake tax: full 20% to stakers, no burn (era-gated)
 - From `FULL_REBATE_ERA` (2026-08-25 07:46 UTC) the whole 20% exit tax goes to
   the remaining stakers; nothing is burned. If the last staker leaves, the tax

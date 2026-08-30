@@ -124,6 +124,38 @@ interface Token {
   trades: Trade[];
   topHolders: Holder[];
   comments: Comment[];
+  futures: FuturesView;
+}
+
+interface FuturesView {
+  active: boolean;
+  spot: string;
+  twap: string;
+  oiLong: string;
+  oiShort: string;
+  longWaiting: string;
+  shortWaiting: string;
+  openPairs: number;
+  book: { id: string; account: string; side: 0 | 1; size: string; margin: string }[];
+  pairs: { id: string; size: string; entry: string; long: { account: string; margin: string }; short: { account: string; margin: string } }[];
+  recent: DuelEvent[];
+  duelCount: number;
+  myRecord: { wins: number; losses: number; liquidated: number; opponents: number; netPnl: string };
+}
+
+interface DuelEvent {
+  tokenId: string;
+  id: string;
+  size: string;
+  entry: string;
+  price: string;
+  long: string;
+  short: string;
+  longPnl: string;
+  kind: 0 | 1;
+  closer: string;
+  hash: string;
+  time: number;
 }
 
 function keysFromSeed(seed: string): Keys {
@@ -585,6 +617,22 @@ export default function Home() {
     }
   }
 
+  /** Two-block fragment op (futOpen): frag A then frag B chained on my account. */
+  async function sendFrag(tokenId: string, op: Op, label: string) {
+    if (!keys) return promptUnlock();
+    setBusy(true);
+    try {
+      const [a, b] = encodeFragLinks(tokenId, op);
+      await submitBlock(a, 1n);
+      const hash = await submitBlock(b, 1n);
+      say(`${label} ✓ ${hash.slice(0, 10)}…`);
+    } catch (e: any) {
+      say(`${label} failed: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (termsAccepted === null) return <main className="min-h-screen bg-black" />; // avoid a flash while the stored choice loads
   if (!termsAccepted) return <Welcome onAccept={acceptTerms} />;
 
@@ -674,6 +722,7 @@ export default function Home() {
                 ensureHello={ensureHello}
                 submitBlock={submitBlock}
                 sendOp={sendOp}
+                sendFrag={sendFrag}
                 promptUnlock={promptUnlock}
                 onBack={() => setSelectedId(null)}
                 refreshDetail={refreshDetail}
@@ -1992,6 +2041,7 @@ function PosterCard({ t, usd, onSelect }: { t: Token; usd: number | null; onSele
         </div>
         <p className="text-[10px] uppercase tracking-wide text-neutral-500 truncate">
           <span title="Market cap">MC {fmtXno(t.marketCap)}</span>{usd != null && <> ({fmtUsd(t.marketCap, usd)})</>} · {t.holders} holder{t.holders === 1 ? "" : "s"}
+          {(t.futures?.openPairs ?? 0) > 0 && <> · <span className="text-amber-400">⚔ {t.futures.openPairs} duel{t.futures.openPairs === 1 ? "" : "s"}</span></>}
         </p>
       </div>
       <span className="pointer-events-none absolute inset-x-0 bottom-0 hidden sm:block translate-y-full group-hover:translate-y-0 transition-transform duration-200 motion-reduce:transition-none motion-reduce:transform-none bg-white text-black text-[10px] font-black uppercase tracking-wide text-center py-1.5">
@@ -2170,6 +2220,7 @@ function TokenDetail({
   submitBlock,
   ensureHello,
   sendOp,
+  sendFrag,
   promptUnlock,
   onBack,
   refreshDetail,
@@ -2182,6 +2233,7 @@ function TokenDetail({
   submitBlock: (link: string, delta: bigint) => Promise<string>;
   ensureHello: () => Promise<void>;
   sendOp: (tokenId: string, op: Op, label: string) => Promise<void>;
+  sendFrag: (tokenId: string, op: Op, label: string) => Promise<void>;
   promptUnlock: () => void;
   onBack: () => void;
   refreshDetail: () => void;
@@ -2772,6 +2824,7 @@ function TokenDetail({
             buy={buy}
             sell={sell}
             sendOp={sendOp}
+            sendFrag={sendFrag}
             address={keys?.address ?? null}
             promptUnlock={promptUnlock}
             side={side}
@@ -2893,6 +2946,7 @@ function TradePanel({
   buy,
   sell,
   sendOp,
+  sendFrag,
   address,
   promptUnlock,
   side,
@@ -2909,6 +2963,7 @@ function TradePanel({
   buy: () => Promise<void>;
   sell: () => Promise<void>;
   sendOp: (tokenId: string, op: Op, label: string) => Promise<void>;
+  sendFrag: (tokenId: string, op: Op, label: string) => Promise<void>;
   address: string | null;
   promptUnlock: () => void;
   side: "buy" | "sell";
@@ -3191,6 +3246,8 @@ function TradePanel({
       </button>
 
       <StakeBox token={token} busy={busy} sendOp={sendOp} myAddress={address ?? undefined} />
+
+      <FuturesBox token={token} busy={busy} sendOp={sendOp} sendFrag={sendFrag} myAddress={address ?? undefined} />
 
       {/* Direct-Settlement surfaces: queued payout position + collateral. */}
       {token.direct && BigInt(token.myQueueOwed || "0") > 0n && (
@@ -3680,6 +3737,426 @@ function StakeBox({
           Claim
         </button>
       </div>
+    </div>
+  );
+}
+
+// ── Futures (SPEC §10): token-margined long/short, trustless by construction ──
+const FUT_PRECISION = 1_000_000_000_000n;
+const FUT_MAX_LEV = 5;
+const FUT_MAINT_BPS = 500n;
+const FUT_BPS = 10_000n;
+const shortAddr = (a: string) => (a ? a.slice(0, 10) + "…" + a.slice(-4) : "");
+
+function FuturesBox({
+  token,
+  busy,
+  sendOp,
+  sendFrag,
+  myAddress,
+}: {
+  token: Token;
+  busy: boolean;
+  sendOp: (tokenId: string, op: Op, label: string) => Promise<void>;
+  sendFrag: (tokenId: string, op: Op, label: string) => Promise<void>;
+  myAddress?: string;
+}) {
+  const f = token.futures;
+  const dec = token.decimals;
+  const sym = tokSym(token);
+  const [side, setSide] = useState<0 | 1>(0);
+  const [marginAmt, setMarginAmt] = useState("");
+  const [lev, setLev] = useState(2);
+  const [slip, setSlip] = useState("1"); // % — becomes the on-chain entry-price guard
+  const [armed, setArmed] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const [receipt, setReceipt] = useState<DuelEvent | null>(null);
+  // A duel of mine that settled after this page loaded (close OR liquidation)
+  // pops its receipt once — keyed in localStorage so a refresh never re-pops.
+  const loadedAt = useRef(Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    if (!myAddress) return;
+    const mine = (f?.recent ?? []).find((d) => d.long === myAddress || d.short === myAddress);
+    if (!mine || mine.time < loadedAt.current - 120) return;
+    const key = `hodl-duel-seen-${token.tokenId}`;
+    let seen = "";
+    try { seen = localStorage.getItem(key) ?? ""; } catch {}
+    if (seen === mine.hash) return;
+    try { localStorage.setItem(key, mine.hash); } catch {}
+    setReceipt(mine);
+  }, [f?.recent, myAddress, token.tokenId]);
+  const bal = BigInt(token.myBalance || "0");
+  const spot = BigInt(f?.spot || "0");
+  const twap = BigInt(f?.twap || "0");
+  const lo = spot < twap ? spot : twap;
+  const hi = spot < twap ? twap : spot;
+  const entry = side === 0 ? hi : lo; // taker-adverse (consensus rule)
+  const margin = toRaw(marginAmt || "0", dec);
+  const size = margin * BigInt(lev);
+  // Inverse-contract liquidation price (equity ≤ 5% of size):
+  //   long:  P ≤ size·E / (m + 0.95·size)     short: P ≥ size·E / (1.05·size − m)
+  const liq = (() => {
+    if (size <= 0n || entry <= 0n) return 0n;
+    if (side === 0) return (size * entry) / (margin + (size * (FUT_BPS - FUT_MAINT_BPS)) / FUT_BPS);
+    const den = (size * (FUT_BPS + FUT_MAINT_BPS)) / FUT_BPS - margin;
+    return den > 0n ? (size * entry) / den : 0n;
+  })();
+  const priceXno = (p: bigint) => fmtXno(((p * 10n ** BigInt(dec)) / FUT_PRECISION).toString()); // XNO per whole token
+  const longWaiting = BigInt(f?.longWaiting || "0");
+  const shortWaiting = BigInt(f?.shortWaiting || "0");
+  const maxWait = longWaiting > shortWaiting ? longWaiting : shortWaiting;
+  const pct = (v: bigint) => (maxWait > 0n ? Number((v * 100n) / maxWait) : 0);
+  const pairs = f?.pairs ?? [];
+  const me = myAddress ?? "";
+  const myOrders = (f?.book ?? []).filter((o) => o.account === me);
+  const myPairs = pairs.filter((p) => p.long.account === me || p.short.account === me);
+  const pnlNow = (p: FuturesView["pairs"][number], forSide: 0 | 1) => {
+    const e = BigInt(p.entry), sz = BigInt(p.size);
+    if (spot <= 0n) return 0n;
+    const longPnl = (sz * (spot - e)) / spot;
+    const cap = forSide === 0 ? BigInt(p.short.margin) : BigInt(p.long.margin);
+    let v = forSide === 0 ? longPnl : -longPnl;
+    if (v > cap) v = cap;
+    const own = forSide === 0 ? BigInt(p.long.margin) : BigInt(p.short.margin);
+    if (v < -own) v = -own;
+    return v;
+  };
+  const fmtSigned = (v: bigint) => (v < 0n ? "−" : "+") + fmtTok((v < 0n ? -v : v).toString(), dec);
+  // Slippage tolerance → the mandatory on-chain entry-price guard: a long only
+  // fills at or below it, a short only at or above it. Same control every DEX
+  // has, doing the same job.
+  const slipPct = Math.min(50, Math.max(0.1, Number(slip) || 1));
+  const slipBps = BigInt(Math.round(slipPct * 100));
+  const guard = entry <= 0n ? 0n : side === 0 ? (entry * (10_000n + slipBps)) / 10_000n : (entry * (10_000n - slipBps)) / 10_000n;
+  const minSize = BigInt(token.supply || "0") / 10_000n; // MIN_SIZE_DIV
+  const tooSmall = size > 0n && size < minSize;
+  const canOpen = margin > 0n && margin <= bal && spot > 0n && !tooSmall && !busy;
+  const open = () => {
+    if (!canOpen) return;
+    if (!armed) return setArmed(true);
+    setArmed(false);
+    sendFrag(token.tokenId, { kind: "futOpen", side, size, margin, guard }, side === 0 ? "long" : "short").then(() => setMarginAmt(""));
+  };
+  // futClose closes MY pairs FIFO — closing "this" pair means closing every
+  // earlier one of mine too; the button says how much that is.
+  const fifoSizeThrough = (id: string) => {
+    let t = 0n;
+    for (const p of myPairs) {
+      t += BigInt(p.size);
+      if (p.id === id) break;
+    }
+    return t;
+  };
+  const shown = showAll ? pairs.slice().reverse() : pairs.slice(-6).reverse();
+
+  const rec = f?.myRecord;
+  const recent = f?.recent ?? [];
+  return (
+    <div className="rounded-none border border-neutral-800 bg-neutral-950 p-3 space-y-3">
+      {receipt && (
+        <DuelReceipt
+          duel={receipt}
+          me={me}
+          symbol={sym}
+          decimals={dec}
+          tokenId={token.tokenId}
+          priceXno={priceXno}
+          onRematch={() => {
+            const mySide: 0 | 1 = receipt.long === me ? 0 : 1;
+            setSide(mySide);
+            setMarginAmt(fmtTok((BigInt(receipt.size) / BigInt(lev)).toString(), dec));
+            setReceipt(null);
+          }}
+          onClose={() => setReceipt(null)}
+        />
+      )}
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-neutral-400 font-bold">Futures · trade {sym} with up to {FUT_MAX_LEV}x leverage</span>
+        {(BigInt(f?.oiLong || "0") > 0n || BigInt(f?.oiShort || "0") > 0n) && (
+          <span className="text-neutral-500">
+            open interest <span className="text-white font-bold tabular-nums">{fmtTok(f.oiLong, dec)}</span> L / <span className="text-white font-bold tabular-nums">{fmtTok(f.oiShort, dec)}</span> S
+          </span>
+        )}
+      </div>
+      <p className="rounded-none border border-neutral-800 bg-neutral-900 px-3 py-2 text-[11px] leading-relaxed text-neutral-300">
+        Go <span className="font-bold text-green-400">long</span> if you think {sym} goes up, <span className="font-bold text-red-400">short</span> if
+        you think it goes down. Your margin is {sym} from your own balance — no deposit, nobody holds it — and{" "}
+        <span className="font-bold text-white">the most you can lose is that margin</span>.
+        <span className="text-neutral-400"> Positions close automatically (liquidate) if your margin falls to 5% of the order value. The mark price
+        follows traded volume, not the last tick, so a single big trade can't liquidate you.</span>
+      </p>
+
+      {/* Who is waiting on the other side — click to take them. */}
+      <div className="space-y-1">
+        <p className="text-[10px] uppercase tracking-widest text-neutral-500">Order book</p>
+        {([[1, "Shorts", shortWaiting, "text-red-400", "bg-red-900/60"], [0, "Longs", longWaiting, "text-green-400", "bg-green-900/60"]] as const).map(([s, label, v, tc, bc]) => (
+          <button key={label} className="w-full text-left group" onClick={() => setSide(s === 1 ? 0 : 1)} title={s === 1 ? "Go long to fill these" : "Go short to fill these"}>
+            <div className="flex items-center justify-between text-[10px]">
+              <span className={"font-bold " + tc}>{label} waiting</span>
+              <span className="text-neutral-400 tabular-nums">{v > 0n ? `${fmtTok(v.toString(), dec)} ${sym}` : "—"}</span>
+            </div>
+            <div className="h-1.5 w-full bg-neutral-900 border border-neutral-800">
+              <div className={"h-full " + bc + " group-hover:opacity-100 opacity-80"} style={{ width: `${pct(v)}%` }} />
+            </div>
+          </button>
+        ))}
+        {maxWait === 0n && <p className="text-[10px] text-neutral-500">The book is empty — your order will sit here until someone takes the other side.</p>}
+      </div>
+
+      {/* Order ticket — the layout every futures exchange uses: side tabs,
+          leverage chips, amount with % shortcuts, then a summary and one
+          coloured action button. */}
+      <div className="grid grid-cols-2">
+        <button className={"rounded-none border py-2 text-xs font-black " + (side === 0 ? "border-green-500 bg-green-600 text-white" : "border-neutral-800 text-neutral-400 hover:text-white")} onClick={() => { setSide(0); setArmed(false); }}>Long</button>
+        <button className={"rounded-none border border-l-0 py-2 text-xs font-black " + (side === 1 ? "border-red-500 bg-red-600 text-white" : "border-neutral-800 text-neutral-400 hover:text-white")} onClick={() => { setSide(1); setArmed(false); }}>Short</button>
+      </div>
+
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] text-neutral-500 w-14 shrink-0">Leverage</span>
+        <div className="flex gap-1 flex-1">
+          {[1, 2, 3, 5].map((l) => (
+            <button key={l} className={"flex-1 rounded-none border py-1 text-[11px] font-bold " + (lev === l ? "border-white bg-white text-black" : "border-neutral-800 text-neutral-400 hover:border-neutral-600 hover:text-white")} onClick={() => { setLev(l); setArmed(false); }}>
+              {l}x
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="space-y-1">
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="text-neutral-500">Amount</span>
+          <span className="text-neutral-500">Available <span className="text-neutral-300 tabular-nums">{fmtTok(bal.toString(), dec)} {sym}</span></span>
+        </div>
+        <input className={inputC} placeholder={`0.00 ${sym}`} inputMode="decimal" value={marginAmt} onChange={(e) => { setMarginAmt(e.target.value); setArmed(false); }} />
+        {bal > 0n && (
+          <div className="grid grid-cols-4 gap-1">
+            {[25, 50, 75, 100].map((p) => (
+              <button key={p} className="rounded-none border border-neutral-800 py-1 text-[10px] font-bold text-neutral-400 hover:border-white hover:text-white" onClick={() => { setMarginAmt(fmtTok(((bal * BigInt(p)) / 100n).toString(), dec)); setArmed(false); }}>
+                {p}%
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Order summary — standard rows, standard names. */}
+      <div className="border border-neutral-800 bg-neutral-900 divide-y divide-neutral-800 text-[11px]">
+        <SumRow k="Order value" v={size > 0n ? `${fmtTok(size.toString(), dec)} ${sym}` : "—"} />
+        <SumRow k="Entry price" v={spot > 0n ? `${priceXno(entry)} XNO` : "—"} />
+        <SumRow k="Mark price" v={spot > 0n ? `${priceXno(twap)} XNO` : "—"} />
+        <SumRow k="Liq. price" v={liq > 0n ? `${priceXno(liq)} XNO` : "—"} strong />
+        <SumRow k="Closing fee" v={size > 0n ? `${fmtTok(((size * 50n) / 10_000n).toString(), dec)} ${sym} (0.5%)` : "0.5%"} />
+      </div>
+
+      <div className="flex items-center gap-2 text-[11px]">
+        <span className="text-neutral-500 w-14 shrink-0">Slippage</span>
+        <div className="flex gap-1 flex-1">
+          {["0.5", "1", "3"].map((v) => (
+            <button key={v} className={"flex-1 rounded-none border py-1 text-[10px] font-bold " + (slip === v ? "border-white text-white" : "border-neutral-800 text-neutral-400 hover:text-white")} onClick={() => setSlip(v)}>{v}%</button>
+          ))}
+          <input className="w-14 rounded-none border border-neutral-800 bg-black px-2 py-1 text-[10px] text-white" inputMode="decimal" value={slip} onChange={(e) => setSlip(e.target.value)} />
+        </div>
+      </div>
+
+      <button
+        className={
+          "w-full rounded-none py-2.5 text-xs font-black uppercase tracking-wide text-white disabled:opacity-40 " +
+          (side === 0 ? "bg-green-600 hover:bg-green-500" : "bg-red-600 hover:bg-red-500")
+        }
+        disabled={!canOpen}
+        onClick={open}
+      >
+        {busy ? "…" : armed ? `Confirm — ${fmtTok(margin.toString(), dec)} ${sym} at ${lev}x` : side === 0 ? `Buy / Long ${sym}` : `Sell / Short ${sym}`}
+      </button>
+      {margin > bal && <p className="text-[10px] text-red-400">Not enough {sym} — the amount must be in your available balance (unstaked).</p>}
+      {tooSmall && <p className="text-[10px] text-red-400">Minimum order value is {fmtTok(minSize.toString(), dec)} {sym}. Raise the amount or the leverage.</p>}
+
+      {/* Positions & open orders — the standard two lists. */}
+      {(myPairs.length > 0 || myOrders.length > 0) && (
+        <div className="border-t border-neutral-800 pt-2 space-y-1">
+          <div className="flex items-center justify-between text-[10px]">
+            <span className="font-black uppercase tracking-widest text-neutral-400">Positions {myPairs.length > 0 && `(${myPairs.length})`}</span>
+            <button className="text-neutral-400 hover:text-white underline" disabled={busy} onClick={() => sendOp(token.tokenId, { kind: "futClose", size: 0n }, "close all")}>Close all</button>
+          </div>
+          {myOrders.map((o) => (
+            <div key={"o" + o.id} className="flex items-center justify-between text-[11px] text-neutral-400">
+              <span><span className={o.side === 0 ? "text-green-400 font-bold" : "text-red-400 font-bold"}>{o.side === 0 ? "Long" : "Short"}</span> {fmtTok(o.size, dec)} {sym} · open order, waiting to fill</span>
+              <span className="tabular-nums">margin {fmtTok(o.margin, dec)}</span>
+            </div>
+          ))}
+          {myPairs.map((p) => {
+            const mySide: 0 | 1 = p.long.account === me ? 0 : 1;
+            const pnl = pnlNow(p, mySide);
+            const thru = fifoSizeThrough(p.id);
+            return (
+              <div key={"p" + p.id} className="flex items-center justify-between text-[11px]">
+                <span className={mySide === 0 ? "text-green-400" : "text-red-400"}>
+                  {mySide === 0 ? "Long" : "Short"} {fmtTok(p.size, dec)} {sym} <span className="text-neutral-500">@ {priceXno(BigInt(p.entry))}</span>
+                </span>
+                <span className="flex items-center gap-2">
+                  <span className={"tabular-nums font-bold " + (pnl >= 0n ? "text-green-400" : "text-red-400")}>{fmtSigned(pnl)}</span>
+                  <button className="rounded-none border border-neutral-700 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-neutral-800 disabled:opacity-40" disabled={busy}
+                    title={thru > BigInt(p.size) ? `Closes your earlier positions first (${fmtTok(thru.toString(), dec)} ${sym} in total)` : "Market close · 0.5% closing fee"}
+                    onClick={() => sendOp(token.tokenId, { kind: "futClose", size: thru }, "close")}>Close</button>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Trading history summary — plain wins/losses and realised PnL. */}
+      {me && rec && rec.wins + rec.losses > 0 && (
+        <div className="border-t border-neutral-800 pt-2 flex items-center justify-between text-[11px]">
+          <span className="text-neutral-400">
+            Your record <span className="text-white font-black tabular-nums">{rec.wins}W · {rec.losses}L</span>
+            {rec.liquidated > 0 && <span className="text-neutral-500"> ({rec.liquidated} liquidated)</span>}
+          </span>
+          <span className="text-neutral-400">
+            Realised PnL{" "}
+            <span className={"font-black tabular-nums " + (BigInt(rec.netPnl) >= 0n ? "text-green-400" : "text-red-400")}>{fmtSigned(BigInt(rec.netPnl))} {sym}</span>
+          </span>
+        </div>
+      )}
+
+      {/* Market-wide open positions */}
+      {pairs.length > 0 && (
+        <div className="border-t border-neutral-800 pt-2 space-y-1">
+          <div className="flex items-center justify-between text-[10px]">
+            <span className="font-black uppercase tracking-widest text-neutral-400">All open positions · {pairs.length}</span>
+            {pairs.length > 6 && <button className="text-neutral-400 hover:text-white underline" onClick={() => setShowAll((v) => !v)}>{showAll ? "Show less" : "Show all"}</button>}
+          </div>
+          {shown.map((p) => {
+            const lp = pnlNow(p, 0);
+            const isMe = p.long.account === me || p.short.account === me;
+            return (
+              <div key={"d" + p.id} className={"text-[10px] flex items-center justify-between gap-2 " + (isMe ? "text-white" : "text-neutral-400")}>
+                <span className="truncate">
+                  <span className="text-green-400 font-bold">L</span> {p.long.account === me ? "you" : shortAddr(p.long.account)} <span className="text-neutral-600">vs</span>{" "}
+                  <span className="text-red-400 font-bold">S</span> {p.short.account === me ? "you" : shortAddr(p.short.account)}
+                </span>
+                <span className="tabular-nums shrink-0">{fmtTok(p.size, dec)} {sym} · long {fmtSigned(lp)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Trade history — every row is a receipt anyone can replay */}
+      {recent.length > 0 && (
+        <div className="border-t border-neutral-800 pt-2 space-y-1">
+          <div className="flex items-center justify-between text-[10px]">
+            <span className="font-black uppercase tracking-widest text-neutral-400">Trade history · {f.duelCount}</span>
+            <span className="text-neutral-600">tap a row for the receipt</span>
+          </div>
+          {recent.slice(0, 5).map((d) => {
+            const lp = BigInt(d.longPnl);
+            const winner = lp > 0n ? d.long : lp < 0n ? d.short : "";
+            const isMe = d.long === me || d.short === me;
+            return (
+              <button key={d.hash + d.id} className={"w-full text-left text-[10px] flex items-center justify-between gap-2 hover:text-white " + (isMe ? "text-white" : "text-neutral-400")} onClick={() => setReceipt(d)} title="open receipt">
+                <span className="truncate">
+                  {d.kind === 1 ? <span className="text-red-400 font-bold">Liquidated</span> : <span className="text-neutral-500 font-bold">Closed</span>}{" "}
+                  <span className="text-green-400 font-bold">Long</span> {d.long === me ? "you" : shortAddr(d.long)} <span className="text-neutral-600">·</span>{" "}
+                  <span className="text-red-400 font-bold">Short</span> {d.short === me ? "you" : shortAddr(d.short)}
+                  {winner && <span className="text-neutral-500"> · {winner === me ? "you" : shortAddr(winner)} profited</span>}
+                </span>
+                <span className="tabular-nums shrink-0">{fmtTok(d.size, dec)} {sym} · {fmtSigned(lp < 0n ? -lp : lp)}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Trade receipt — the standard "position closed / liquidated" confirmation,
+ * with the settling block so anyone can verify it, and a one-click re-open. */
+function DuelReceipt({
+  duel,
+  me,
+  symbol,
+  decimals,
+  tokenId,
+  priceXno,
+  onRematch,
+  onClose,
+}: {
+  duel: DuelEvent;
+  me: string;
+  symbol: string;
+  decimals: number;
+  tokenId: string;
+  priceXno: (p: bigint) => string;
+  onRematch: () => void;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const lp = BigInt(duel.longPnl);
+  const mySide: 0 | 1 | null = duel.long === me ? 0 : duel.short === me ? 1 : null;
+  const myPnl = mySide === 0 ? lp : mySide === 1 ? -lp : lp;
+  const won = myPnl > 0n;
+  const liq = duel.kind === 1;
+  const liqLoser = liq ? (lp < 0n ? duel.long : duel.short) : "";
+  const url = `${typeof window !== "undefined" ? window.location.origin : "https://www.hodlgame.fun"}/t/${tokenId}`;
+  const headline =
+    mySide == null ? (liq ? "POSITION LIQUIDATED" : "POSITION CLOSED") : liq && liqLoser === me ? "YOU WERE LIQUIDATED" : won ? "POSITION CLOSED · PROFIT" : "POSITION CLOSED · LOSS";
+  const abs = myPnl < 0n ? -myPnl : myPnl;
+  const line = mySide == null
+    ? `A $${symbol} futures position settled on-chain: ${fmtTok(abs.toString(), decimals)} ${symbol} changed hands. No oracle, no custody — anyone can verify it. ${url}`
+    : won
+      ? `Closed my $${symbol} ${mySide === 0 ? "long" : "short"} for +${fmtTok(abs.toString(), decimals)} ${symbol}. On-chain futures, verifiable by anyone. ${url}`
+      : `${liq ? "Liquidated" : "Closed"} on my $${symbol} ${mySide === 0 ? "long" : "short"}: −${fmtTok(abs.toString(), decimals)} ${symbol}. All on-chain. ${url}`;
+  const share = async () => {
+    try {
+      if (typeof navigator !== "undefined" && (navigator as any).share) {
+        await (navigator as any).share({ title: "Trade receipt", text: line, url });
+        return;
+      }
+    } catch { return; }
+    try { await navigator.clipboard.writeText(line); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch {}
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4" onClick={onClose}>
+      <div className="w-full max-w-xs rounded-none border border-neutral-700 bg-neutral-950 p-5 space-y-3 font-mono" onClick={(e) => e.stopPropagation()}>
+        <div className="text-center border-b border-dashed border-neutral-700 pb-2">
+          <p className={"text-sm font-black tracking-[0.2em] " + (mySide == null ? "text-white" : won ? "text-green-400" : "text-red-400")}>{headline}</p>
+          <p className="text-[10px] text-neutral-500">{liq ? "Liquidation" : "Market close"} · ${symbol.toUpperCase()} · #{duel.id}</p>
+        </div>
+        <div className="text-xs divide-y divide-neutral-800 border border-neutral-800">
+          <Line k="long" v={duel.long === me ? "you" : shortAddr(duel.long)} />
+          <Line k="short" v={duel.short === me ? "you" : shortAddr(duel.short)} />
+          <Line k="size" v={`${fmtTok(duel.size, decimals)} ${symbol}`} />
+          <Line k="entry" v={`${priceXno(BigInt(duel.entry))} XNO`} />
+          <Line k="settled at" v={`${priceXno(BigInt(duel.price))} XNO`} />
+          <Line k={mySide == null ? "long pnl" : "your pnl"} v={`${myPnl < 0n ? "−" : "+"}${fmtTok(abs.toString(), decimals)} ${symbol}`} strong />
+          {duel.closer && <Line k="closed by" v={duel.closer === me ? "you" : shortAddr(duel.closer)} />}
+        </div>
+        <p className="text-center text-[10px] text-neutral-600">
+          Settled in block <a className="underline hover:text-white" href={`https://nanexplorer.com/nano/block/${duel.hash}`} target="_blank" rel="noreferrer">{duel.hash.slice(0, 10)}…</a> · verify it yourself in the Explorer — no oracle, no server trust
+        </p>
+        <div className="flex flex-col gap-2">
+          {mySide != null && (
+            <button onClick={onRematch} className="w-full rounded-none bg-white py-2 text-[11px] font-black uppercase tracking-wide text-black hover:bg-neutral-200">
+              Open a new position
+            </button>
+          )}
+          <button onClick={share} className="w-full rounded-none border border-neutral-700 py-2 text-[11px] font-black uppercase tracking-wide text-neutral-300 hover:border-white hover:text-white">
+            {copied ? "Copied" : "Share receipt"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** One row of a standard order summary. */
+function SumRow({ k, v, strong }: { k: string; v: string; strong?: boolean }) {
+  return (
+    <div className="flex items-center justify-between px-2 py-1">
+      <span className="text-neutral-500">{k}</span>
+      <span className={"tabular-nums " + (strong ? "font-black text-white" : "text-neutral-300")}>{v}</span>
     </div>
   );
 }
