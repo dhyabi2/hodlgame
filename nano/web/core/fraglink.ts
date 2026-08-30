@@ -61,6 +61,7 @@ function fragCode(kind: Op["kind"]): number | null {
     case "buy": return OP_CODE.buy;
     case "seedLiq": return OP_CODE.seedLiq;
     case "addLiq": return OP_CODE.addLiq;
+    case "futOpen": return OP_CODE.futOpen;
     default: return null;
   }
 }
@@ -80,6 +81,11 @@ function bodyOf(op: Op): Uint8Array {
   } else if (op.kind === "seedLiq" || op.kind === "addLiq") {
     writeAmt(b, 0, op.xno);
     writeAmt(b, AMT_BYTES, op.tokens);
+  } else if (op.kind === "futOpen") {
+    // [ size: 15B ][ margin: 15B ][ side: 1B ][ zero: 16B ]
+    writeAmt(b, 0, op.size);
+    writeAmt(b, AMT_BYTES, op.margin);
+    b[2 * AMT_BYTES] = op.side;
   } else {
     throw new Error("op does not use fragment links: " + op.kind);
   }
@@ -109,7 +115,8 @@ export function isFragA(linkHex: string): boolean {
     code === OP_CODE.sell ||
     code === OP_CODE.buy ||
     code === OP_CODE.seedLiq ||
-    code === OP_CODE.addLiq
+    code === OP_CODE.addLiq ||
+    code === OP_CODE.futOpen
   );
 }
 
@@ -130,6 +137,17 @@ export function assembleFrag(aHex: string, bHex: string): { tokenId: TokenId; op
     if (/^0+$/.test(toPub)) throw new Error("transfer to zero pubkey");
     const to = nanocurrency.deriveAddress(toPub, { useNanoPrefix: true });
     return { tokenId, op: { kind: "transfer", to, amount: readAmt(body, 32) } };
+  }
+  if (code === OP_CODE.futOpen) {
+    const sideByte = body[2 * AMT_BYTES];
+    if (sideByte !== 0 && sideByte !== 1) throw new Error("bad futures side");
+    for (let i = 2 * AMT_BYTES + 1; i < BODY_BYTES; i++) {
+      if (body[i] !== 0) throw new Error("fragment padding not zero");
+    }
+    return {
+      tokenId,
+      op: { kind: "futOpen", side: sideByte as 0 | 1, size: readAmt(body, 0), margin: readAmt(body, AMT_BYTES) },
+    };
   }
   // two-amount ops: trailing padding MUST be zero (rejects garbage that merely
   // carries the marker)

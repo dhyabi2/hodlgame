@@ -5,6 +5,15 @@
 // state — that is the entire trust model.
 
 import type { Op } from "./ops";
+import {
+  FUTURES_ERA,
+  cloneFutures,
+  closeFutures,
+  emptyFutures,
+  openFutures,
+  sweepFutures,
+  type FutState,
+} from "./futures";
 
 export const PRECISION = 1_000_000_000_000n;
 export const BPS = 10_000n;
@@ -88,6 +97,12 @@ export interface State {
   // residual owed, the excess is real XNO the seller already received — it
   // nets against their future sell proceeds first (no double-pay).
   prepaid: Map<string, bigint>;
+  // ── Futures (core/futures.ts) ─────────────────────────────────────────────
+  // Token-margined inverse positions: resting orders + matched pairs. Margin
+  // tokens leave `balances` while locked (conservation: balances + staked +
+  // treasury + poolTokens + lockedMargin == supply). Empty for every token
+  // without futures activity → canonical root unchanged for all history.
+  futures: FutState;
   height: bigint;
 }
 
@@ -119,6 +134,7 @@ export function emptyState(): State {
     earmarkFloor: new Map(),
     queue: [],
     prepaid: new Map(),
+    futures: emptyFutures(),
     height: 0n,
   };
 }
@@ -261,7 +277,14 @@ function cloneState(s0: State): State {
     earmarkFloor: new Map(s0.earmarkFloor),
     queue: s0.queue.map((e) => ({ ...e })),
     prepaid: new Map(s0.prepaid),
+    futures: cloneFutures(s0.futures),
   };
+}
+
+// Deterministic liquidation pass after any op that moves the virtual price.
+// A pure no-op for tokens with no open pairs (all pre-futures history).
+function afterPriceChange(s: State) {
+  if (s.futures.pairs.length > 0) sweepFutures(s, s.futures);
 }
 
 // `timestamp` is the carrier block's network-observed time (seconds); it only
@@ -315,6 +338,7 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
         s.poolXno += op.xno;
         s.poolTokens -= out;
         set(s.balances, sender, get(s.balances, sender) + out);
+        afterPriceChange(s);
         s.height = height;
         return s;
       }
@@ -355,6 +379,7 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
         set(s.earmarkFloor, sender, (s.earmarkFloor.get(sender) ?? 0n) + op.xno);
       }
       ratchetFloors(s);
+      afterPriceChange(s);
       s.height = height;
       return s;
     }
@@ -374,6 +399,7 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
         // Proceeds become in-game credit (see State.xnoCredit) — the real XNO
         // stays in the pool account until the seller explicitly withdraws.
         set(s.xnoCredit, sender, get(s.xnoCredit, sender) + out);
+        afterPriceChange(s);
         s.height = height;
         return s;
       }
@@ -423,6 +449,18 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
       // netted + own collateral released + queued (post-haircut) claim.
       if (usePre + net + credited < op.minXno) throw new InvalidOp("slippage");
       ratchetFloors(s);
+      afterPriceChange(s);
+      s.height = height;
+      return s;
+    }
+
+    case "futOpen":
+    case "futClose": {
+      if (!s.launched) throw new InvalidOp("not launched");
+      // Era-gated: unstamped or pre-era futures ops are invalid everywhere.
+      if (timestamp == null || timestamp < FUTURES_ERA) throw new InvalidOp("futures not active");
+      if (op.kind === "futOpen") openFutures(s, s.futures, sender, op.side, op.size, op.margin);
+      else closeFutures(s, s.futures, sender, op.size);
       s.height = height;
       return s;
     }
@@ -514,6 +552,7 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
       s.poolXno += op.xno;
       s.poolTokens += op.tokens;
       if (s.direct) ratchetFloors(s);
+      afterPriceChange(s);
       s.height = height;
       return s;
     }

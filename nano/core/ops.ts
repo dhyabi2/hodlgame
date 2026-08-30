@@ -25,6 +25,11 @@ export type Op =
   | { kind: "withdraw" }
   | { kind: "seedLiq"; xno: bigint; tokens: bigint }
   | { kind: "addLiq"; xno: bigint; tokens: bigint }
+  // Futures (core/futures.ts): token-margined inverse positions. `side` 0=long
+  // 1=short; `size` is notional in tokens; `margin` tokens are locked from the
+  // sender's balance. futClose.size 0 = cancel all resting + close everything.
+  | { kind: "futOpen"; side: 0 | 1; size: bigint; margin: bigint }
+  | { kind: "futClose"; size: bigint }
   // Synthetic observation (never encoded on-chain): the signed balance of one
   // account's block, folded in canonical order. Direct tokens use it to detect
   // earmark defection (balance dropped below the ratcheted floor) and void the
@@ -42,6 +47,8 @@ export const OP_CODE: Record<Exclude<Op["kind"], "balance">, number> = {
   withdraw: 0x0a,
   seedLiq: 0x08,
   addLiq: 0x09,
+  futOpen: 0x0c,
+  futClose: 0x0d,
 };
 
 // Direct-Settlement launch rides its own opcode so the mode is consensus-bound

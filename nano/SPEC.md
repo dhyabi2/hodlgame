@@ -31,12 +31,15 @@ Each operation is a Nano **state block** where:
 Op codes: `launch=0x01, transfer=0x02, buy=0x03, sell=0x04, stake=0x05,
 unstake=0x06, claim=0x07, seedLiq=0x08, addLiq=0x09, withdraw=0x0a,
 launchDirect=0x0b` (same byte layout as `launch`; marks the token
-**Direct-Settlement / zero-custody**, §8).
+**Direct-Settlement / zero-custody**, §8), `futOpen=0x0c` (fragment only),
+`futClose=0x0d` (compact; amount = size to close, 0 = close all) — see §10.
 
 Fragment links (`0xE0 | opcode` marker across two chained 1-raw blocks) carry
 two-amount ops fully on-chain: `transfer(to, amount)`, `sell(tokens, minXno)`,
 `buy(xno, minTokens)` (direct self-earmark buys declare their xno this way),
-and `seedLiq/addLiq(xno, tokens)` (direct virtual seeds).
+`seedLiq/addLiq(xno, tokens)` (direct virtual seeds), and
+`futOpen(size, margin, side)` (body `[size 15B][margin 15B][side 1B][zero 16B]`,
+side 0 = long, 1 = short; any other side byte or non-zero padding is rejected).
 
 Ops that don't fit 31 bytes (e.g. `launch` with name/IPFS CID) are encoded as
 **commit-reveal**: `link = blake2b(payload)`, and the payload is fetched from any
@@ -270,3 +273,52 @@ at sell.
   re-prices (time-primary ordering is what guarantees newly discovered blocks
   actually append rather than insert). Every replayer runs the identical
   procedure over the identical ordered list, so state stays byte-identical.
+
+## 10. Futures — token-margined inverse positions (`core/futures.ts`)
+
+**Why this is the only trustless derivative possible on Nano.** The chain can
+never seize XNO, but a HodlGame token exists *only* as replay state — so margin
+posted **in the token** is enforceable by consensus. A loss is a balance move
+inside `State`; no escrow, no operator key, no oracle. Futures never touch XNO
+or the spot invariants (§8: earmarks, floors, `queue == unpaid appreciation`).
+
+**Constants.** `FUTURES_ERA = 1_788_100_000` (2026-08-30 14:26:40 UTC),
+`MAX_LEVERAGE = 5`, `MAINT_BPS = 500`, `CLOSE_FEE_BPS = 50`, `MAX_OI_BPS = 2500`.
+
+**Mark price.** `mark = poolXno × PRECISION / poolTokens` — the token's own
+replay-computed spot. Invalid (`no liquidity`) when either reserve is 0.
+
+**State.** `futures: { book: FutOrder[], pairs: FutPair[], nextId }` per token.
+`FutOrder = {id, account, side, size, margin}` (resting, FIFO);
+`FutPair = {id, size, entry, long: {account, margin}, short: {account, margin}}`.
+Margin tokens leave `balances` while locked. Conservation (tested):
+`Σbalances + Σstaked + treasury + poolTokens + lockedMargin == supply`.
+The canonical root carries a `futures` key **only once a token has futures
+activity** (`nextId > 0` or a non-empty book/pairs) — every pre-futures root is
+byte-identical to before (verified against the live production root).
+
+**`futOpen(side, size, margin)`** — valid iff stamped `≥ FUTURES_ERA`, token
+launched and priced, `size > 0`, `margin > 0`, `size ≤ margin × MAX_LEVERAGE`,
+`balance ≥ margin`, and that side's open interest (book + pairs) + size
+`≤ supply × MAX_OI_BPS / BPS`. Deducts `margin`, then matches FIFO against
+resting opposite-side orders **not owned by the sender** (partial fills; maker
+and taker margin are prorated by fill / original size, rounding dust refunded).
+Each fill creates a pair at `entry = mark`. Any unmatched remainder rests in
+the book with its prorated margin.
+
+**`futClose(size)`** — `size = 0`: refund every resting order of the sender and
+close all their pairs; else close the sender's pairs FIFO up to `size`
+(partial). Each closed portion settles **both** legs at `mark`:
+`pnl_long = portion × (mark − entry) / mark` (tokens), clamped to
+`[−longMargin, +shortMargin]` (loss never exceeds what the loser locked);
+the closer pays `portion × CLOSE_FEE_BPS / BPS` (capped at their payout) to the
+counterparty it closed. Invalid (`nothing to close`) if the sender had nothing.
+
+**Liquidation sweep** — after every op that moves the price (buy, sell,
+seedLiq, addLiq) and after every futures op, each pair whose losing side's
+equity `margin ± pnl ≤ size × MAINT_BPS / BPS` is settled at `mark` with no
+fee, in ascending pair id. A pure no-op for tokens with no pairs.
+
+**Guarantees.** Zero-sum per pair; solvent by construction (no insurance
+fund); deterministic (identical fold on every replayer); era-gated so no
+historical block can ever decode into a futures op that applies.

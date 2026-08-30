@@ -6,6 +6,19 @@ everything lands on `main`.
 
 ## [Unreleased]
 
+### Added — 2026-08-30 · Futures Block 1: token-margined inverse positions (consensus, era-gated)
+- New ops `futOpen (0x0c, fragment)` / `futClose (0x0d, compact)`: open a long
+  or short on any token with margin posted **in the token itself** — the only
+  collateral Nano consensus can enforce (tokens exist only as replay state), so
+  the derivative is zero-custody, oracle-free and solvent by construction.
+- FIFO matching with partial fills, symmetric close (closer pays 0.5% to the
+  party it closes), deterministic liquidation at 5% maintenance on every
+  price-moving op, 5× max leverage, 25%-of-supply open-interest cap per side.
+- Era-gated (`FUTURES_ERA` 2026-08-30 14:26 UTC) and root-stable: the canonical
+  root only gains a `futures` key once a token has activity. Verified
+  bit-identical against the **live production root** on the full ledger
+  (26 accounts, 1,021 blocks, 21 tokens). Spec §10; `core/futures.test.ts`.
+
 ### Changed — 2026-08-25 · Unstake tax: full 20% to stakers, no burn (era-gated)
 - From `FULL_REBATE_ERA` (2026-08-25 07:46 UTC) the whole 20% exit tax goes to
   the remaining stakers; nothing is burned. If the last staker leaves, the tax

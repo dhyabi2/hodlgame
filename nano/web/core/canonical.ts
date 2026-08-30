@@ -9,6 +9,7 @@
 import { blake2bHex } from "blakejs";
 import type { MultiState } from "./multi";
 import type { State } from "./state";
+import { futuresActive } from "./futures";
 
 export function canonicalize(v: unknown): string {
   if (typeof v === "bigint") return `"${v.toString()}"`;
@@ -48,6 +49,21 @@ function consensusView(s: State) {
     earmarkFloor: s.earmarkFloor,
     queue: s.queue.map((e) => ({ account: e.account, owed: e.owed })),
     prepaid: s.prepaid,
+    // Present ONLY once a token has futures activity, so every pre-futures
+    // root (all anchored history) is byte-identical to before the feature.
+    futures: futuresActive(s.futures)
+      ? {
+          book: s.futures.book.map((o) => ({ id: o.id, account: o.account, side: o.side, size: o.size, margin: o.margin })),
+          pairs: s.futures.pairs.map((p) => ({
+            id: p.id,
+            size: p.size,
+            entry: p.entry,
+            long: { account: p.long.account, margin: p.long.margin },
+            short: { account: p.short.account, margin: p.short.margin },
+          })),
+          nextId: s.futures.nextId,
+        }
+      : undefined,
     height: s.height,
   };
 }

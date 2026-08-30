@@ -65,6 +65,8 @@ function primaryAmount(op: Op): bigint {
     case "withdraw": return 0n;
     case "seedLiq":
     case "addLiq": return op.tokens; // xno is bound by the chained pool deposit
+    case "futClose": return op.size;
+    case "futOpen": throw new Error("futOpen uses fragment links");
     case "balance": throw new Error("balance is a synthetic observation, never encoded");
     default: throw new Error("op does not fit compact link: " + op.kind);
   }
@@ -149,6 +151,9 @@ export function decodeOpLink(
       break;
     case OP_CODE.addLiq:
       op = { kind: "addLiq", xno: 0n, tokens: amt };
+      break;
+    case OP_CODE.futClose:
+      op = { kind: "futClose", size: amt };
       break;
     default:
       throw new Error("unknown op code " + code);

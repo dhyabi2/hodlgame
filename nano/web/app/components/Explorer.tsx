@@ -60,9 +60,10 @@ const KIND_COLOR: Record<string, string> = {
   launch: "bg-neutral-800 text-neutral-200", buy: "bg-neutral-900 text-green-500", sell: "bg-neutral-900 text-red-500",
   transfer: "bg-neutral-800 text-neutral-200", seedLiq: "bg-neutral-800 text-neutral-200", addLiq: "bg-neutral-800 text-neutral-200",
   stake: "bg-neutral-900/60 text-white", unstake: "bg-neutral-900/60 text-white", claim: "bg-neutral-900 text-neutral-300",
+  futOpen: "bg-neutral-900 text-amber-400", futClose: "bg-neutral-900 text-amber-300",
 };
-const ALL_KINDS = ["launch", "buy", "sell", "transfer", "seedLiq", "addLiq", "stake", "unstake", "claim", "withdraw"];
-const KIND_LABEL: Record<string, string> = { launch: "launch", buy: "buy", sell: "sell", transfer: "send", seedLiq: "seed liquidity", addLiq: "add liquidity", stake: "stake", unstake: "unstake", claim: "claim", withdraw: "withdraw" };
+const ALL_KINDS = ["launch", "buy", "sell", "transfer", "seedLiq", "addLiq", "stake", "unstake", "claim", "withdraw", "futOpen", "futClose"];
+const KIND_LABEL: Record<string, string> = { launch: "launch", buy: "buy", sell: "sell", transfer: "send", seedLiq: "seed liquidity", addLiq: "add liquidity", stake: "stake", unstake: "unstake", claim: "claim", withdraw: "withdraw", futOpen: "open futures", futClose: "close futures" };
 const FIELD_XNO = new Set(["poolXno"]);
 const FIELD_LABEL: Record<string, string> = { supply: "total coins", creatorShare: "creator's coins", treasury: "treasury", poolXno: "pool XNO", poolTokens: "coins in pool", totalStaked: "staked", rebateVault: "rebate vault", rewardPerShare: "reward per share" };
 
