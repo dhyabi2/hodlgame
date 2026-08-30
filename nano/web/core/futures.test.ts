@@ -66,7 +66,7 @@ function conserved(s: State) {
   assert.deepEqual(c, { tokenId: tid, op: { kind: "futClose", size: 77n } });
   // pre-futures state has NO futures key in the root → identical to before
   const root1 = stateRoot(new Map([[tid, s]]));
-  const s2 = { ...s, futures: { book: [], pairs: [], nextId: 0n } };
+  const s2 = { ...s, futures: emptyState().futures };
   assert.equal(stateRoot(new Map([[tid, s2]])), root1);
   console.log("1 ok: era gate + encodings + root stability");
 }

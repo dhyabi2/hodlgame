@@ -6,6 +6,17 @@ everything lands on `main`.
 
 ## [Unreleased]
 
+### Added — 2026-08-30 · Futures Block 3: trade it from the token page
+- New **Futures** panel under staking: LONG/SHORT, margin in the token, 1–5×
+  leverage; shows the taker-adverse entry (worse of spot/TWAP) and the exact
+  liquidation price before you commit (two-click confirm).
+- "Shorts waiting / Longs waiting" depth bars — click one to take the other
+  side; your resting orders and open positions with live pnl and FIFO-aware
+  Close; every open pair listed as a public duel (long wallet vs short wallet).
+- `TokenView.futures` (server): spot, TWAP, open interest per side, waiting
+  size per side, book and pairs. Explorer labels `open futures` / `close
+  futures` ops.
+
 ### Added — 2026-08-30 · Futures Block 2: TWAP reference + adverse pricing (manipulation resistance)
 - A one-op pump/crash can no longer liquidate anyone or be cashed out: the
   reference is a 10-minute **time**-weighted average of spot (network
