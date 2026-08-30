@@ -85,7 +85,7 @@ export interface FuturesView {
   longWaiting: string; // resting (unmatched) long size — what a short taker can hit
   shortWaiting: string;
   openPairs: number; // count only — list views strip `pairs` but still show ⚔
-  book: { id: string; account: string; side: 0 | 1; size: string; margin: string }[];
+  book: { id: string; account: string; side: 0 | 1; size: string; margin: string; guard: string }[];
   pairs: { id: string; size: string; entry: string; long: { account: string; margin: string }; short: { account: string; margin: string } }[];
   // Settled duels (newest first, last 20) — every row is a verifiable receipt
   // tied to the block that settled it.
@@ -136,9 +136,17 @@ function futuresView(s: { poolXno: bigint; poolTokens: bigint; futures: FutState
     longWaiting: lw.toString(),
     shortWaiting: sw.toString(),
     openPairs: f.pairs.length,
-    // Bounded like `pairs` below: the consensus book is length-capped, but the
-    // payload must never scale with it (this ships in the home feed too).
-    book: f.book.slice(-60).map((o) => ({ id: o.id.toString(), account: o.account, side: o.side, size: o.size.toString(), margin: o.margin.toString() })),
+    // The consensus book is length-capped (MAX_BOOK_SIDE per side), so serving
+    // it whole is bounded; list views strip it anyway. `guard` is the order's
+    // limit price — what makes a real bid/ask ladder possible.
+    book: f.book.map((o) => ({
+      id: o.id.toString(),
+      account: o.account,
+      side: o.side,
+      size: o.size.toString(),
+      margin: o.margin.toString(),
+      guard: o.guard.toString(),
+    })),
     pairs: f.pairs.slice(-60).map((p) => ({
       id: p.id.toString(),
       size: p.size.toString(),

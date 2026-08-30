@@ -136,7 +136,7 @@ interface FuturesView {
   longWaiting: string;
   shortWaiting: string;
   openPairs: number;
-  book: { id: string; account: string; side: 0 | 1; size: string; margin: string }[];
+  book: { id: string; account: string; side: 0 | 1; size: string; margin: string; guard: string }[];
   pairs: { id: string; size: string; entry: string; long: { account: string; margin: string }; short: { account: string; margin: string } }[];
   recent: DuelEvent[];
   duelCount: number;
@@ -433,7 +433,10 @@ export default function Home() {
   const usd = useXnoUsd(); // live XNO→USD for $-equivalents across the app
   // First-visit gate: the app is reachable only after the Terms are accepted.
   const [termsAccepted, acceptTerms] = useTermsAccepted();
-  const [tab, setTab] = useState<"explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet" | "list">("explore");
+  const [tab, setTab] = useState<"explore" | "ranks" | "futures" | "portfolio" | "create" | "scan" | "wallet" | "list">("explore");
+  // Which tab a freshly opened coin should show (the Futures market list sends
+  // you straight to its Futures tab).
+  const [detailTab, setDetailTab] = useState<"trade" | "futures" | "thread">("trade");
   const [unlockOpen, setUnlockOpen] = useState(false);
 
   // Transient status message (auto-dismisses) — no persistent debug log in the UI.
@@ -511,7 +514,7 @@ export default function Home() {
       const t = h.get("t");
       const tb = h.get("tab") as typeof tab | null;
       if (t) setSelectedId(t.toLowerCase());
-      else if (tb && ["explore", "ranks", "portfolio", "create", "scan", "wallet", "list"].includes(tb)) setTab(tb);
+      else if (tb && ["explore", "ranks", "futures", "portfolio", "create", "scan", "wallet", "list"].includes(tb)) setTab(tb);
     } catch {}
   }, []);
 
@@ -646,7 +649,7 @@ export default function Home() {
           </button>
           {/* Desktop nav only — on mobile the bottom tab bar handles navigation. */}
           <nav className="hidden sm:flex items-center gap-4 text-xs font-bold uppercase tracking-wide text-neutral-400 min-w-0 overflow-x-auto">
-            {([["explore", "Coins"], ["ranks", "Ranks"], ["scan", "Explorer"], ["wallet", "Wallet"], ["list", "List"]] as const).map(([id, label]) => (
+            {([["explore", "Coins"], ["ranks", "Ranks"], ["futures", "Futures"], ["scan", "Explorer"], ["wallet", "Wallet"], ["list", "List"]] as const).map(([id, label]) => (
               <button key={id} className={"whitespace-nowrap py-1 border-b-2 -mb-px " + (!selectedId && tab === id ? "text-white border-white" : "border-transparent hover:text-white")} onClick={() => { setSelectedId(null); setTab(id); }}>{label}</button>
             ))}
             <a className="hover:text-white whitespace-nowrap" href="/pro">Chart / Trade ↗</a>
@@ -724,6 +727,7 @@ export default function Home() {
                 sendOp={sendOp}
                 sendFrag={sendFrag}
                 promptUnlock={promptUnlock}
+                initialTab={detailTab}
                 onBack={() => setSelectedId(null)}
                 refreshDetail={refreshDetail}
               />
@@ -749,9 +753,11 @@ export default function Home() {
             </div>
           )
         ) : tab === "explore" ? (
-          <Feed tokens={tokens} loaded={feedLoaded} onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} usd={usd} onCreate={() => setTab("create")} />
+          <Feed tokens={tokens} loaded={feedLoaded} onSelect={(id) => { setDetailTab("trade"); setSelectedId(id); }} myAddress={keys?.address} usd={usd} onCreate={() => setTab("create")} />
         ) : tab === "ranks" ? (
-          <Ranks onSelect={(id) => setSelectedId(id)} myAddress={keys?.address} />
+          <Ranks onSelect={(id) => { setDetailTab("trade"); setSelectedId(id); }} myAddress={keys?.address} />
+        ) : tab === "futures" ? (
+          <FuturesMarkets tokens={tokens} loaded={feedLoaded} onSelect={(id) => { setDetailTab("futures"); setSelectedId(id); }} />
         ) : tab === "scan" ? (
           <Explorer />
         ) : tab === "list" ? (
@@ -2224,6 +2230,7 @@ function TokenDetail({
   promptUnlock,
   onBack,
   refreshDetail,
+  initialTab,
 }: {
   token: Token;
   keys: Keys | null;
@@ -2237,6 +2244,7 @@ function TokenDetail({
   promptUnlock: () => void;
   onBack: () => void;
   refreshDetail: () => void;
+  initialTab?: "trade" | "futures" | "thread";
 }) {
   // Optimistic seed override: the instant the creator sets a starting price, the
   // coin reads as tradeable in the UI (poolXno/price/mcap reflect the seed) even
@@ -2282,7 +2290,10 @@ function TokenDetail({
       say(url);
     }
   };
-  const [tab, setTab] = useState<"trade" | "thread">("trade");
+  const [tab, setTab] = useState<"trade" | "futures" | "thread">(initialTab ?? "trade");
+  // Arriving from the Futures market list should land on the Futures tab, and
+  // switching coins should re-apply that intent rather than keep the old tab.
+  useEffect(() => { setTab(initialTab ?? "trade"); }, [token.tokenId, initialTab]);
   const [side, setSide] = useState<"buy" | "sell">("buy"); // lifted so the mobile action bar can pick a side
   // Default to a sane 1% slippage and remember the user's last choice, so they
   // don't re-set protection on every coin.
@@ -2805,6 +2816,12 @@ function TokenDetail({
             Trade
           </button>
           <button
+            className={"px-4 py-2 rounded-none text-sm font-bold " + (tab === "futures" ? "bg-white text-black" : "text-neutral-500 hover:text-white")}
+            onClick={() => setTab("futures")}
+          >
+            Futures{token.futures?.openPairs ? ` (${token.futures.openPairs})` : ""}
+          </button>
+          <button
             className={"px-4 py-2 rounded-none text-sm font-bold " + (tab === "thread" ? "bg-white text-black" : "text-neutral-500 hover:text-white")}
             onClick={() => setTab("thread")}
           >
@@ -2830,6 +2847,8 @@ function TokenDetail({
             side={side}
             setSide={setSide}
           />
+        ) : tab === "futures" ? (
+          <FuturesBox token={token} busy={busy} sendOp={sendOp} sendFrag={sendFrag} myAddress={keys?.address ?? undefined} />
         ) : (
           <CommentThread tokenId={token.tokenId} comments={token.comments} keys={keys} isDev={keys?.address === token.creator} />
         )}
@@ -3246,8 +3265,6 @@ function TradePanel({
       </button>
 
       <StakeBox token={token} busy={busy} sendOp={sendOp} myAddress={address ?? undefined} />
-
-      <FuturesBox token={token} busy={busy} sendOp={sendOp} sendFrag={sendFrag} myAddress={address ?? undefined} />
 
       {/* Direct-Settlement surfaces: queued payout position + collateral. */}
       {token.direct && BigInt(token.myQueueOwed || "0") > 0n && (
@@ -3888,19 +3905,16 @@ function FuturesBox({
 
       {/* Who is waiting on the other side — click to take them. */}
       <div className="space-y-1">
-        <p className="text-[10px] uppercase tracking-widest text-neutral-500">Order book</p>
-        {([[1, "Shorts", shortWaiting, "text-red-400", "bg-red-900/60"], [0, "Longs", longWaiting, "text-green-400", "bg-green-900/60"]] as const).map(([s, label, v, tc, bc]) => (
-          <button key={label} className="w-full text-left group" onClick={() => setSide(s === 1 ? 0 : 1)} title={s === 1 ? "Go long to fill these" : "Go short to fill these"}>
-            <div className="flex items-center justify-between text-[10px]">
-              <span className={"font-bold " + tc}>{label} waiting</span>
-              <span className="text-neutral-400 tabular-nums">{v > 0n ? `${fmtTok(v.toString(), dec)} ${sym}` : "—"}</span>
-            </div>
-            <div className="h-1.5 w-full bg-neutral-900 border border-neutral-800">
-              <div className={"h-full " + bc + " group-hover:opacity-100 opacity-80"} style={{ width: `${pct(v)}%` }} />
-            </div>
-          </button>
-        ))}
-        {maxWait === 0n && <p className="text-[10px] text-neutral-500">The book is empty — your order will sit here until someone takes the other side.</p>}
+        <OrderBook
+          book={f?.book ?? []}
+          spot={spot}
+          mark={twap}
+          decimals={dec}
+          symbol={sym}
+          me={me}
+          priceXno={priceXno}
+          onTake={(s) => { setSide(s); setArmed(false); }}
+        />
       </div>
 
       {/* Order ticket — the layout every futures exchange uses: side tabs,
@@ -4147,6 +4161,184 @@ function DuelReceipt({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Futures markets — the home tab: every coin you can trade with leverage,
+ * busiest first, so open interest and resting depth are visible before you
+ * commit to a coin. */
+function FuturesMarkets({ tokens, loaded, onSelect }: { tokens: Token[]; loaded: boolean; onSelect: (id: string) => void }) {
+  const priceOf = (t: Token, p: string) => fmtXno(((BigInt(p || "0") * 10n ** BigInt(t.decimals)) / FUT_PRECISION).toString());
+  const activity = (t: Token) => {
+    const f = t.futures;
+    if (!f) return 0n;
+    return BigInt(f.oiLong || "0") + BigInt(f.oiShort || "0") + BigInt(f.longWaiting || "0") + BigInt(f.shortWaiting || "0");
+  };
+  const tradeable = tokens.filter((t) => BigInt(t.poolXno || "0") > 0n && BigInt(t.poolTokens || "0") > 0n);
+  const sorted = [...tradeable].sort((a, b) => {
+    const d = activity(b) - activity(a);
+    if (d !== 0n) return d > 0n ? 1 : -1;
+    return BigInt(b.marketCap || "0") > BigInt(a.marketCap || "0") ? 1 : -1;
+  });
+  const live = sorted.filter((t) => activity(t) > 0n);
+
+  return (
+    <div className="w-full max-w-3xl mx-auto space-y-4">
+      <div className="rounded-none border border-neutral-800 bg-neutral-950 p-4">
+        <h1 className="text-lg font-black text-white">Futures</h1>
+        <p className="mt-1 text-[12px] leading-relaxed text-neutral-400">
+          Go <span className="font-bold text-green-400">long</span> or <span className="font-bold text-red-400">short</span> any coin with up to 5x
+          leverage. Your margin is the coin itself, held by the same rules as every balance — no deposit, no custody, and the most you can lose is
+          your margin. Pick a coin to open the order book.
+        </p>
+      </div>
+
+      {!loaded && <div className="rounded-none border border-neutral-800 bg-neutral-950 p-10 text-center text-neutral-500 animate-pulse">loading markets…</div>}
+
+      {loaded && (
+        <div className="rounded-none border border-neutral-800 bg-neutral-950">
+          <div className="grid grid-cols-[1.6fr_1fr_1fr_0.8fr] gap-2 px-3 py-2 text-[9px] uppercase tracking-widest text-neutral-500 border-b border-neutral-800">
+            <span>Market</span>
+            <span className="text-right">Mark</span>
+            <span className="text-right">Open interest</span>
+            <span className="text-right">Positions</span>
+          </div>
+          {sorted.length === 0 && <p className="px-3 py-6 text-center text-[12px] text-neutral-500">No tradeable coins yet.</p>}
+          {sorted.map((t) => {
+            const f = t.futures;
+            const hot = activity(t) > 0n;
+            return (
+              <button
+                key={t.tokenId}
+                onClick={() => onSelect(t.tokenId)}
+                className="w-full grid grid-cols-[1.6fr_1fr_1fr_0.8fr] gap-2 items-center px-3 py-2 border-b border-neutral-900 text-[11px] hover:bg-neutral-900 text-left"
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  {t.image ? <img src={t.image} alt="" className="w-5 h-5 object-cover shrink-0" /> : <span className="w-5 h-5 bg-neutral-800 shrink-0" />}
+                  <span className="truncate font-bold text-white">{tokSym(t)}</span>
+                  <span className="truncate text-neutral-500 hidden sm:inline">{t.name}</span>
+                </span>
+                <span className="text-right tabular-nums text-neutral-200">{f ? priceOf(t, f.twap) : "—"}</span>
+                <span className="text-right tabular-nums">
+                  {hot ? (
+                    <>
+                      <span className="text-green-400">{fmtTok(f.oiLong, t.decimals)}</span>
+                      <span className="text-neutral-600"> / </span>
+                      <span className="text-red-400">{fmtTok(f.oiShort, t.decimals)}</span>
+                    </>
+                  ) : (
+                    <span className="text-neutral-600">—</span>
+                  )}
+                </span>
+                <span className={"text-right tabular-nums " + (f?.openPairs ? "text-white font-bold" : "text-neutral-600")}>{f?.openPairs || "—"}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {loaded && live.length === 0 && sorted.length > 0 && (
+        <p className="text-center text-[11px] text-neutral-500">
+          Nobody has opened a position yet — take any market above and you're first.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Order book — the familiar asks-above-bids ladder.
+ *
+ * A resting order carries the signer's `guard`, which IS its limit price: a
+ * long fills only at or below it, a short only at or above it. So resting
+ * shorts are the ask side and resting longs are the bid side, and the ladder
+ * reads exactly like any exchange's.
+ */
+function OrderBook({
+  book,
+  spot,
+  mark,
+  decimals,
+  symbol,
+  me,
+  priceXno,
+  onTake,
+}: {
+  book: FuturesView["book"];
+  spot: bigint;
+  mark: bigint;
+  decimals: number;
+  symbol: string;
+  me: string;
+  priceXno: (p: bigint) => string;
+  onTake: (side: 0 | 1) => void;
+}) {
+  const ROWS = 6;
+  // "Any price" sentinels (a huge cap for a long, ~1 raw for a short) are not
+  // real limits — show them as market orders rather than an absurd number.
+  const isMarket = (side: 0 | 1, g: bigint) => (spot > 0n ? (side === 0 ? g > spot * 100n : g < spot / 100n) : false);
+  const rows = (side: 0 | 1) => {
+    const list = book.filter((o) => o.side === side).map((o) => ({ ...o, g: BigInt(o.guard), sz: BigInt(o.size) }));
+    // Best price first: highest bid, lowest ask.
+    list.sort((a, b) => (side === 0 ? (b.g > a.g ? 1 : b.g < a.g ? -1 : 0) : a.g > b.g ? 1 : a.g < b.g ? -1 : 0));
+    let cum = 0n;
+    return list.slice(0, ROWS).map((o) => ({ ...o, cum: (cum += o.sz) }));
+  };
+  const bids = rows(0);
+  const asks = rows(1);
+  const maxCum = [...bids, ...asks].reduce((m, r) => (r.cum > m ? r.cum : m), 0n);
+  const width = (v: bigint) => (maxCum > 0n ? Number((v * 100n) / maxCum) : 0);
+
+  const Row = ({ o, side }: { o: (typeof bids)[number]; side: 0 | 1 }) => (
+    <button
+      className="relative w-full grid grid-cols-3 gap-1 px-1 py-[3px] text-[10px] tabular-nums hover:bg-neutral-900"
+      onClick={() => onTake(side === 0 ? 1 : 0)}
+      title={side === 0 ? `Go short to fill this order` : `Go long to fill this order`}
+    >
+      <span
+        aria-hidden
+        className={"absolute inset-y-0 right-0 " + (side === 0 ? "bg-green-900/25" : "bg-red-900/25")}
+        style={{ width: `${width(o.cum)}%` }}
+      />
+      <span className={"relative text-left " + (side === 0 ? "text-green-400" : "text-red-400")}>
+        {isMarket(side, o.g) ? "market" : priceXno(o.g)}
+      </span>
+      <span className="relative text-right text-neutral-300">{fmtTok(o.size, decimals)}</span>
+      <span className="relative text-right text-neutral-500">
+        {fmtTok(o.cum.toString(), decimals)}
+        {o.account === me && <span className="ml-1 text-white">•</span>}
+      </span>
+    </button>
+  );
+
+  return (
+    <div className="border border-neutral-800 bg-neutral-950">
+      <div className="grid grid-cols-3 gap-1 px-1 py-1 text-[9px] uppercase tracking-widest text-neutral-500 border-b border-neutral-800">
+        <span className="text-left">Price (XNO)</span>
+        <span className="text-right">Size ({symbol})</span>
+        <span className="text-right">Total</span>
+      </div>
+      {/* Asks: worst at the top, best just above the mark — standard depth ladder. */}
+      {asks.length > 0 ? (
+        [...asks].reverse().map((o) => <Row key={"a" + o.id} o={o} side={1} />)
+      ) : (
+        <p className="px-1 py-[3px] text-[10px] text-neutral-600">No shorts resting</p>
+      )}
+      <div className="flex items-center justify-between border-y border-neutral-800 bg-neutral-900 px-1 py-1 text-[10px]">
+        <span className="font-black tabular-nums text-white">{spot > 0n ? priceXno(spot) : "—"}</span>
+        <span className="text-neutral-500">Mark {mark > 0n ? priceXno(mark) : "—"}</span>
+      </div>
+      {bids.length > 0 ? (
+        bids.map((o) => <Row key={"b" + o.id} o={o} side={0} />)
+      ) : (
+        <p className="px-1 py-[3px] text-[10px] text-neutral-600">No longs resting</p>
+      )}
+      {book.length === 0 && (
+        <p className="px-1 py-1 text-[10px] text-neutral-500 border-t border-neutral-800">
+          The book is empty — your order rests here until someone takes the other side.
+        </p>
+      )}
     </div>
   );
 }
@@ -4809,18 +5001,19 @@ function Portfolio({ tokens, onSelect, account, sendOp, busy, usd }: { tokens: T
   );
 }
 
-const TABS: { id: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet" | "list"; label: string; icon: string }[] = [
+const TABS: { id: "explore" | "ranks" | "futures" | "portfolio" | "create" | "scan" | "wallet" | "list"; label: string; icon: string }[] = [
   { id: "explore", label: "Explore", icon: "🏠" },
   { id: "ranks", label: "Ranks", icon: "🏆" },
+  { id: "futures", label: "Futures", icon: "📈" },
   { id: "create", label: "Launch", icon: "✨" },
   { id: "scan", label: "Explorer", icon: "🔎" },
   { id: "wallet", label: "Wallet", icon: "👛" },
 ];
 
-function TabBar({ tab, setTab }: { tab: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet" | "list"; setTab: (t: "explore" | "ranks" | "portfolio" | "create" | "scan" | "wallet" | "list") => void }) {
+function TabBar({ tab, setTab }: { tab: "explore" | "ranks" | "futures" | "portfolio" | "create" | "scan" | "wallet" | "list"; setTab: (t: "explore" | "ranks" | "futures" | "portfolio" | "create" | "scan" | "wallet" | "list") => void }) {
   return (
     <nav className="sm:hidden fixed bottom-0 inset-x-0 z-30 border-t border-neutral-800 bg-black/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
-      <div className="w-full grid grid-cols-5">
+      <div className="w-full grid grid-cols-6">
         {TABS.map((t) => (
           <button
             key={t.id}
