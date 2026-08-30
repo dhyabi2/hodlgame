@@ -6,6 +6,7 @@ import { fixpointOrder } from "../indexer/replay";
 import type { IndexedEvent } from "../indexer/multiIndexer";
 import { clampDecimals } from "./validate";
 import { emptyExitLedger, preExit, recordExit, type ExitLedger, type PreExit } from "./exits";
+import type { FutSettled } from "../core/futures";
 
 export interface Holder {
   account: string;
@@ -48,6 +49,38 @@ export interface TokenAnalytics {
   sellVolumeRaw: string;
   /** "Exit Pays You": every unstake as a verifiable payout event (server/exits.ts). */
   exits: ExitLedger;
+  /** Futures settlements (duel receipts), oldest first — the FULL history
+   * derived from the fold (the consensus tape in state keeps only the last
+   * 32), each tied to the block that settled it. */
+  duels: DuelEvent[];
+}
+
+export interface DuelEvent {
+  tokenId: string;
+  id: string; // pair id
+  size: string;
+  entry: string;
+  price: string;
+  long: string;
+  short: string;
+  longPnl: string; // tokens moved short → long (negative = long → short)
+  kind: 0 | 1; // 0 close, 1 liquidation
+  closer: string;
+  hash: string; // block that settled it
+  time: number;
+}
+
+/** Settlements appended by this op: the post tape is (pre + appended)[-32:],
+ * so find the longest suffix of `pre` that prefixes `post` and take the rest. */
+function newSettled(pre: FutSettled[], post: FutSettled[]): FutSettled[] {
+  const eq = (a: FutSettled, b: FutSettled) =>
+    a.id === b.id && a.size === b.size && a.price === b.price && a.long === b.long && a.short === b.short && a.longPnl === b.longPnl;
+  for (let j = Math.min(pre.length, post.length); j >= 0; j--) {
+    let ok = true;
+    for (let i = 0; i < j; i++) if (!eq(pre[pre.length - j + i], post[i])) { ok = false; break; }
+    if (ok) return post.slice(j);
+  }
+  return post;
 }
 
 /** XNO-raw price of one whole token. */
@@ -83,6 +116,7 @@ export function analyze(events: IndexedEvent[]): Analytics {
   const buyVol = new Map<string, bigint>();
   const sellVol = new Map<string, bigint>();
   const exitsMap = new Map<string, ExitLedger>();
+  const duelsMap = new Map<string, DuelEvent[]>();
 
   const timeFor = (tokenId: string, ev: IndexedEvent): number => {
     const t = ev.timestamp ?? Number(ev.height);
@@ -129,6 +163,31 @@ export function analyze(events: IndexedEvent[]): Analytics {
       const led = exitsMap.get(ev.tokenId) ?? emptyExitLedger();
       recordExit(led, preX, st, { tokenId: ev.tokenId, hash: ev.hash, sender: ev.sender, amount: ev.op.amount, time: timeFor(ev.tokenId, ev) });
       exitsMap.set(ev.tokenId, led);
+    }
+
+    // Futures settlements this op produced (closes, liquidations) → receipts.
+    if (st.futures.settled.length > 0) {
+      const appended = newSettled(pre?.futures.settled ?? [], st.futures.settled);
+      if (appended.length > 0) {
+        const list = duelsMap.get(ev.tokenId) ?? [];
+        for (const r of appended) {
+          list.push({
+            tokenId: ev.tokenId,
+            id: r.id.toString(),
+            size: r.size.toString(),
+            entry: r.entry.toString(),
+            price: r.price.toString(),
+            long: r.long,
+            short: r.short,
+            longPnl: r.longPnl.toString(),
+            kind: r.kind,
+            closer: r.closer,
+            hash: ev.hash,
+            time: timeFor(ev.tokenId, ev),
+          });
+        }
+        duelsMap.set(ev.tokenId, list);
+      }
     }
 
     // Exact XNO-out computed at the sell's execution point (pre-sell reserves),
@@ -209,6 +268,7 @@ export function analyze(events: IndexedEvent[]): Analytics {
       buyVolumeRaw: (buyVol.get(tokenId) ?? 0n).toString(),
       sellVolumeRaw: (sellVol.get(tokenId) ?? 0n).toString(),
       exits: exitsMap.get(tokenId) ?? emptyExitLedger(),
+      duels: duelsMap.get(tokenId) ?? [],
     });
   }
 

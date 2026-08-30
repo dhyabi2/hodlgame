@@ -263,4 +263,41 @@ function conserved(s: State) {
   console.log("8 ok: taker-adverse entry, bounded samples, depth-aware OI cap");
 }
 
+// ── 9. Block 4: the settled log is an exact, bounded receipt tape ───────────
+{
+  let s = seeded();
+  const a0 = bal(s, A), b0 = bal(s, B);
+  s = open(s, A, LONG, 2_000_000n, 1_000_000n, T);
+  s = open(s, B, SHORT, 2_000_000n, 1_000_000n, T);
+  s = close(s, B, 0n, T + 1); // B closes voluntarily
+  assert.equal(s.futures.settled.length, 1);
+  const r = s.futures.settled[0];
+  assert.equal(r.kind, 0);
+  assert.equal(r.closer, B);
+  assert.equal(r.long, A);
+  assert.equal(r.short, B);
+  assert.equal(r.size, 2_000_000n);
+  // receipt pnl == what actually moved between the two wallets
+  assert.equal(bal(s, A) - a0, r.longPnl, "long's receipt matches its balance change");
+  assert.equal(bal(s, B) - b0, -r.longPnl, "short's receipt is the mirror");
+  // liquidation receipts carry kind 1 and no closer
+  s = open(s, A, LONG, 5_000_000n, 1_000_000n, T + 2);
+  s = open(s, B, SHORT, 5_000_000n, 5_000_000n, T + 2);
+  s = applyOp(s, { kind: "sell", tokens: bal(s, C), minXno: 0n }, C, next()); // unstamped → twap = spot → liquidates
+  assert.equal(s.futures.pairs.length, 0);
+  const l = s.futures.settled[s.futures.settled.length - 1];
+  assert.equal(l.kind, 1);
+  assert.equal(l.closer, "");
+  assert.ok(l.longPnl <= -750_000n && l.longPnl >= -1_000_000n, `long lost past maintenance, ≤ margin: ${l.longPnl}`);
+  // bounded tape
+  for (let i = 0; i < 40; i++) {
+    s = open(s, A, LONG, 1000n, 1000n, T + 10 + i);
+    s = open(s, B, SHORT, 1000n, 1000n, T + 10 + i);
+    s = close(s, A, 0n, T + 11 + i);
+  }
+  assert.ok(s.futures.settled.length <= 32, "tape bounded");
+  conserved(s);
+  console.log("9 ok: settled receipts are exact and bounded");
+}
+
 console.log("✅ futures tests passed");

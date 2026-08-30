@@ -63,6 +63,7 @@ function consensusView(s: State) {
           })),
           nextId: s.futures.nextId,
           samples: s.futures.samples.map((x) => ({ t: x.t, price: x.price })),
+          settled: s.futures.settled.map((x) => ({ ...x })),
         }
       : undefined,
     height: s.height,

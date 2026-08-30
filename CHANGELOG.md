@@ -6,6 +6,19 @@ everything lands on `main`.
 
 ## [Unreleased]
 
+### Added — 2026-08-30 · Futures Block 4: duel receipts, records, and the settled tape
+- Every settlement (close or liquidation) now writes a consensus **receipt**
+  (`futures.settled`, bounded to 32): pair id, both wallets, size, entry,
+  settlement price, exact pnl moved, kind and closer — regression-tested to
+  match the wallets' actual balance changes.
+- The server fold derives the FULL duel history per token; the token page
+  shows the settled tape, your record (`W · L`, liquidations, net pnl) and the
+  sybil-resistant status number: **distinct wallets beaten** (self-dueling two
+  wallets can never grow it past 1).
+- **Duel Receipt** modal pops when your duel settles — "DUEL WON." /
+  "DUEL LOST. HONOR INTACT." — with the settling block link, share text and a
+  one-click **Rematch**. Coin cards show ⚔ open-duel count.
+
 ### Added — 2026-08-30 · Futures Block 3: trade it from the token page
 - New **Futures** panel under staking: LONG/SHORT, margin in the token, 1–5×
   leverage; shows the taker-adverse entry (worse of spot/TWAP) and the exact

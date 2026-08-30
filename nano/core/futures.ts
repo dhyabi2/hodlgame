@@ -78,15 +78,32 @@ export interface FutSample {
   price: bigint; // spot at that op (× PRECISION)
 }
 
+/** A settled portion of a pair — the verifiable "duel receipt". `longPnl` is
+ * the tokens that moved from short to long (negative = the other way), fee
+ * included; `kind` 1 = liquidation (no closer), 0 = voluntary close. */
+export interface FutSettled {
+  id: bigint; // pair id
+  size: bigint; // portion settled
+  entry: bigint;
+  price: bigint; // settlement price (× PRECISION)
+  long: string;
+  short: string;
+  longPnl: bigint;
+  kind: 0 | 1;
+  closer: string; // "" for liquidations
+}
+export const MAX_SETTLED = 32; // bounded receipt tape in state (oldest dropped)
+
 export interface FutState {
   book: FutOrder[]; // resting orders, FIFO per side
   pairs: FutPair[]; // open matched positions, ascending id
   nextId: bigint;
   samples: FutSample[]; // spot history for the TWAP (only once active)
+  settled: FutSettled[]; // recent settlements, oldest first
 }
 
 export function emptyFutures(): FutState {
-  return { book: [], pairs: [], nextId: 0n, samples: [] };
+  return { book: [], pairs: [], nextId: 0n, samples: [], settled: [] };
 }
 
 export function cloneFutures(f: FutState): FutState {
@@ -95,6 +112,7 @@ export function cloneFutures(f: FutState): FutState {
     pairs: f.pairs.map((p) => ({ ...p, long: { ...p.long }, short: { ...p.short } })),
     nextId: f.nextId,
     samples: f.samples.map((x) => ({ ...x })),
+    settled: f.settled.map((x) => ({ ...x })),
   };
 }
 
@@ -199,7 +217,7 @@ export function lockedMargin(f: FutState): bigint {
 /** Settle one pair (or a `portion` of it) at `price`, returning tokens to both
  * parties' balances. `closer` (if given) pays CLOSE_FEE on the portion to the
  * other side. Loss is capped at the loser's prorated margin. Mutates `s`. */
-function settlePortion(s: State, p: FutPair, portion: bigint, price: bigint, closer?: string) {
+function settlePortion(s: State, f: FutState, p: FutPair, portion: bigint, price: bigint, closer?: string) {
   const lm = (p.long.margin * portion) / p.size;
   const sm = (p.short.margin * portion) / p.size;
   let pl = pnlTokens(LONG, portion, p.entry, price); // short pnl = −pl
@@ -221,6 +239,18 @@ function settlePortion(s: State, p: FutPair, portion: bigint, price: bigint, clo
   }
   set(s.balances, p.long.account, get(s.balances, p.long.account) + longOut);
   set(s.balances, p.short.account, get(s.balances, p.short.account) + shortOut);
+  f.settled.push({
+    id: p.id,
+    size: portion,
+    entry: p.entry,
+    price,
+    long: p.long.account,
+    short: p.short.account,
+    longPnl: longOut - lm,
+    kind: closer ? 0 : 1,
+    closer: closer ?? "",
+  });
+  while (f.settled.length > MAX_SETTLED) f.settled.shift();
   p.size -= portion;
   p.long.margin -= lm;
   p.short.margin -= sm;
@@ -246,7 +276,7 @@ export function sweepFutures(s: State, f: FutState, now: number | undefined): vo
   for (const p of f.pairs) {
     const a = belowMaint(p, spot);
     const b = belowMaint(p, twap);
-    if (a != null && a === b) settlePortion(s, p, p.size, worseFor(a === LONG ? SHORT : LONG, true, spot, twap));
+    if (a != null && a === b) settlePortion(s, f, p, p.size, worseFor(a === LONG ? SHORT : LONG, true, spot, twap));
     else keep.push(p);
   }
   f.pairs = keep;
@@ -342,7 +372,7 @@ export function closeFutures(s: State, f: FutState, sender: string, size: bigint
     }
     const mySide: FutSide = p.long.account === sender ? LONG : SHORT;
     const portion = rem < 0n || rem >= p.size ? p.size : rem;
-    settlePortion(s, p, portion, worseFor(mySide, true, spot, twap), sender);
+    settlePortion(s, f, p, portion, worseFor(mySide, true, spot, twap), sender);
     did = true;
     if (rem > 0n) rem -= portion;
     if (p.size > 0n) keep.push(p);

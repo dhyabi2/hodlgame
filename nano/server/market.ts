@@ -5,7 +5,7 @@
 import { MultiIndexer, type IndexedEvent } from "../indexer/multiIndexer";
 import { deriveAddress } from "nanocurrency";
 import { NanoRpcSource } from "../indexer/blockSource";
-import { analyze, type PricePoint, type TokenAnalytics } from "./analytics";
+import { analyze, type PricePoint, type TokenAnalytics, type DuelEvent } from "./analytics";
 import { exitView, type ExitView } from "./exits";
 import { tokenPoolKeys } from "./custody";
 import { loadRegistry, EMPTY_META } from "./tokens";
@@ -86,11 +86,37 @@ export interface FuturesView {
   shortWaiting: string;
   book: { id: string; account: string; side: 0 | 1; size: string; margin: string }[];
   pairs: { id: string; size: string; entry: string; long: { account: string; margin: string }; short: { account: string; margin: string } }[];
+  // Settled duels (newest first, last 20) — every row is a verifiable receipt
+  // tied to the block that settled it.
+  recent: DuelEvent[];
+  duelCount: number;
+  // THIS viewer's record across the token's full duel history. `opponents` is
+  // the number of DISTINCT wallets beaten — self-dueling two wallets can never
+  // grow it past 1, so it is the status number that resists sybils.
+  myRecord: { wins: number; losses: number; liquidated: number; opponents: number; netPnl: string };
 }
 
-function futuresView(s: { poolXno: bigint; poolTokens: bigint; futures: FutState } | undefined): FuturesView {
-  const empty: FuturesView = { active: false, spot: "0", twap: "0", oiLong: "0", oiShort: "0", longWaiting: "0", shortWaiting: "0", book: [], pairs: [] };
+function futuresView(s: { poolXno: bigint; poolTokens: bigint; futures: FutState } | undefined, duels: DuelEvent[], account: string): FuturesView {
+  const empty: FuturesView = {
+    active: false, spot: "0", twap: "0", oiLong: "0", oiShort: "0", longWaiting: "0", shortWaiting: "0", book: [], pairs: [],
+    recent: [], duelCount: 0, myRecord: { wins: 0, losses: 0, liquidated: 0, opponents: 0, netPnl: "0" },
+  };
   if (!s) return empty;
+  const rec = { wins: 0, losses: 0, liquidated: 0, opponents: 0, netPnl: "0" };
+  if (account) {
+    const beaten = new Set<string>();
+    let net = 0n;
+    for (const d of duels) {
+      const mineLong = d.long === account, mineShort = d.short === account;
+      if (!mineLong && !mineShort) continue;
+      const pnl = mineLong ? BigInt(d.longPnl) : -BigInt(d.longPnl);
+      net += pnl;
+      if (pnl > 0n) { rec.wins++; beaten.add(mineLong ? d.short : d.long); }
+      else if (pnl < 0n) { rec.losses++; if (d.kind === 1) rec.liquidated++; }
+    }
+    rec.opponents = beaten.size;
+    rec.netPnl = net.toString();
+  }
   const f = s.futures;
   const st = s as any;
   const spot = markPrice(st);
@@ -114,6 +140,9 @@ function futuresView(s: { poolXno: bigint; poolTokens: bigint; futures: FutState
       long: { account: p.long.account, margin: p.long.margin.toString() },
       short: { account: p.short.account, margin: p.short.margin.toString() },
     })),
+    recent: duels.slice(-20).reverse(),
+    duelCount: duels.length,
+    myRecord: rec,
   };
 }
 
@@ -329,7 +358,7 @@ async function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, accoun
       myEarnedRaw: account ? (a.exits.earned.get(account) ?? 0n).toString() : "0",
       lastTime: a.exits.events.length ? a.exits.events[a.exits.events.length - 1].time : 0,
     },
-    futures: futuresView(s ?? undefined),
+    futures: futuresView(s ?? undefined, a.duels, account),
     spark: a.series.slice(-48),
     series: a.series,
     trades: a.trades,

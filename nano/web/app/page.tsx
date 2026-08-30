@@ -137,6 +137,24 @@ interface FuturesView {
   shortWaiting: string;
   book: { id: string; account: string; side: 0 | 1; size: string; margin: string }[];
   pairs: { id: string; size: string; entry: string; long: { account: string; margin: string }; short: { account: string; margin: string } }[];
+  recent: DuelEvent[];
+  duelCount: number;
+  myRecord: { wins: number; losses: number; liquidated: number; opponents: number; netPnl: string };
+}
+
+interface DuelEvent {
+  tokenId: string;
+  id: string;
+  size: string;
+  entry: string;
+  price: string;
+  long: string;
+  short: string;
+  longPnl: string;
+  kind: 0 | 1;
+  closer: string;
+  hash: string;
+  time: number;
 }
 
 function keysFromSeed(seed: string): Keys {
@@ -2022,6 +2040,7 @@ function PosterCard({ t, usd, onSelect }: { t: Token; usd: number | null; onSele
         </div>
         <p className="text-[10px] uppercase tracking-wide text-neutral-500 truncate">
           <span title="Market cap">MC {fmtXno(t.marketCap)}</span>{usd != null && <> ({fmtUsd(t.marketCap, usd)})</>} · {t.holders} holder{t.holders === 1 ? "" : "s"}
+          {(t.futures?.pairs?.length ?? 0) > 0 && <> · <span className="text-amber-400">⚔ {t.futures.pairs.length} duel{t.futures.pairs.length === 1 ? "" : "s"}</span></>}
         </p>
       </div>
       <span className="pointer-events-none absolute inset-x-0 bottom-0 hidden sm:block translate-y-full group-hover:translate-y-0 transition-transform duration-200 motion-reduce:transition-none motion-reduce:transform-none bg-white text-black text-[10px] font-black uppercase tracking-wide text-center py-1.5">
@@ -3749,6 +3768,21 @@ function FuturesBox({
   const [lev, setLev] = useState(2);
   const [armed, setArmed] = useState(false);
   const [showAll, setShowAll] = useState(false);
+  const [receipt, setReceipt] = useState<DuelEvent | null>(null);
+  // A duel of mine that settled after this page loaded (close OR liquidation)
+  // pops its receipt once — keyed in localStorage so a refresh never re-pops.
+  const loadedAt = useRef(Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    if (!myAddress) return;
+    const mine = (f?.recent ?? []).find((d) => d.long === myAddress || d.short === myAddress);
+    if (!mine || mine.time < loadedAt.current - 120) return;
+    const key = `hodl-duel-seen-${token.tokenId}`;
+    let seen = "";
+    try { seen = localStorage.getItem(key) ?? ""; } catch {}
+    if (seen === mine.hash) return;
+    try { localStorage.setItem(key, mine.hash); } catch {}
+    setReceipt(mine);
+  }, [f?.recent, myAddress, token.tokenId]);
   const bal = BigInt(token.myBalance || "0");
   const spot = BigInt(f?.spot || "0");
   const twap = BigInt(f?.twap || "0");
@@ -3805,8 +3839,27 @@ function FuturesBox({
   };
   const shown = showAll ? pairs.slice().reverse() : pairs.slice(-6).reverse();
 
+  const rec = f?.myRecord;
+  const recent = f?.recent ?? [];
   return (
     <div className="rounded-none border border-neutral-800 bg-neutral-950 p-3 space-y-3">
+      {receipt && (
+        <DuelReceipt
+          duel={receipt}
+          me={me}
+          symbol={sym}
+          decimals={dec}
+          tokenId={token.tokenId}
+          priceXno={priceXno}
+          onRematch={() => {
+            const mySide: 0 | 1 = receipt.long === me ? 0 : 1;
+            setSide(mySide);
+            setMarginAmt(fmtTok((BigInt(receipt.size) / BigInt(lev)).toString(), dec));
+            setReceipt(null);
+          }}
+          onClose={() => setReceipt(null)}
+        />
+      )}
       <div className="flex items-center justify-between text-[11px]">
         <span className="text-neutral-400 font-bold">Futures · long or short {sym}, up to {FUT_MAX_LEV}×</span>
         {(BigInt(f?.oiLong || "0") > 0n || BigInt(f?.oiShort || "0") > 0n) && (
@@ -3913,6 +3966,20 @@ function FuturesBox({
         </div>
       )}
 
+      {/* My record — distinct opponents beaten is the sybil-proof status */}
+      {me && rec && rec.wins + rec.losses > 0 && (
+        <div className="border-t border-neutral-800 pt-2 flex items-center justify-between text-[11px]">
+          <span className="text-neutral-400">
+            your record <span className="text-white font-black tabular-nums">{rec.wins}W · {rec.losses}L</span>
+            {rec.liquidated > 0 && <span className="text-neutral-500"> ({rec.liquidated} liquidated)</span>}
+          </span>
+          <span className="text-neutral-400">
+            <span className="text-amber-400 font-black tabular-nums">⚔ {rec.opponents}</span> wallet{rec.opponents === 1 ? "" : "s"} beaten ·{" "}
+            <span className={"font-black tabular-nums " + (BigInt(rec.netPnl) >= 0n ? "text-green-400" : "text-red-400")}>{fmtSigned(BigInt(rec.netPnl))}</span>
+          </span>
+        </div>
+      )}
+
       {/* Public duels */}
       {pairs.length > 0 && (
         <div className="border-t border-neutral-800 pt-2 space-y-1">
@@ -3935,6 +4002,111 @@ function FuturesBox({
           })}
         </div>
       )}
+
+      {/* Settled duels — every row is a receipt anyone can replay */}
+      {recent.length > 0 && (
+        <div className="border-t border-neutral-800 pt-2 space-y-1">
+          <div className="flex items-center justify-between text-[10px]">
+            <span className="font-black uppercase tracking-widest text-neutral-400">settled · {f.duelCount}</span>
+            <span className="text-neutral-600">every row replays from the chain</span>
+          </div>
+          {recent.slice(0, 5).map((d) => {
+            const lp = BigInt(d.longPnl);
+            const winner = lp > 0n ? d.long : lp < 0n ? d.short : "";
+            const isMe = d.long === me || d.short === me;
+            return (
+              <button key={d.hash + d.id} className={"w-full text-left text-[10px] flex items-center justify-between gap-2 hover:text-white " + (isMe ? "text-white" : "text-neutral-400")} onClick={() => setReceipt(d)} title="open receipt">
+                <span className="truncate">
+                  {d.kind === 1 ? <span className="text-red-400 font-bold">☠ liq</span> : <span className="text-neutral-500 font-bold">closed</span>}{" "}
+                  <span className="text-green-400 font-bold">L</span> {d.long === me ? "you" : shortAddr(d.long)} <span className="text-neutral-600">vs</span>{" "}
+                  <span className="text-red-400 font-bold">S</span> {d.short === me ? "you" : shortAddr(d.short)}
+                  {winner && <span className="text-neutral-500"> · {winner === me ? "you" : shortAddr(winner)} won</span>}
+                </span>
+                <span className="tabular-nums shrink-0">{fmtTok(d.size, dec)} {sym} · {fmtSigned(lp < 0n ? -lp : lp)}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Duel receipt — the verifiable moment. Winner: "Duel won." Loser (esp.
+ * liquidated): "Duel lost. Honor intact." with a one-click rematch. */
+function DuelReceipt({
+  duel,
+  me,
+  symbol,
+  decimals,
+  tokenId,
+  priceXno,
+  onRematch,
+  onClose,
+}: {
+  duel: DuelEvent;
+  me: string;
+  symbol: string;
+  decimals: number;
+  tokenId: string;
+  priceXno: (p: bigint) => string;
+  onRematch: () => void;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const lp = BigInt(duel.longPnl);
+  const mySide: 0 | 1 | null = duel.long === me ? 0 : duel.short === me ? 1 : null;
+  const myPnl = mySide === 0 ? lp : mySide === 1 ? -lp : lp;
+  const won = myPnl > 0n;
+  const liq = duel.kind === 1;
+  const liqLoser = liq ? (lp < 0n ? duel.long : duel.short) : "";
+  const url = `${typeof window !== "undefined" ? window.location.origin : "https://www.hodlgame.fun"}/t/${tokenId}`;
+  const headline = mySide == null ? (liq ? "LIQUIDATION" : "DUEL SETTLED") : won ? "DUEL WON." : liq && liqLoser === me ? "DUEL LOST. HONOR INTACT." : "DUEL LOST.";
+  const abs = myPnl < 0n ? -myPnl : myPnl;
+  const line = mySide == null
+    ? `⚔ $${symbol} duel settled on-chain: ${fmtTok(abs.toString(), decimals)} ${symbol} changed hands. No oracle, no custody — just math. ${url}`
+    : won
+      ? `⚔ I won a $${symbol} duel: +${fmtTok(abs.toString(), decimals)} ${symbol} from a ${mySide === 0 ? "short" : "long"}. Trustless futures, verifiable by anyone. ${url}`
+      : `⚔ ${liq ? "Liquidated" : "Lost"} a $${symbol} duel: −${fmtTok(abs.toString(), decimals)} ${symbol}. Honor intact — it's all on-chain. Rematch? ${url}`;
+  const share = async () => {
+    try {
+      if (typeof navigator !== "undefined" && (navigator as any).share) {
+        await (navigator as any).share({ title: "Duel receipt", text: line, url });
+        return;
+      }
+    } catch { return; }
+    try { await navigator.clipboard.writeText(line); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch {}
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4" onClick={onClose}>
+      <div className="w-full max-w-xs rounded-none border border-neutral-700 bg-neutral-950 p-5 space-y-3 font-mono" onClick={(e) => e.stopPropagation()}>
+        <div className="text-center border-b border-dashed border-neutral-700 pb-2">
+          <p className={"text-sm font-black tracking-[0.2em] " + (mySide == null ? "text-white" : won ? "text-green-400" : "text-red-400")}>{headline}</p>
+          <p className="text-[10px] text-neutral-500">{liq ? "LIQUIDATION" : "CLOSE"} · ${symbol.toUpperCase()} · duel #{duel.id}</p>
+        </div>
+        <div className="text-xs divide-y divide-neutral-800 border border-neutral-800">
+          <Line k="long" v={duel.long === me ? "you" : shortAddr(duel.long)} />
+          <Line k="short" v={duel.short === me ? "you" : shortAddr(duel.short)} />
+          <Line k="size" v={`${fmtTok(duel.size, decimals)} ${symbol}`} />
+          <Line k="entry" v={`${priceXno(BigInt(duel.entry))} XNO`} />
+          <Line k="settled at" v={`${priceXno(BigInt(duel.price))} XNO`} />
+          <Line k={mySide == null ? "long pnl" : "your pnl"} v={`${myPnl < 0n ? "−" : "+"}${fmtTok(abs.toString(), decimals)} ${symbol}`} strong />
+          {duel.closer && <Line k="closed by" v={duel.closer === me ? "you" : shortAddr(duel.closer)} />}
+        </div>
+        <p className="text-center text-[10px] text-neutral-600">
+          settled in block <a className="underline hover:text-white" href={`https://nanexplorer.com/nano/block/${duel.hash}`} target="_blank" rel="noreferrer">{duel.hash.slice(0, 10)}…</a> · no oracle, no server trust — replay it yourself in Explorer
+        </p>
+        <div className="flex flex-col gap-2">
+          {mySide != null && (
+            <button onClick={onRematch} className="w-full rounded-none bg-white py-2 text-[11px] font-black uppercase tracking-wide text-black hover:bg-neutral-200">
+              {won ? "Go again" : "Rematch"}
+            </button>
+          )}
+          <button onClick={share} className="w-full rounded-none border border-neutral-700 py-2 text-[11px] font-black uppercase tracking-wide text-neutral-300 hover:border-white hover:text-white">
+            {copied ? "copied" : "Share the receipt"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

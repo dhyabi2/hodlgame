@@ -313,10 +313,14 @@ manipulator's real cost.
   **both** `spot` and `twap`, and settles at the price more favourable to that
   loser (long loser `hi`, short loser `lo`).
 
-**State.** `futures: { book: FutOrder[], pairs: FutPair[], nextId, samples }`
-per token. `FutOrder = {id, account, side, size, margin}` (resting, FIFO);
-`FutPair = {id, size, entry, long: {account, margin}, short: {account, margin}}`;
-`FutSample = {t, price}`.
+**State.** `futures: { book: FutOrder[], pairs: FutPair[], nextId, samples,
+settled }` per token. `FutOrder = {id, account, side, size, margin}` (resting,
+FIFO); `FutPair = {id, size, entry, long: {account, margin}, short: {account,
+margin}}`; `FutSample = {t, price}`; `FutSettled = {id, size, entry, price,
+long, short, longPnl, kind (0 close / 1 liquidation), closer}` — every
+settlement appends a receipt to `settled` (bounded to the most recent 32,
+oldest dropped; the full history is derivable from the fold, and each entry
+ties to the block that settled it).
 Margin tokens leave `balances` while locked. Conservation (tested):
 `Σbalances + Σstaked + treasury + poolTokens + lockedMargin == supply`.
 The canonical root carries a `futures` key **only once a token has futures
