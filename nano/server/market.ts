@@ -16,7 +16,7 @@ import { watchedAccounts, persistWatched } from "./operator";
 import { StoreBlockCache } from "./sharedCache";
 import { deriveMetaAuthority, type MetaAuthorityState } from "../core/metaAnchor";
 import { claimableReward } from "../core/state";
-import { futuresActive, markPrice, twapPrice, type FutState } from "../core/futures";
+import { futuresActive, markPrice, refPrice, type FutState } from "../core/futures";
 
 export interface TokenView {
   tokenId: string;
@@ -84,6 +84,7 @@ export interface FuturesView {
   oiShort: string;
   longWaiting: string; // resting (unmatched) long size — what a short taker can hit
   shortWaiting: string;
+  openPairs: number; // count only — list views strip `pairs` but still show ⚔
   book: { id: string; account: string; side: 0 | 1; size: string; margin: string }[];
   pairs: { id: string; size: string; entry: string; long: { account: string; margin: string }; short: { account: string; margin: string } }[];
   // Settled duels (newest first, last 20) — every row is a verifiable receipt
@@ -98,7 +99,7 @@ export interface FuturesView {
 
 function futuresView(s: { poolXno: bigint; poolTokens: bigint; futures: FutState } | undefined, duels: DuelEvent[], account: string): FuturesView {
   const empty: FuturesView = {
-    active: false, spot: "0", twap: "0", oiLong: "0", oiShort: "0", longWaiting: "0", shortWaiting: "0", book: [], pairs: [],
+    active: false, spot: "0", twap: "0", oiLong: "0", oiShort: "0", longWaiting: "0", shortWaiting: "0", openPairs: 0, book: [], pairs: [],
     recent: [], duelCount: 0, myRecord: { wins: 0, losses: 0, liquidated: 0, opponents: 0, netPnl: "0" },
   };
   if (!s) return empty;
@@ -120,7 +121,9 @@ function futuresView(s: { poolXno: bigint; poolTokens: bigint; futures: FutState
   const f = s.futures;
   const st = s as any;
   const spot = markPrice(st);
-  const twap = twapPrice(st, f, Math.floor(Date.now() / 1000));
+  // The reference is pure consensus state — no clock, so this view is exactly
+  // what every replayer computes.
+  const twap = refPrice(st, f);
   let lw = 0n, sw = 0n, paired = 0n;
   for (const o of f.book) if (o.side === 0) lw += o.size; else sw += o.size;
   for (const p of f.pairs) paired += p.size;
@@ -132,7 +135,10 @@ function futuresView(s: { poolXno: bigint; poolTokens: bigint; futures: FutState
     oiShort: (sw + paired).toString(),
     longWaiting: lw.toString(),
     shortWaiting: sw.toString(),
-    book: f.book.map((o) => ({ id: o.id.toString(), account: o.account, side: o.side, size: o.size.toString(), margin: o.margin.toString() })),
+    openPairs: f.pairs.length,
+    // Bounded like `pairs` below: the consensus book is length-capped, but the
+    // payload must never scale with it (this ships in the home feed too).
+    book: f.book.slice(-60).map((o) => ({ id: o.id.toString(), account: o.account, side: o.side, size: o.size.toString(), margin: o.margin.toString() })),
     pairs: f.pairs.slice(-60).map((p) => ({
       id: p.id.toString(),
       size: p.size.toString(),
@@ -380,6 +386,8 @@ export async function feed(account = ""): Promise<TokenView[]> {
     v.topHolders = [];
     v.comments = [];
     v.exits = v.exits.slice(0, 3); // home firehose: the latest exits per coin
+    // Card views need only the ⚔ count and the depth totals — never the lists.
+    v.futures = { ...v.futures, book: [], pairs: [], recent: [] };
     out.push(v);
   }
   return out.sort((x, y) => (BigInt(y.marketCap) > BigInt(x.marketCap) ? 1 : -1));
@@ -397,6 +405,7 @@ export async function ranksFeed(account = ""): Promise<TokenView[]> {
     const v = await toView(tokenId, a, raw, account, false);
     v.series = [];
     v.comments = [];
+    v.futures = { ...v.futures, book: [], pairs: [], recent: [] };
     out.push(v);
   }
   return out.sort((x, y) => (BigInt(y.marketCap) > BigInt(x.marketCap) ? 1 : -1));

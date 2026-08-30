@@ -6,6 +6,48 @@ everything lands on `main`.
 
 ## [Unreleased]
 
+### Changed — 2026-08-31 · Futures hardening after an adversarial review (pre-launch)
+Four independent hostile reviews (economics, determinism, arithmetic, DoS) plus
+a randomised fuzz were run against the futures engine before any deploy. Every
+confirmed finding is fixed, with a regression test for each:
+- **The reference price no longer uses a clock.** A block's timestamp is
+  `local_timestamp` — per-node and not signature-covered — so a time-weighted
+  average made *continuous* consensus money out of it: two replayers a second
+  apart would compute different balances and different roots, breaking
+  in-browser verification. It is replaced by a **volume-anchored mark**
+  (`mark += (spot − mark) × min(1, 4·Δreserve/reserve)`), which is a pure
+  function of the ordered block list. It also weights the token side, so the
+  creator-only `addLiq(xno = 0, …)` — which moves spot for free — can no longer
+  leave a stale reference for a maker to harvest a taker against.
+- **An entry-price guard is now mandatory** on `futOpen`, and closing nothing
+  is a no-op instead of an invalid op. The fixpoint defers invalid ops and
+  retries them later, so both could otherwise fire at a price the signer never
+  quoted.
+- **No position can be too small to liquidate**, and none can hide: minimum
+  order value, enforced on every fill and residue; `sellValueOf` and
+  `applyVoid` now count futures margin, so margin can't cloak a
+  Direct-Settlement position and collapse its collateral floor.
+- **Dust-chunked closes are dead**: a partial close must take and leave at
+  least the minimum, or it closes the whole position — otherwise slicing
+  rounded pnl, margin and fee all to zero.
+- **Bounded by count, not just value** (Nano is feeless): book capped per side
+  and per account, pairs capped, receipts carry a unique sequence number, and
+  the API/feed payloads no longer scale with the book.
+- Open interest is now capped at 10% of the token reserve (was 50%), shrinking
+  what a price manipulator could win. The era gate is written as a positive
+  test so a NaN/absent timestamp fails it.
+Verified after every change: 35/35 suite, 14 futures invariant groups, ~39k
+fuzzed ops with zero failures, and the replay root still **bit-identical to the
+live production root**.
+
+### Changed — 2026-08-31 · Futures UI: standard exchange layout
+Reworked to the conventions traders already know instead of bespoke ones:
+Long/Short tabs, leverage chips, an Amount field with 25/50/75/100%, a standard
+order summary (order value, entry, mark, liq. price, fee), a slippage control
+(which is what sets the on-chain guard) and one coloured Buy/Long · Sell/Short
+button. "Duels" are now Positions, Open orders and Trade history; the receipt
+reads "Position closed / Liquidated".
+
 ### Added — 2026-08-30 · Futures Block 4: duel receipts, records, and the settled tape
 - Every settlement (close or liquidation) now writes a consensus **receipt**
   (`futures.settled`, bounded to 32): pair id, both wallets, size, entry,

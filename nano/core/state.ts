@@ -11,8 +11,10 @@ import {
   closeFutures,
   emptyFutures,
   openFutures,
-  recordSample,
+  updateMark,
   sweepFutures,
+  lockedMarginOf,
+  voidMarginOf,
   type FutState,
 } from "./futures";
 
@@ -194,7 +196,11 @@ function constantProductOut(reserveIn: bigint, reserveOut: bigint, amountIn: big
 // Instant sell-value of an account's whole position (balance + staked) at the
 // current virtual reserves — what the curve would pay if they exited now.
 function sellValueOf(s: State, a: string): bigint {
-  const pos = get(s.balances, a) + get(s.staked, a);
+  // Futures margin is still this account's position — counting only balances
+  // and stake would let one futOpen (margin = entire balance) make the
+  // position look like zero, ratcheting the earmark floor to 0 and freeing
+  // the account to spend collateral that other sellers' quotes depend on.
+  const pos = get(s.balances, a) + get(s.staked, a) + lockedMarginOf(s.futures, a);
   if (pos <= 0n || s.poolXno <= 0n || s.poolTokens <= 0n) return 0n;
   return (pos * s.poolXno) / (s.poolTokens + pos);
 }
@@ -250,6 +256,10 @@ export function applyVoid(s0: State, account: string, newFloor: bigint): State {
     resetDebt(s, account);
     voided += vs;
   }
+  // Futures margin is part of the position, so it is voided in the same
+  // proportion — otherwise parking everything as margin would make a defector
+  // untouchable.
+  voided += voidMarginOf(s.futures, account, short, floor);
   s.poolTokens += voided; // voided tokens back the remaining holders
   s.queue = s.queue
     .map((e) => (e.account === account ? { account: e.account, owed: e.owed - (e.owed * short) / floor } : e))
@@ -257,6 +267,11 @@ export function applyVoid(s0: State, account: string, newFloor: bigint): State {
   const em = get(s.earmark, account);
   set(s.earmark, account, em - (em * short) / floor);
   set(s.earmarkFloor, account, newFloor > 0n ? newFloor : 0n);
+  // A void returns tokens to the virtual reserves — a price move like any
+  // other, so open positions must be re-checked here too. (No XNO changed
+  // hands, so the volume-anchored mark does not advance: the sweep can only
+  // fire if the pair is already breached at BOTH prices.)
+  if (s.futures.pairs.length > 0) sweepFutures(s, s.futures);
   return s;
 }
 
@@ -285,9 +300,9 @@ function cloneState(s0: State): State {
 // After any op that moves the virtual price: record a TWAP sample (only once
 // the token has futures activity) and run the deterministic liquidation pass.
 // A pure no-op for tokens with no futures activity (all pre-futures history).
-function afterPriceChange(s: State, timestamp: number | undefined) {
-  recordSample(s, s.futures, timestamp);
-  if (s.futures.pairs.length > 0) sweepFutures(s, s.futures, timestamp);
+function afterPriceChange(s: State, prevPoolXno: bigint, prevPoolTokens: bigint) {
+  updateMark(s, s.futures, prevPoolXno, prevPoolTokens);
+  if (s.futures.pairs.length > 0) sweepFutures(s, s.futures);
 }
 
 // `timestamp` is the carrier block's network-observed time (seconds); it only
@@ -341,7 +356,7 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
         s.poolXno += op.xno;
         s.poolTokens -= out;
         set(s.balances, sender, get(s.balances, sender) + out);
-        afterPriceChange(s, timestamp);
+        afterPriceChange(s, s0.poolXno, s0.poolTokens);
         s.height = height;
         return s;
       }
@@ -382,7 +397,7 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
         set(s.earmarkFloor, sender, (s.earmarkFloor.get(sender) ?? 0n) + op.xno);
       }
       ratchetFloors(s);
-      afterPriceChange(s, timestamp);
+      afterPriceChange(s, s0.poolXno, s0.poolTokens);
       s.height = height;
       return s;
     }
@@ -402,7 +417,7 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
         // Proceeds become in-game credit (see State.xnoCredit) — the real XNO
         // stays in the pool account until the seller explicitly withdraws.
         set(s.xnoCredit, sender, get(s.xnoCredit, sender) + out);
-        afterPriceChange(s, timestamp);
+        afterPriceChange(s, s0.poolXno, s0.poolTokens);
         s.height = height;
         return s;
       }
@@ -452,7 +467,7 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
       // netted + own collateral released + queued (post-haircut) claim.
       if (usePre + net + credited < op.minXno) throw new InvalidOp("slippage");
       ratchetFloors(s);
-      afterPriceChange(s, timestamp);
+      afterPriceChange(s, s0.poolXno, s0.poolTokens);
       s.height = height;
       return s;
     }
@@ -460,10 +475,14 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
     case "futOpen":
     case "futClose": {
       if (!s.launched) throw new InvalidOp("not launched");
-      // Era-gated: unstamped or pre-era futures ops are invalid everywhere.
-      if (timestamp == null || timestamp < FUTURES_ERA) throw new InvalidOp("futures not active");
-      if (op.kind === "futOpen") openFutures(s, s.futures, sender, op.side, op.size, op.margin, timestamp);
-      else closeFutures(s, s.futures, sender, op.size, timestamp);
+      // Era-gated. Written as a positive test so a NaN/absent/garbage
+      // timestamp FAILS it: `NaN < FUTURES_ERA` is false, so the negated form
+      // would have let an unstamped or malformed block through the gate.
+      if (!(typeof timestamp === "number" && Number.isFinite(timestamp) && timestamp >= FUTURES_ERA)) {
+        throw new InvalidOp("futures not active");
+      }
+      if (op.kind === "futOpen") openFutures(s, s.futures, sender, op.side, op.size, op.margin, op.guard);
+      else closeFutures(s, s.futures, sender, op.size);
       s.height = height;
       return s;
     }
@@ -555,7 +574,7 @@ export function applyOp(s0: State, op: Op, sender: string, height: bigint, times
       s.poolXno += op.xno;
       s.poolTokens += op.tokens;
       if (s.direct) ratchetFloors(s);
-      afterPriceChange(s, timestamp);
+      afterPriceChange(s, s0.poolXno, s0.poolTokens);
       s.height = height;
       return s;
     }

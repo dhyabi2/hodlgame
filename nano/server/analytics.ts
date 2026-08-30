@@ -55,6 +55,11 @@ export interface TokenAnalytics {
   duels: DuelEvent[];
 }
 
+/** Derived duel history kept per token (newest retained). Bounded so a token
+ * with heavy futures activity can't grow server memory without limit; the
+ * viewer-facing record is computed from this window. */
+export const MAX_DUELS = 500;
+
 export interface DuelEvent {
   tokenId: string;
   id: string; // pair id
@@ -186,6 +191,10 @@ export function analyze(events: IndexedEvent[]): Analytics {
             time: timeFor(ev.tokenId, ev),
           });
         }
+        // Bounded like every other derived tape: one op can settle many pairs
+        // (futClose size 0, or a multi-pair liquidation sweep), so an unbounded
+        // list would grow with total settlement count, forever, per token.
+        if (list.length > MAX_DUELS) list.splice(0, list.length - MAX_DUELS);
         duelsMap.set(ev.tokenId, list);
       }
     }

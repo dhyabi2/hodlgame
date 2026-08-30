@@ -174,7 +174,10 @@ anything.
 - Open a long or short (`futOpen`) with up to 5× leverage; your margin is locked
   from your token balance and matched FIFO against the opposite side.
 - The price is the token's own replay-computed spot — no oracle, nothing
-  external.
+  external — paired with a **mark** that follows traded volume rather than the
+  last tick, so a single large trade can't liquidate anyone. Deliberately, that
+  mark contains no clock: block timestamps differ from node to node, so letting
+  them weight a price would make two honest replayers disagree.
 - Close (`futClose`) settles both sides at the current price; a losing side can
   never lose more than it locked, so the system is solvent with no insurance
   fund. Liquidation is a deterministic sweep every replayer runs identically.

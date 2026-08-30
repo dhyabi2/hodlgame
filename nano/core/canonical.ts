@@ -53,7 +53,7 @@ function consensusView(s: State) {
     // root (all anchored history) is byte-identical to before the feature.
     futures: futuresActive(s.futures)
       ? {
-          book: s.futures.book.map((o) => ({ id: o.id, account: o.account, side: o.side, size: o.size, margin: o.margin })),
+          book: s.futures.book.map((o) => ({ id: o.id, account: o.account, side: o.side, size: o.size, margin: o.margin, guard: o.guard })),
           pairs: s.futures.pairs.map((p) => ({
             id: p.id,
             size: p.size,
@@ -62,8 +62,9 @@ function consensusView(s: State) {
             short: { account: p.short.account, margin: p.short.margin },
           })),
           nextId: s.futures.nextId,
-          samples: s.futures.samples.map((x) => ({ t: x.t, price: x.price })),
+          mark: s.futures.mark,
           settled: s.futures.settled.map((x) => ({ ...x })),
+          nextSeq: s.futures.nextSeq,
         }
       : undefined,
     height: s.height,

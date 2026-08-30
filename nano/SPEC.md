@@ -38,8 +38,9 @@ Fragment links (`0xE0 | opcode` marker across two chained 1-raw blocks) carry
 two-amount ops fully on-chain: `transfer(to, amount)`, `sell(tokens, minXno)`,
 `buy(xno, minTokens)` (direct self-earmark buys declare their xno this way),
 `seedLiq/addLiq(xno, tokens)` (direct virtual seeds), and
-`futOpen(size, margin, side)` (body `[size 15B][margin 15B][side 1B][zero 16B]`,
-side 0 = long, 1 = short; any other side byte or non-zero padding is rejected).
+`futOpen(size, margin, side, guard)` (body
+`[size 15B][margin 15B][side 1B][guard 15B][zero 1B]`, side 0 = long, 1 = short;
+any other side byte or non-zero padding is rejected).
 
 Ops that don't fit 31 bytes (e.g. `launch` with name/IPFS CID) are encoded as
 **commit-reveal**: `link = blake2b(payload)`, and the payload is fetched from any
@@ -284,75 +285,114 @@ or the spot invariants (§8: earmarks, floors, `queue == unpaid appreciation`).
 
 **Constants.** `FUTURES_ERA = 1_788_100_000` (2026-08-30 14:26:40 UTC),
 `MAX_LEVERAGE = 5`, `MAINT_BPS = 500`, `CLOSE_FEE_BPS = 50`, `MAX_OI_BPS = 2500`
-(of supply), `MAX_OI_POOL_BPS = 5000` (of the token reserve), `TWAP_WINDOW = 600`
-seconds, `MAX_SAMPLES = 64`.
+(of supply), `MAX_OI_POOL_BPS = 1000` (of the token reserve),
+`MARK_RESPONSIVENESS = 4`, `MIN_SIZE_DIV = 10_000`, `MAX_BOOK_SIDE = 32`,
+`MAX_ORDERS_PER_ACCOUNT = 2`, `MAX_PAIRS = 128`, `MAX_SETTLED = 32`.
 
-**Spot.** `spot = poolXno × PRECISION / poolTokens` — the token's own
-replay-computed price. Invalid (`no liquidity`) when either reserve is 0.
+**Spot.** `spot = poolXno × PRECISION / poolTokens`. Invalid (`no liquidity`)
+when either reserve is 0.
 
-**TWAP reference (manipulation resistance).** Spot can be pumped inside one
-op for ~2% swap fees, and op-count windows are free to spam on a feeless chain,
-so the reference is **time**-weighted: after every price-moving op on an
-*active* token (one that has had a `futOpen`), the carrier's network timestamp
-and the spot are appended to `futures.samples` (same-second → latest wins;
-times clamped non-decreasing; one sample at/before the window start is kept,
-older ones pruned; at most `MAX_SAMPLES`, dropping the oldest in-window first).
-`twap(now)` = average of spot over `[now − TWAP_WINDOW, now]` where each sample
-holds until the next and the **first sample is extended back to the window
-start**; with no timestamp or no samples, `twap = spot`. Sampling never starts
-before the first `futOpen`, so no pre-futures root changes. Holding a pump for
-the whole window lets every other holder sell into it — that is the
-manipulator's real cost.
+**The mark, and why it carries no clock.** A lagging reference is required —
+spot can be pumped inside one op for the swap fee. It must *not* be
+time-weighted: a block's timestamp is `local_timestamp`, the moment the
+answering node first saw it. It is not covered by the signature and differs
+between nodes. Ordering already tolerates that because sorting is a DISCRETE
+function of timestamps; a time-weighted average is a CONTINUOUS one, so a
+one-second difference would change entry prices, balances and the state root,
+and the server and the in-browser verifier would disagree. The reference is
+therefore anchored to VOLUME, which is consensus state. After every
+price-moving op on an active token:
 
-**Adverse pricing.** Let `lo = min(spot, twap)`, `hi = max(spot, twap)`.
+```
+frac = max( |Δ poolXno| / max(poolXno_before, poolXno_after),
+            |Δ poolTokens| / max(poolTokens_before, poolTokens_after) )
+mark += (spot − mark) × min(1, MARK_RESPONSIVENESS × frac)
+```
+
+Taking the larger of the two reserve moves is required: `addLiq(xno = 0,
+tokens = …)` is creator-only and free and repositions spot while moving no XNO
+at all, which would otherwise leave a stale reference for a resting maker to
+harvest a taker against. Cumulative volume `V` closes `1 − e^(−4V/pool)` of any
+gap, so moving the reference means pushing a comparable fraction of the pool's
+own liquidity through the curve — paying the swap fee and the slippage, both
+ways, while everyone else can trade against you. `mark` is seeded from spot at
+the token's first `futOpen` and is one bigint of state.
+
+**Adverse pricing.** Let `lo = min(spot, mark)`, `hi = max(spot, mark)`.
 - entry of a new pair: the **taker** gets the worse side — long taker `hi`,
-  short taker `lo` (the maker inherits the same entry);
+  short taker `lo` (the maker inherits the same entry, which is its good side);
 - voluntary close: the pair settles at the price worse for the **closer** —
   long closer `lo`, short closer `hi`;
 - liquidation: fires only if the losing side is at/below maintenance at
-  **both** `spot` and `twap`, and settles at the price more favourable to that
-  loser (long loser `hi`, short loser `lo`).
+  **both** `spot` and `mark`, and settles at the price more favourable to that
+  loser.
 
-**State.** `futures: { book: FutOrder[], pairs: FutPair[], nextId, samples,
-settled }` per token. `FutOrder = {id, account, side, size, margin}` (resting,
-FIFO); `FutPair = {id, size, entry, long: {account, margin}, short: {account,
-margin}}`; `FutSample = {t, price}`; `FutSettled = {id, size, entry, price,
-long, short, longPnl, kind (0 close / 1 liquidation), closer}` — every
-settlement appends a receipt to `settled` (bounded to the most recent 32,
-oldest dropped; the full history is derivable from the fold, and each entry
-ties to the block that settled it).
-Margin tokens leave `balances` while locked. Conservation (tested):
-`Σbalances + Σstaked + treasury + poolTokens + lockedMargin == supply`.
-The canonical root carries a `futures` key **only once a token has futures
-activity** (`nextId > 0` or a non-empty book/pairs) — every pre-futures root is
-byte-identical to before (verified against the live production root).
+**State.** `futures: { book, pairs, nextId, mark, settled, nextSeq }` per token.
+`FutOrder = {id, account, side, size, margin, guard}` (resting, FIFO);
+`FutPair = {id, size, entry, long: {account, margin}, short: {account, margin}}`;
+`FutSettled = {seq, id, size, entry, price, long, short, longPnl, kind (0 close
+/ 1 liquidation), closer}` — every settlement appends a receipt, bounded to the
+most recent 32, each carrying a unique monotone `seq` so a derived history can
+never confuse two identical settlements. Margin tokens leave `balances` while
+locked. Conservation (fuzz-tested): `Σbalances + Σstaked + treasury +
+poolTokens + rebateVault + lockedMargin == supply`. The canonical root carries a
+`futures` key **only once a token has futures activity**, so every pre-futures
+root is byte-identical (verified against the live production root).
 
-**`futOpen(side, size, margin)`** — valid iff stamped `≥ FUTURES_ERA`, token
-launched and priced, `size > 0`, `margin > 0`, `size ≤ margin × MAX_LEVERAGE`,
-`balance ≥ margin`, and that side's open interest (book + pairs) + size
-`≤ min(supply × MAX_OI_BPS, poolTokens × MAX_OI_POOL_BPS) / BPS`. Deducts
-`margin`, then matches FIFO against resting opposite-side orders **not owned
-by the sender** (partial fills; maker and taker margin are prorated by fill /
-original size, rounding dust refunded). Each fill creates a pair at the
-taker-adverse `entry`. Any unmatched remainder rests in the book with its
-prorated margin. The token's first `futOpen` records the first TWAP sample.
+**`futOpen(side, size, margin, guard)`** — fragment-encoded. Valid iff the
+carrier's timestamp is a finite number `≥ FUTURES_ERA` (written as a positive
+test, so an absent/NaN stamp fails), token launched and priced, `size > 0`,
+`margin > 0`, `guard > 0`, `size ≤ margin × MAX_LEVERAGE`, `size ≥ minSize =
+max(supply/MIN_SIZE_DIV, BPS/MAINT_BPS)`, `balance ≥ margin`, that side's open
+interest + size `≤ min(supply × MAX_OI_BPS, poolTokens × MAX_OI_POOL_BPS)/BPS`,
+the taker-adverse `entry` satisfies the guard, and — if the order would have to
+rest — there is room under `MAX_BOOK_SIDE` and `MAX_ORDERS_PER_ACCOUNT`.
+Matches FIFO against resting opposite-side orders not owned by the sender and
+whose own `guard` the entry satisfies, stopping at `MAX_PAIRS`. A fill that
+would leave either party below `minSize` is skipped rather than made. Any
+remainder rests if it is `≥ minSize` and there is room, else it is refunded.
 
-**`futClose(size)`** — `size = 0`: refund every resting order of the sender and
-close all their pairs; else close the sender's pairs FIFO up to `size`
-(partial). Each closed portion settles **both** legs at the closer-adverse
-price `P`: `pnl_long = portion × (P − entry) / P` (tokens), clamped to
-`[−longMargin, +shortMargin]` (loss never exceeds what the loser locked);
-the closer pays `portion × CLOSE_FEE_BPS / BPS` (capped at their payout) to the
-counterparty it closed. Invalid (`nothing to close`) if the sender had nothing.
+**`guard`** is the signer's entry-price bound (long: `entry ≤ guard`; short:
+`entry ≥ guard`) and is **mandatory**. The fixpoint defers an invalid op and
+retries it after every later apply (§9), so without a bound an open could fire
+at a price its signer never quoted; and because one large swap always
+dislocates spot further than the mark, an unguarded taker is harvestable by a
+maker who moved the price on purpose.
+
+**`futClose(size)`** — compact. `size = 0`: refund every resting order of the
+sender and close all their positions; else close FIFO up to `size`. A partial
+close must both take and leave at least `minSize`, otherwise it closes the
+whole pair: `pnl`, the prorated margins and the fee all floor, so slicing a
+losing pair into dust would otherwise round every one of them to zero and let
+the loser pay neither. Each closed portion settles **both** legs at the
+closer-adverse price `P`: `pnl_long = portion × (P − entry) / P`, clamped to
+`[−longMargin, +shortMargin]`; the closer pays `portion × CLOSE_FEE_BPS / BPS`
+(capped at their payout) to the counterparty. **Closing nothing is a no-op, not
+an invalid op** — an invalid one would be deferred and fire against a position
+the signer opened later.
 
 **Liquidation sweep** — after every op that moves the price (buy, sell,
-seedLiq, addLiq) and after every futures op: each pair whose losing side's
-equity `margin ± pnl ≤ size × MAINT_BPS / BPS` at **both** spot and twap is
-settled at the loser-favourable price with no fee, in ascending pair id. A
-pure no-op for tokens with no pairs. Settlement never trades against the pool,
-so a liquidation cannot move the price — no cascades.
+seedLiq, addLiq, and a §8 `applyVoid`) and after every futures op: each pair
+whose losing side is at/below `size × MAINT_BPS / BPS` at both prices is
+settled loser-favourably with no fee, in ascending pair id. Settlement never
+trades against the pool, so a liquidation cannot move the price — no cascades.
 
-**Guarantees.** Zero-sum per pair; solvent by construction (no insurance
-fund); deterministic (identical fold on every replayer); era-gated so no
-historical block can ever decode into a futures op that applies; a one-op
-price move can neither liquidate nor be cashed out.
+**Interaction with §8.** `sellValueOf` counts an account's futures margin as
+part of its position, and `applyVoid` prorates the void across balances, stake
+**and** futures margin. Otherwise one `futOpen` with `margin = whole balance`
+would make the position look like zero, ratchet the earmark floor to 0 and free
+the holder to spend collateral other sellers' quotes are backed by.
+
+**Guarantees.** Zero-sum per pair; solvent by construction (no insurance fund);
+a pure function of the ordered block list with no clock in it; era-gated so no
+historical block can decode into a futures op that applies; a single large
+trade can neither liquidate nor be cashed out; no position can exist that is
+too small to be liquidated; book and pairs are bounded by count, which matters
+because Nano is feeless.
+
+**Not claimed.** A trader who can push volume comparable to the pool's own
+liquidity, and hold the price there while everyone trades against them, can
+still move the mark and liquidate counterparties. That is bounded by
+`MAX_OI_POOL_BPS` (the prize) and by the loss cap (a loser can never lose more
+than their margin), but it is a cost, not an impossibility — as on any venue
+with a thin market.

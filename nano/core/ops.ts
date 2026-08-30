@@ -28,7 +28,11 @@ export type Op =
   // Futures (core/futures.ts): token-margined inverse positions. `side` 0=long
   // 1=short; `size` is notional in tokens; `margin` tokens are locked from the
   // sender's balance. futClose.size 0 = cancel all resting + close everything.
-  | { kind: "futOpen"; side: 0 | 1; size: bigint; margin: bigint }
+  // `guard` is the signer's entry-price bound (× PRECISION; 0 = none): long
+  // fills only at entry ≤ guard, short only at entry ≥ guard. Required by the
+  // fixpoint's deferral rule (SPEC §9) — it keeps a late-applied open inside
+  // the price the signer actually accepted.
+  | { kind: "futOpen"; side: 0 | 1; size: bigint; margin: bigint; guard: bigint }
   | { kind: "futClose"; size: bigint }
   // Synthetic observation (never encoded on-chain): the signed balance of one
   // account's block, folded in canonical order. Direct tokens use it to detect

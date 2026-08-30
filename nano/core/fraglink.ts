@@ -82,10 +82,14 @@ function bodyOf(op: Op): Uint8Array {
     writeAmt(b, 0, op.xno);
     writeAmt(b, AMT_BYTES, op.tokens);
   } else if (op.kind === "futOpen") {
-    // [ size: 15B ][ margin: 15B ][ side: 1B ][ zero: 16B ]
+    // [ size: 15B ][ margin: 15B ][ side: 1B ][ guard: 15B ][ zero: 1B ]
     writeAmt(b, 0, op.size);
     writeAmt(b, AMT_BYTES, op.margin);
+    // Fail loudly rather than silently truncating an out-of-range side into a
+    // valid-looking byte (every other field already rejects out-of-range).
+    if (op.side !== 0 && op.side !== 1) throw new Error("futures side must be 0 or 1");
     b[2 * AMT_BYTES] = op.side;
+    writeAmt(b, 2 * AMT_BYTES + 1, op.guard);
   } else {
     throw new Error("op does not use fragment links: " + op.kind);
   }
@@ -141,12 +145,18 @@ export function assembleFrag(aHex: string, bHex: string): { tokenId: TokenId; op
   if (code === OP_CODE.futOpen) {
     const sideByte = body[2 * AMT_BYTES];
     if (sideByte !== 0 && sideByte !== 1) throw new Error("bad futures side");
-    for (let i = 2 * AMT_BYTES + 1; i < BODY_BYTES; i++) {
+    for (let i = 3 * AMT_BYTES + 1; i < BODY_BYTES; i++) {
       if (body[i] !== 0) throw new Error("fragment padding not zero");
     }
     return {
       tokenId,
-      op: { kind: "futOpen", side: sideByte as 0 | 1, size: readAmt(body, 0), margin: readAmt(body, AMT_BYTES) },
+      op: {
+        kind: "futOpen",
+        side: sideByte as 0 | 1,
+        size: readAmt(body, 0),
+        margin: readAmt(body, AMT_BYTES),
+        guard: readAmt(body, 2 * AMT_BYTES + 1),
+      },
     };
   }
   // two-amount ops: trailing padding MUST be zero (rejects garbage that merely
