@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { feed, cachedPayload } from "../../../server/market";
-import { withCacheHeaders, wantsFresh } from "../_cache";
+import { withCacheHeaders, wantsFresh, shapeFor } from "../_cache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
