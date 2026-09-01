@@ -294,10 +294,14 @@ async function chainFingerprint(
     const all = [...new Set([...accounts, ...pools, ANCHOR_ADDRESS])].sort();
     await src.warmFrontiers(all);
     let hints = src.frontierHints();
-    // One retry: the batch resolves via three views each under a short cap, so
-    // a single rate-limited moment can return nothing at all. Without this the
-    // probe reports "unknown" and every request pays for a full walk.
-    if (hints.size === 0) {
+    // Retry the probe, hard. The economics are lopsided: the probe is ONE
+    // batched call, while the fold it avoids is hundreds. Giving up after a
+    // single rate-limited attempt meant every request paid for a full walk,
+    // which saturated the plan further and made the next probe fail too — a
+    // loop that fed itself. A few hundred milliseconds of retry is cheap
+    // insurance against 15-40s of walking.
+    for (let attempt = 1; hints.size === 0 && attempt <= 3; attempt++) {
+      await new Promise((r) => setTimeout(r, 250 * attempt));
       await src.warmFrontiers(all);
       hints = src.frontierHints();
     }
