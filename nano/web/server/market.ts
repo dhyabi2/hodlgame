@@ -407,6 +407,11 @@ async function currentFingerprint(): Promise<Record<string, string> | null> {
  * not moved, else produce it and store it. `fresh` bypasses both directions.
  */
 export async function cachedPayload(shape: string, fresh: boolean, produce: () => Promise<unknown>): Promise<string> {
+  // Reset per call. This is a module global on a warm serverless instance, so
+  // without this a later request inherits an earlier one's verdict — which is
+  // exactly how this diagnostic first lied to me, reporting "hit" on requests
+  // that had actually missed.
+  lastStore = "skipped";
   if (fresh || cacheDisabled()) {
     const v = JSON.stringify(await produce());
     lastInfo = { store: lastStore, hit: false, key: "(bypass)", computedAt: Date.now(), accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
