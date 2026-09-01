@@ -15,6 +15,7 @@ import { commitResolver } from "./commits";
 import { loadNanoRpcKey } from "../lib/rpc";
 import { watchedAccounts, persistWatched } from "./operator";
 import { StoreBlockCache } from "./sharedCache";
+import { loadBlob, saveBlob } from "./store";
 import { ANCHOR_ADDRESS } from "../core/anchor";
 import { deriveMetaAuthority, type MetaAuthorityState } from "../core/metaAnchor";
 import { claimableReward } from "../core/state";
@@ -298,6 +299,74 @@ async function chainFingerprint(
   } catch {
     return null;
   }
+}
+
+/**
+ * Cross-instance layer.
+ *
+ * The in-memory entry above only helps a request that lands on the SAME warm
+ * serverless instance, and Vercel spreads requests across many — measured in
+ * production, four sequential calls resolved the same fingerprint and still
+ * missed every time. So the rendered payload is also parked in the durable
+ * store under its fingerprint, where every instance can reach it.
+ *
+ * Same rule, same guarantees: the key contains the chain fingerprint, so a hit
+ * is the answer a recompute would produce. A store miss, a parse failure or a
+ * fingerprint we could not establish all fall through to a full compute.
+ */
+async function sharedGet(shape: string, fp: string): Promise<string | null> {
+  try {
+    const raw = await loadBlob(`mcache/${shape}`);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as { fp?: string; at?: number; json?: string };
+    if (!p?.fp || p.fp !== fp || typeof p.json !== "string") return null;
+    if (!p.at || Date.now() - p.at >= CACHE_MAX_AGE_MS) return null;
+    lastInfo = { hit: true, key: fp, computedAt: p.at, accounts: lastInfo.accounts, ageMs: 0 };
+    return p.json;
+  } catch {
+    return null;
+  }
+}
+async function sharedPut(shape: string, fp: string, json: string): Promise<void> {
+  try {
+    await saveBlob(`mcache/${shape}`, JSON.stringify({ fp, at: Date.now(), json }));
+  } catch {
+    /* a cache write must never fail a request */
+  }
+}
+
+/** Resolve the current chain fingerprint on its own (~1 batch RPC call), for
+ * callers that want to check the shared cache before folding anything. */
+async function currentFingerprint(): Promise<string | null> {
+  try {
+    const src = new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache());
+    const watched = await watchedAccounts();
+    const prev = cached;
+    const fp = await chainFingerprint(src, [...watched, ...(prev?.accounts ?? [])], prev?.pools ?? []);
+    return fp?.key ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Serve a JSON payload for `shape` from the shared cache when the chain has
+ * not moved, else produce it and store it. `fresh` bypasses both directions.
+ */
+export async function cachedPayload(shape: string, fresh: boolean, produce: () => Promise<unknown>): Promise<string> {
+  if (fresh || cacheDisabled()) {
+    const v = JSON.stringify(await produce());
+    lastInfo = { hit: false, key: "(bypass)", computedAt: Date.now(), accounts: lastInfo.accounts, ageMs: 0 };
+    return v;
+  }
+  const fp = await currentFingerprint();
+  if (fp) {
+    const hit = await sharedGet(shape, fp);
+    if (hit) return hit;
+  }
+  const json = JSON.stringify(await produce());
+  if (fp) await sharedPut(shape, fp, json);
+  return json;
 }
 
 async function computeMaybeCached(): Promise<RawMarket> {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { detail } from "../../../server/market";
+import { detail, cachedPayload } from "../../../server/market";
 import { withCacheHeaders, wantsFresh } from "../_cache";
 
 export const runtime = "nodejs";
@@ -11,10 +11,21 @@ export async function GET(req: Request) {
   const account = u.searchParams.get("account") ?? "";
   if (!tokenId) return NextResponse.json({ error: "token required" }, { status: 400 });
   try {
-    const token = await detail(tokenId, account, wantsFresh(req));
-    return token
-      ? withCacheHeaders(NextResponse.json({ token }))
-      : NextResponse.json({ error: "unknown token" }, { status: 404 });
+    const fresh = wantsFresh(req);
+    if (account) {
+      const token = await detail(tokenId, account, fresh);
+      return token
+        ? withCacheHeaders(NextResponse.json({ token }))
+        : NextResponse.json({ error: "unknown token" }, { status: 404 });
+    }
+    let missing = false;
+    const json = await cachedPayload(`token-${tokenId}`, fresh, async () => {
+      const token = await detail(tokenId, "", fresh);
+      if (!token) missing = true;
+      return { token };
+    });
+    if (missing) return NextResponse.json({ error: "unknown token" }, { status: 404 });
+    return withCacheHeaders(new NextResponse(json, { headers: { "content-type": "application/json" } }));
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? String(e) }, { status: 500 });
   }
