@@ -353,7 +353,10 @@ async function sharedGet(shape: string, fp: string): Promise<string | null> {
  * hidden. It applies only when the probe failed; a working probe always uses
  * the exact-fingerprint path above.
  */
-const BLIND_WINDOW_MS = 20_000;
+// Sized against the thing it has to outlast: a fold takes 15-25s, and the feed
+// polls every 30s, so a 20s window expired before the next caller could ever
+// reach it. 45s covers roughly two folds.
+const BLIND_WINDOW_MS = 45_000;
 async function sharedGetRecent(shape: string): Promise<string | null> {
   try {
     const raw = await loadBlob(`mcache/${shape}`);
