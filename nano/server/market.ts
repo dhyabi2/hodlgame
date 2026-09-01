@@ -234,6 +234,7 @@ let inFlight: Promise<RawMarket> | null = null;
 // shorter than that leaves no room for a hit to ever land.
 const CACHE_MAX_AGE_MS = 90_000;
 interface CacheEntry {
+  tips: Record<string, string>;
   key: string;
   at: number;
   value: RawMarket;
@@ -289,7 +290,7 @@ async function chainFingerprint(
   src: NanoRpcSource,
   accounts: string[],
   pools: string[]
-): Promise<{ key: string; hinted: number } | null> {
+): Promise<{ tips: Record<string, string>; hinted: number } | null> {
   try {
     const all = [...new Set([...accounts, ...pools, ANCHOR_ADDRESS])].sort();
     await src.warmFrontiers(all);
@@ -309,13 +310,16 @@ async function chainFingerprint(
     // if the batch resolves nothing, we know nothing, so we cannot claim the
     // chain is unchanged.
     if (hints.size === 0) return null;
-    // An account that flips between resolved and unresolved changes the key, so
-    // a partial blip can only ever cost an extra recompute, never a false hit.
-    const parts = all.map((a) => a + ":" + (hints.get(a) ?? "-"));
-    return {
-      key: blake2bHex(new TextEncoder().encode(parts.join("|")), undefined, 32),
-      hinted: hints.size,
-    };
+    // Return the RESOLVED tips, not a hash over every account. Hashing the
+    // whole set meant an unresolved account contributed a "-" placeholder, so
+    // a probe that happened to resolve a different subset produced a different
+    // key for an unchanged chain — measured live as a key alternating between
+    // two values on consecutive requests, which made the cache unhittable.
+    // Comparing only what we actually know is both stable and honest: an
+    // account whose tip moved will mismatch as soon as it IS resolved.
+    const tips: Record<string, string> = {};
+    for (const a of all) { const h = hints.get(a); if (h) tips[a] = h; }
+    return { tips, hinted: hints.size };
   } catch {
     return null;
   }
@@ -334,22 +338,40 @@ async function chainFingerprint(
  * is the answer a recompute would produce. A store miss, a parse failure or a
  * fingerprint we could not establish all fall through to a full compute.
  */
-async function sharedGet(shape: string, fp: string): Promise<string | null> {
+/** Short, stable label for a tip set — for headers only, never for matching. */
+function tipsLabel(tips: Record<string, string>): string {
+  const parts = Object.keys(tips).sort().map((a) => a + ":" + tips[a]);
+  return blake2bHex(new TextEncoder().encode(parts.join("|")), undefined, 32).slice(0, 16);
+}
+
+/** A hit requires every tip we resolved NOW to match what the entry recorded.
+ * Accounts we could not resolve are simply not evidence either way, so they no
+ * longer veto a hit — that is what makes this stable under a flaky probe. */
+function tipsAgree(stored: Record<string, string> | undefined, now: Record<string, string>): boolean {
+  if (!stored) return false;
+  const keys = Object.keys(now);
+  if (keys.length === 0) return false;
+  for (const a of keys) if (stored[a] !== now[a]) return false;
+  return true;
+}
+
+async function sharedGet(shape: string, tips: Record<string, string>): Promise<string | null> {
   try {
     const raw = await loadBlob(`mcache/${shape}`);
     if (!raw) return null;
-    const p = JSON.parse(raw) as { fp?: string; at?: number; json?: string };
-    if (!p?.fp || p.fp !== fp || typeof p.json !== "string") return null;
+    const p = JSON.parse(raw) as { tips?: Record<string, string>; at?: number; json?: string };
+    if (typeof p?.json !== "string") return null;
     if (!p.at || Date.now() - p.at >= CACHE_MAX_AGE_MS) return null;
-    lastInfo = { hit: true, key: fp, computedAt: p.at, accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
+    if (!tipsAgree(p.tips, tips)) return null;
+    lastInfo = { hit: true, key: tipsLabel(tips), computedAt: p.at, accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
     return p.json;
   } catch {
     return null;
   }
 }
-async function sharedPut(shape: string, fp: string, json: string): Promise<void> {
+async function sharedPut(shape: string, tips: Record<string, string>, json: string): Promise<void> {
   try {
-    await saveBlob(`mcache/${shape}`, JSON.stringify({ fp, at: Date.now(), json }));
+    await saveBlob(`mcache/${shape}`, JSON.stringify({ tips, at: Date.now(), json }));
   } catch {
     /* a cache write must never fail a request */
   }
@@ -357,7 +379,7 @@ async function sharedPut(shape: string, fp: string, json: string): Promise<void>
 
 /** Resolve the current chain fingerprint on its own (~1 batch RPC call), for
  * callers that want to check the shared cache before folding anything. */
-async function currentFingerprint(): Promise<string | null> {
+async function currentFingerprint(): Promise<Record<string, string> | null> {
   try {
     const src = new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache(), { staleTips: true });
     // The PERSISTED set, not live discovery: discovery unions several flaky
@@ -367,7 +389,7 @@ async function currentFingerprint(): Promise<string | null> {
     const stable = await storedWatched();
     const prev = cached;
     const fp = await chainFingerprint(src, [...stable, ...(prev?.accounts ?? [])], prev?.pools ?? []);
-    return fp?.key ?? null;
+    return fp?.tips ?? null;
   } catch {
     return null;
   }
@@ -383,9 +405,9 @@ export async function cachedPayload(shape: string, fresh: boolean, produce: () =
     lastInfo = { hit: false, key: "(bypass)", computedAt: Date.now(), accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
     return v;
   }
-  const fp = await currentFingerprint();
-  if (fp) {
-    const hit = await sharedGet(shape, fp);
+  const tips = await currentFingerprint();
+  if (tips) {
+    const hit = await sharedGet(shape, tips);
     if (hit) return hit;
   }
   // `produce` runs with the inner cache bypassed on purpose: this layer has
@@ -393,13 +415,13 @@ export async function cachedPayload(shape: string, fresh: boolean, produce: () =
   // AGAIN doubled the batch calls per request — which, under rate limiting, is
   // what made the probe fail two thirds of the time in the first place.
   const json = JSON.stringify(await produce());
-  if (fp) await sharedPut(shape, fp, json);
+  if (tips) await sharedPut(shape, tips, json);
   // Report THIS layer's verdict, not the inner bypass the producer just ran —
   // otherwise every miss reads "(bypass)" and the header stops telling you why
   // it missed, which is the entire reason the header exists.
   lastInfo = {
     hit: false,
-    key: fp ?? "(probe failed)",
+    key: tips ? tipsLabel(tips) : "(probe failed)",
     computedAt: Date.now(),
     accounts: lastInfo.accounts,
     ageMs: 0,
@@ -413,18 +435,18 @@ async function computeMaybeCached(): Promise<RawMarket> {
   const watched = await watchedAccounts();
   const prev = cached;
   const fp = await chainFingerprint(src, [...watched, ...(prev?.accounts ?? [])], prev?.pools ?? []);
-  // A hit needs: the same chain tips, no LOSS of probe coverage since the entry
-  // was built, and an age under the ceiling. Anything else recomputes.
-  if (fp && prev && prev.key === fp.key && fp.hinted >= prev.hinted && Date.now() - prev.at < CACHE_MAX_AGE_MS) {
-    lastInfo = { hit: true, key: fp.key, computedAt: prev.at, accounts: prev.accounts.length, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
+  // A hit needs every tip we resolved now to match what the entry recorded, and
+  // an age under the ceiling. Anything else recomputes.
+  if (fp && prev && tipsAgree(prev.tips, fp.tips) && Date.now() - prev.at < CACHE_MAX_AGE_MS) {
+    lastInfo = { hit: true, key: tipsLabel(fp.tips), computedAt: prev.at, accounts: prev.accounts.length, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
     return prev.value;
   }
   const value = await computeFresh({ src, watched });
   const at = Date.now();
   cached = fp
-    ? { key: fp.key, at, value, accounts: value.accounts, pools: poolAddresses(value), hinted: fp.hinted }
-    : null; // probe failed → store nothing, so the next request cannot hit on an unverified key
-  lastInfo = { hit: false, key: fp ? fp.key : "(probe failed)", computedAt: at, accounts: value.accounts.length, ageMs: 0, tipsFromCache: value.tipsFromCache };
+    ? { tips: fp.tips, key: tipsLabel(fp.tips), at, value, accounts: value.accounts, pools: poolAddresses(value), hinted: fp.hinted }
+    : null; // probe failed → store nothing, so the next request cannot hit on unverified evidence
+  lastInfo = { hit: false, key: fp ? tipsLabel(fp.tips) : "(probe failed)", computedAt: at, accounts: value.accounts.length, ageMs: 0, tipsFromCache: value.tipsFromCache };
   return value;
 }
 
