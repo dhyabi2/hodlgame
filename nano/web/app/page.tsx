@@ -56,6 +56,20 @@ interface Holder {
 
 // "Exit Pays You" — one unstake, as a payout to the people who stayed.
 interface ExitRecipient { account: string; gotRaw: string; stakeRaw: string; yieldBps: number }
+
+/** A bell entry. `xno` = an incoming payment; `reward` = a staking payout from
+ * someone else's unstake, carrying the coin it was paid in. */
+interface Notif {
+  kind: "xno" | "reward";
+  id: string;
+  amountRaw: string;
+  time: number;
+  read: boolean;
+  symbol?: string;
+  decimals?: number;
+  tokenId?: string;
+}
+const NOTIF_MAX = 30;
 interface ExitView {
   hash: string;
   time: number;
@@ -447,20 +461,68 @@ export default function Home() {
   // visible from ANY tab: a persistent per-account list (last 20, localStorage)
   // with an unread badge on the bell. Keyed by send hash so the wallet tab's
   // own websocket/toast can't duplicate entries here.
-  const [notifs, setNotifs] = useState<{ id: string; amountRaw: string; time: number; read: boolean }[]>([]);
+  const [notifs, setNotifs] = useState<Notif[]>([]);
   const [notifOpen, setNotifOpen] = useState(false);
   const notifKey = keys ? `holdfun-notifs-${keys.address}` : null;
   useEffect(() => {
     if (!notifKey) { setNotifs([]); return; }
-    try { setNotifs(JSON.parse(localStorage.getItem(notifKey) || "[]")); } catch { setNotifs([]); }
+    // Entries stored before rewards existed have no `kind` — they were all
+    // incoming XNO, so default them rather than dropping someone's history.
+    try {
+      const raw = JSON.parse(localStorage.getItem(notifKey) || "[]");
+      setNotifs(Array.isArray(raw) ? raw.map((n: any) => ({ kind: "xno", ...n })) : []);
+    } catch { setNotifs([]); }
   }, [notifKey]);
-  const saveNotifs = (next: { id: string; amountRaw: string; time: number; read: boolean }[]) => {
+  const saveNotifs = (next: Notif[]) => {
     try { if (notifKey) localStorage.setItem(notifKey, JSON.stringify(next)); } catch {}
     return next;
   };
   useNanoWebsocket(keys?.address ?? null, keys?.publicKey ?? null, (amountRaw, hash) => {
-    setNotifs((prev) => (prev.some((n) => n.id === hash) ? prev : saveNotifs([{ id: hash, amountRaw, time: Date.now(), read: false }, ...prev].slice(0, 20))));
+    setNotifs((prev) => (prev.some((n) => n.id === hash) ? prev : saveNotifs([{ kind: "xno" as const, id: hash, amountRaw, time: Date.now(), read: false }, ...prev].slice(0, NOTIF_MAX))));
   });
+
+  // ── Staking rewards ───────────────────────────────────────────────────────
+  // Every unstake pays its 20% tax to the people still staked ("Exit Pays You").
+  // Those payouts are ledger-exact and already carried per-viewer on each exit
+  // (`mine`), so the notification list is derived from them rather than guessed
+  // at: one entry per exit that actually paid THIS wallet, keyed by the unstake
+  // block hash so it can never double-count across polls.
+  const rewardsSeeded = useRef<string | null>(null);
+  useEffect(() => {
+    const me = keys?.address;
+    if (!me || tokens.length === 0) return;
+    // First pass for a wallet backfills history WITHOUT badging it unread —
+    // otherwise unlocking a long-idle wallet would fire a wall of alerts for
+    // rewards the user has already lived through.
+    const firstPass = rewardsSeeded.current !== me;
+    rewardsSeeded.current = me;
+    const found: Notif[] = [];
+    for (const t of tokens) {
+      for (const e of t.exits ?? []) {
+        const got = e.mine?.gotRaw;
+        if (!got || BigInt(got) <= 0n) continue;
+        found.push({
+          kind: "reward",
+          id: `reward:${t.tokenId}:${e.hash}`,
+          amountRaw: got,
+          time: (e.time || 0) * 1000,
+          read: firstPass,
+          symbol: tokSym(t),
+          decimals: t.decimals,
+          tokenId: t.tokenId,
+        });
+      }
+    }
+    if (found.length === 0) return;
+    setNotifs((prev) => {
+      const known = new Set(prev.map((n) => n.id));
+      const fresh = found.filter((n) => !known.has(n.id));
+      if (fresh.length === 0) return prev;
+      const merged = [...fresh, ...prev].sort((a, b) => b.time - a.time).slice(0, NOTIF_MAX);
+      return saveNotifs(merged);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokens, keys?.address]);
   const unreadNotifs = notifs.filter((n) => !n.read).length;
   const toggleNotifs = () => {
     setNotifOpen((v) => !v);
@@ -680,14 +742,28 @@ export default function Home() {
                   <div className="fixed inset-x-3 top-14 z-30 border border-neutral-700 bg-black p-2 sm:absolute sm:inset-x-auto sm:right-0 sm:top-9 sm:w-72">
                     <p className="px-1 pb-1 text-[10px] font-bold uppercase tracking-wide text-neutral-500">Notifications</p>
                     {notifs.length === 0 ? (
-                      <p className="px-1 py-2 text-xs text-neutral-500">nothing yet — incoming XNO shows up here</p>
+                      <p className="px-1 py-2 text-xs text-neutral-500">nothing yet — incoming XNO and staking rewards show up here</p>
                     ) : (
-                      notifs.slice(0, 10).map((n) => (
-                        <div key={n.id} className="flex items-center justify-between gap-2 border-t border-neutral-900 px-1 py-1.5">
-                          <span className="text-xs text-white">↓ received {fmtXno(n.amountRaw)} XNO</span>
-                          <span className="shrink-0 text-[10px] text-neutral-500">{timeAgo(n.time)}</span>
-                        </div>
-                      ))
+                      notifs.slice(0, 12).map((n) =>
+                        n.kind === "reward" ? (
+                          <button
+                            key={n.id}
+                            className="flex w-full items-center justify-between gap-2 border-t border-neutral-900 px-1 py-1.5 text-left hover:bg-neutral-900"
+                            onClick={() => { if (n.tokenId) { setNotifOpen(false); setDetailTab("trade"); setSelectedId(n.tokenId); } }}
+                          >
+                            <span className="truncate text-xs text-green-400">
+                              + {fmtTok(n.amountRaw, n.decimals ?? 6)} {n.symbol}
+                              <span className="text-neutral-500"> staking reward</span>
+                            </span>
+                            <span className="shrink-0 text-[10px] text-neutral-500">{timeAgo(n.time)}</span>
+                          </button>
+                        ) : (
+                          <div key={n.id} className="flex items-center justify-between gap-2 border-t border-neutral-900 px-1 py-1.5">
+                            <span className="text-xs text-white">↓ received {fmtXno(n.amountRaw)} XNO</span>
+                            <span className="shrink-0 text-[10px] text-neutral-500">{timeAgo(n.time)}</span>
+                          </div>
+                        )
+                      )
                     )}
                   </div>
                 )}
