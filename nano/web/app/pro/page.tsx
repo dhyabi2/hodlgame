@@ -110,7 +110,9 @@ export default function ProPage() {
     setTokens(list);
     // Functional update so a ?token= already set is never clobbered.
     if (list.length) setTokenId((prev) => prev ?? list[0].tokenId);
-  }, 20000, [keys?.address]);
+  // Aligned with the main app: each poll can cost a server-side fold, and the
+  // RPC budget is shared across every open tab.
+  }, 30000, [keys?.address]);
 
   // selected token detail (live) — paused when hidden, 8s.
   usePoll(async () => {
@@ -121,7 +123,7 @@ export default function ProPage() {
     else if (j.error && !token) {
       setTokenId((prev) => (tokens.find((t) => t.tokenId === prev) ? prev : tokens[0]?.tokenId ?? null));
     }
-  }, 8000, [tokenId, keys?.address]);
+  }, 20000, [tokenId, keys?.address]);
   useEffect(() => {
     if (!tokenId) return;
     try {
@@ -567,7 +569,7 @@ function OrderTicket({ token, keys, say, orderApiRef }: { token: Token; keys: Ke
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => { if (!keys) setXnoBal("0"); }, [keys]);
-  usePoll(async () => { if (keys) setXnoBal(await fetchXnoBalance(keys.address)); }, 15000, [keys?.address, busy]);
+  usePoll(async () => { if (keys) setXnoBal(await fetchXnoBalance(keys.address)); }, 45000, [keys?.address, busy]);
 
   // hotkeys: B/S switch side, Enter confirm
   useEffect(() => {

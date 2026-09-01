@@ -193,8 +193,38 @@ export async function indexer(): Promise<MultiIndexer> {
 
 let sweeping = false;
 
+// Cross-instance sweep lock.
+//
+// `sweeping` is a module-level flag, so it only ever guarded ONE serverless
+// instance. The cron fires every 60s while the function may run for up to 300s,
+// and Vercel spreads invocations across instances — so up to five sweeps could
+// overlap, each doing a fold, a discovery scan and per-pool RPC work. That is
+// continuous background load that has nothing to do with user traffic, and it
+// got more expensive once the cron became the only discovery scanner.
+//
+// The lock is a timestamp in the shared store with a TTL below maxDuration, so
+// a crashed sweep cannot wedge it. Read-then-write is not atomic, so this
+// narrows the window rather than closing it completely — which is the right
+// trade here: a rare double sweep is harmless (payouts are idempotent and
+// marked before broadcast), five concurrent ones are not.
+const SWEEP_LOCK_KEY = "sweep-lock";
+const SWEEP_LOCK_TTL_MS = 240_000;
+
+async function acquireSweepLock(): Promise<boolean> {
+  try {
+    const raw = await loadBlob(SWEEP_LOCK_KEY);
+    const at = raw ? Number(raw) : 0;
+    if (Number.isFinite(at) && at > 0 && Date.now() - at < SWEEP_LOCK_TTL_MS) return false;
+    await saveBlob(SWEEP_LOCK_KEY, String(Date.now()));
+    return true;
+  } catch {
+    return true; // store unavailable → fall back to the in-instance guard
+  }
+}
+
 export async function runSweep(onlyToken: string | null) {
   if (sweeping) return { skipped: "sweep already in progress" };
+  if (!(await acquireSweepLock())) return { skipped: "another sweep holds the lock" };
   sweeping = true;
   try {
     const masterSeed = process.env.POOL_SEED;
@@ -246,5 +276,6 @@ export async function runSweep(onlyToken: string | null) {
     return { received, paid, skipped, refunds: [] };
   } finally {
     sweeping = false;
+    try { await saveBlob(SWEEP_LOCK_KEY, "0"); } catch {}
   }
 }
