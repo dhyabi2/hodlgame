@@ -106,8 +106,18 @@ export async function POST(req: Request) {
       // Only cache a COMPLETE answer: this endpoint is known to silently omit
       // some requested hashes depending on which backend replies, and caching
       // a partial set would make the gap permanent.
-      const got = result?.blocks && typeof result.blocks === "object" ? Object.keys(result.blocks).length : 0;
-      if (got === (body.hashes as string[]).length) {
+      //
+      // And only a CONFIRMED one. A block is immutable except for `confirmed`,
+      // which flips false → true — so caching an unconfirmed block would report
+      // it unconfirmed for the whole TTL. The wallet polls this endpoint every
+      // 1.5s waiting for exactly that flag, and the explorer renders it as
+      // "pending", so caching too eagerly would leave a settled trade looking
+      // stuck. Unconfirmed blocks are simply not cached; they confirm within a
+      // second or so and the next fetch stores them.
+      const entries = result?.blocks && typeof result.blocks === "object" ? Object.values(result.blocks) : [];
+      const got = entries.length;
+      const allConfirmed = entries.every((b: any) => b?.confirmed === true || b?.confirmed === "true");
+      if (got === (body.hashes as string[]).length && allConfirmed) {
         if (blocksCache.size > BLOCKS_CACHE_MAX) blocksCache.clear();
         blocksCache.set(bkey, { at: Date.now(), value: result });
       }
