@@ -343,34 +343,6 @@ async function sharedGet(shape: string, fp: string): Promise<string | null> {
     return null;
   }
 }
-/**
- * Blind window. When the chain fingerprint cannot be established at all — the
- * probe is one batched call, and under a saturated RPC plan even that returns
- * 429 — the choice is between recomputing a 15-30s fold for every caller, or
- * reusing a very recent payload without proof the chain has not moved. This
- * takes the second option for a SHORT window only, which is a genuine (if
- * small) staleness window and is reported as such in the headers rather than
- * hidden. It applies only when the probe failed; a working probe always uses
- * the exact-fingerprint path above.
- */
-// Sized against the thing it has to outlast: a fold takes 15-25s, and the feed
-// polls every 30s, so a 20s window expired before the next caller could ever
-// reach it. 45s covers roughly two folds.
-const BLIND_WINDOW_MS = 45_000;
-async function sharedGetRecent(shape: string): Promise<string | null> {
-  try {
-    const raw = await loadBlob(`mcache/${shape}`);
-    if (!raw) return null;
-    const p = JSON.parse(raw) as { at?: number; json?: string };
-    if (!p?.at || typeof p.json !== "string") return null;
-    if (Date.now() - p.at >= BLIND_WINDOW_MS) return null;
-    lastInfo = { hit: true, key: "(unprobed-recent)", computedAt: p.at, accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
-    return p.json;
-  } catch {
-    return null;
-  }
-}
-
 async function sharedPut(shape: string, fp: string, json: string): Promise<void> {
   try {
     await saveBlob(`mcache/${shape}`, JSON.stringify({ fp, at: Date.now(), json }));
@@ -411,20 +383,13 @@ export async function cachedPayload(shape: string, fresh: boolean, produce: () =
   if (fp) {
     const hit = await sharedGet(shape, fp);
     if (hit) return hit;
-  } else {
-    // Could not establish the chain state — reuse a very recent payload rather
-    // than make every caller pay for a fold we cannot prove is needed.
-    const recent = await sharedGetRecent(shape);
-    if (recent) return recent;
   }
   // `produce` runs with the inner cache bypassed on purpose: this layer has
   // already established the fingerprint, and letting the fold probe the chain
   // AGAIN doubled the batch calls per request — which, under rate limiting, is
   // what made the probe fail two thirds of the time in the first place.
   const json = JSON.stringify(await produce());
-  // Stored even without a fingerprint: the entry is then only reachable through
-  // the short blind window above, never through an exact-key hit.
-  await sharedPut(shape, fp ?? "", json);
+  if (fp) await sharedPut(shape, fp, json);
   // Report THIS layer's verdict, not the inner bypass the producer just ran —
   // otherwise every miss reads "(bypass)" and the header stops telling you why
   // it missed, which is the entire reason the header exists.
