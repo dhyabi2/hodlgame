@@ -245,6 +245,9 @@ interface CacheEntry {
 let cached: CacheEntry | null = null;
 
 export interface CacheInfo {
+  /** What the shared store actually did: why a hit did or did not happen.
+   * Guessing at this cost several deploys — it belongs in a header. */
+  store: "hit" | "miss-empty" | "miss-tips" | "miss-age" | "miss-error" | "put-ok" | "put-fail" | "skipped";
   hit: boolean;
   key: string;
   computedAt: number;
@@ -256,11 +259,11 @@ export interface CacheInfo {
    * than left to guesswork. */
   tipsFromCache: number;
 }
-let lastInfo: CacheInfo = { hit: false, key: "", computedAt: 0, accounts: 0, ageMs: 0, tipsFromCache: 0 };
+let lastInfo: CacheInfo = { store: "skipped", hit: false, key: "", computedAt: 0, accounts: 0, ageMs: 0, tipsFromCache: 0 };
 /** Provenance of the most recent compute — surfaced as response headers so
  * "is this cached / how old / keyed on what" is a header read, not a hunt. */
 export function cacheInfo(): CacheInfo {
-  return { ...lastInfo, ageMs: lastInfo.computedAt ? Date.now() - lastInfo.computedAt : 0 };
+  return { ...lastInfo, store: lastStore, ageMs: lastInfo.computedAt ? Date.now() - lastInfo.computedAt : 0 };
 }
 /** Env kill-switch: set CACHE_DISABLED=1 to make every request compute fresh. */
 function cacheDisabled(): boolean {
@@ -355,25 +358,29 @@ function tipsAgree(stored: Record<string, string> | undefined, now: Record<strin
   return true;
 }
 
+let lastStore: CacheInfo["store"] = "skipped";
 async function sharedGet(shape: string, tips: Record<string, string>): Promise<string | null> {
   try {
     const raw = await loadBlob(`mcache/${shape}`);
-    if (!raw) return null;
+    if (!raw) { lastStore = "miss-empty"; return null; }
     const p = JSON.parse(raw) as { tips?: Record<string, string>; at?: number; json?: string };
-    if (typeof p?.json !== "string") return null;
-    if (!p.at || Date.now() - p.at >= CACHE_MAX_AGE_MS) return null;
-    if (!tipsAgree(p.tips, tips)) return null;
-    lastInfo = { hit: true, key: tipsLabel(tips), computedAt: p.at, accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
+    if (typeof p?.json !== "string") { lastStore = "miss-empty"; return null; }
+    if (!p.at || Date.now() - p.at >= CACHE_MAX_AGE_MS) { lastStore = "miss-age"; return null; }
+    if (!tipsAgree(p.tips, tips)) { lastStore = "miss-tips"; return null; }
+    lastStore = "hit";
+    lastInfo = { store: lastStore, hit: true, key: tipsLabel(tips), computedAt: p.at, accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
     return p.json;
   } catch {
+    lastStore = "miss-error";
     return null;
   }
 }
 async function sharedPut(shape: string, tips: Record<string, string>, json: string): Promise<void> {
   try {
     await saveBlob(`mcache/${shape}`, JSON.stringify({ tips, at: Date.now(), json }));
+    lastStore = "put-ok";
   } catch {
-    /* a cache write must never fail a request */
+    lastStore = "put-fail"; // a cache write must never fail a request
   }
 }
 
@@ -402,7 +409,7 @@ async function currentFingerprint(): Promise<Record<string, string> | null> {
 export async function cachedPayload(shape: string, fresh: boolean, produce: () => Promise<unknown>): Promise<string> {
   if (fresh || cacheDisabled()) {
     const v = JSON.stringify(await produce());
-    lastInfo = { hit: false, key: "(bypass)", computedAt: Date.now(), accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
+    lastInfo = { store: lastStore, hit: false, key: "(bypass)", computedAt: Date.now(), accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
     return v;
   }
   const tips = await currentFingerprint();
@@ -420,6 +427,7 @@ export async function cachedPayload(shape: string, fresh: boolean, produce: () =
   // otherwise every miss reads "(bypass)" and the header stops telling you why
   // it missed, which is the entire reason the header exists.
   lastInfo = {
+    store: lastStore,
     hit: false,
     key: tips ? tipsLabel(tips) : "(probe failed)",
     computedAt: Date.now(),
@@ -438,7 +446,7 @@ async function computeMaybeCached(): Promise<RawMarket> {
   // A hit needs every tip we resolved now to match what the entry recorded, and
   // an age under the ceiling. Anything else recomputes.
   if (fp && prev && tipsAgree(prev.tips, fp.tips) && Date.now() - prev.at < CACHE_MAX_AGE_MS) {
-    lastInfo = { hit: true, key: tipsLabel(fp.tips), computedAt: prev.at, accounts: prev.accounts.length, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
+    lastInfo = { store: lastStore, hit: true, key: tipsLabel(fp.tips), computedAt: prev.at, accounts: prev.accounts.length, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
     return prev.value;
   }
   const value = await computeFresh({ src, watched });
@@ -446,7 +454,7 @@ async function computeMaybeCached(): Promise<RawMarket> {
   cached = fp
     ? { tips: fp.tips, key: tipsLabel(fp.tips), at, value, accounts: value.accounts, pools: poolAddresses(value), hinted: fp.hinted }
     : null; // probe failed → store nothing, so the next request cannot hit on unverified evidence
-  lastInfo = { hit: false, key: fp ? tipsLabel(fp.tips) : "(probe failed)", computedAt: at, accounts: value.accounts.length, ageMs: 0, tipsFromCache: value.tipsFromCache };
+  lastInfo = { store: lastStore, hit: false, key: fp ? tipsLabel(fp.tips) : "(probe failed)", computedAt: at, accounts: value.accounts.length, ageMs: 0, tipsFromCache: value.tipsFromCache };
   return value;
 }
 
@@ -455,7 +463,7 @@ function compute(fresh = false): Promise<RawMarket> {
   // uncached behaviour exactly while troubleshooting.
   if (fresh || cacheDisabled()) {
     return computeFresh().then((v) => {
-      lastInfo = { hit: false, key: "(bypass)", computedAt: Date.now(), accounts: v.accounts.length, ageMs: 0, tipsFromCache: v.tipsFromCache };
+      lastInfo = { store: lastStore, hit: false, key: "(bypass)", computedAt: Date.now(), accounts: v.accounts.length, ageMs: 0, tipsFromCache: v.tipsFromCache };
       return v;
     });
   }
