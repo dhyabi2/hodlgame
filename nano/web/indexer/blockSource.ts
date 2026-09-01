@@ -395,17 +395,28 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
     // (observed live: a wallet's fresh blocks visible via nano-gpt minutes
     // before nano.to's US cluster served them), since nanoRpc only fails over
     // on transport errors, never on stale-but-successful answers.
+    // ESCALATE, don't fan out. This used to fire all three sources in PARALLEL
+    // for every account, and collectChains walks 10 accounts at a time — about
+    // 30 concurrent request chains per fold, which is what tripped the plan's
+    // "burst limit exceeded" and "too many concurrent requests". The sources
+    // are tried in order instead and the walk stops at the first COMPLETE one,
+    // so the happy path costs a third of the calls. Correctness is unchanged:
+    // "complete" still means the walk contains the best observed frontier, so
+    // the first complete walk is as trustworthy as the longest of three.
+    const sources: RpcCall[] = [
+      (body) => nanoRpc(this.apiKey, body),
+      (body) => nanoRpc("", body),
+      (body) => fallbackRpc(body),
+    ];
     const walks: { blocks: NanoBlock[]; complete: boolean }[] = [];
     for (let round = 0; round < 2; round++) {
-      const settled = await Promise.allSettled([
-        this.fetchChain((body) => nanoRpc(this.apiKey, body), account, limit, best.frontier),
-        this.fetchChain((body) => nanoRpc("", body), account, limit, best.frontier),
-        this.fetchChain((body) => fallbackRpc(body), account, limit, best.frontier),
-      ]);
-      for (const r of settled) if (r.status === "fulfilled") walks.push(r.value);
-      const complete = walks.filter((w) => w.complete);
-      if (complete.length > 0) {
-        const blocks = complete.reduce((a, b) => (b.blocks.length > a.blocks.length ? b : a)).blocks;
+      for (const source of sources) {
+        let walk: { blocks: NanoBlock[]; complete: boolean } | null = null;
+        try { walk = await this.fetchChain(source, account, limit, best.frontier); } catch { /* try the next source */ }
+        if (!walk) continue;
+        walks.push(walk);
+        if (!walk.complete) continue;
+        const blocks = walk.blocks;
         if (blocks.length) this.frontiers.set(account, blocks[blocks.length - 1].hash); // the replayed tip
         // Publish the complete chain + its frontier to the shared store so every
         // other request/instance serves this exact verified snapshot.

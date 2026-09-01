@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { runSweep } from "../../../../server/operator";
 import { gcOrphanImages } from "../../../../server/imagegc";
 import { refreshXnoUsd } from "../../../../server/xnoUsd";
-import { feed, cacheInfo } from "../../../../server/market";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,18 +27,11 @@ export async function GET(req: Request) {
     // Refresh the XNO→USD rate once per cron tick so no user ever hits CoinGecko.
     let usd: number | null = null;
     try { usd = await refreshXnoUsd(); } catch {}
-    // Pre-warm the market cache on this instance so a user arriving after a
-    // change lands on a warm fold instead of paying for the full chain walk.
-    // Best-effort: a failure here must never affect the payout sweep.
-    let warm: unknown = null;
-    try {
-      const t0 = Date.now();
-      await feed("");
-      warm = { ms: Date.now() - t0, ...cacheInfo() };
-    } catch (e: any) {
-      warm = { error: e?.message ?? String(e) };
-    }
-    return NextResponse.json({ ...r, gc, usd, warm });
+    // NOTE: this used to pre-warm the market cache with a full feed() here.
+    // Removed: it is a whole chain fold every 60s, and it only paid off while
+    // the cache was actually hitting — under the current RPC ceiling it was
+    // pure extra load competing with real user requests.
+    return NextResponse.json({ ...r, gc, usd });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? String(e) }, { status: 500 });
   }

@@ -437,7 +437,10 @@ export class MultiIndexer {
     // per-account fetches on a cold serverless instance), so it's disabled. The
     // per-account best-view frontier in listBlocks + the module-level
     // FRONTIER_CACHE + the request-scoped block memo are the kept, safe wins.
-    const CONCURRENCY = 10;
+    // 3, not 10. Each account walk can itself talk to the RPC several times, so
+    // ten at once meant tens of concurrent requests against a plan that caps
+    // both rate and concurrency — the fold was throttling itself.
+    const CONCURRENCY = 3;
     const out: (DecodedChain | null)[] = new Array(accounts.length).fill(null);
     let cursor = 0;
     let done = 0;
