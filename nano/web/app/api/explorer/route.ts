@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { stats, feed, opDetail, accountView, tokenExplorer, trustDashboard, search } from "../../../server/explorerApi";
-import { withCacheHeaders } from "../_cache";
+import { withCacheHeaders, wantsFresh } from "../_cache";
+import { cachedPayload } from "../../../server/market";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,12 +21,20 @@ export async function GET(req: Request) {
   const view = url.searchParams.get("view") ?? "stats";
   const q = url.searchParams.get("q") ?? "";
   const num = (k: string, d = 0) => { const v = Number(url.searchParams.get(k)); return Number.isFinite(v) ? v : d; };
+  const fresh = wantsFresh(req);
+  // The polled views are fold-backed, so they get the same fingerprint cache as
+  // /api/state. The one-off views (op, account, token, search) are user-driven
+  // and left uncached.
+  const cached = async (shape: string, produce: () => Promise<unknown>) =>
+    withCacheHeaders(new NextResponse(await cachedPayload(shape, fresh, produce), { headers: { "content-type": "application/json" } }));
   try {
     switch (view) {
       case "stats":
-        return withCacheHeaders(NextResponse.json(await stats()));
-      case "feed":
-        return NextResponse.json(await feed({ cursor: num("cursor"), limit: num("limit", 50), kind: url.searchParams.get("kind") || undefined, token: url.searchParams.get("token") || undefined }));
+        return await cached("explorer-stats", () => stats());
+      case "feed": {
+        const args = { cursor: num("cursor"), limit: num("limit", 50), kind: url.searchParams.get("kind") || undefined, token: url.searchParams.get("token") || undefined };
+        return await cached(`explorer-feed-${args.cursor}-${args.limit}-${args.kind ?? ""}-${args.token ?? ""}`, () => feed(args));
+      }
       case "op": {
         const r = await opDetail(q);
         return r ? NextResponse.json(r) : NextResponse.json({ error: "op not found" }, { status: 404 });
@@ -37,7 +46,7 @@ export async function GET(req: Request) {
         return r ? NextResponse.json(r) : NextResponse.json({ error: "unknown token" }, { status: 404 });
       }
       case "trust":
-        return withCacheHeaders(NextResponse.json(await trustDashboard()));
+        return await cached("explorer-trust", () => trustDashboard());
       case "search":
         return NextResponse.json(await search(q));
       default:
