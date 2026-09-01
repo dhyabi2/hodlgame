@@ -83,81 +83,18 @@ async function callEndpoint(
  * never a reason to fail over. */
 class SemanticError extends Error {}
 
-/** A 429 is NOT a real answer — it means "ask again more slowly". Measured
- * live: `Plan burst limit exceeded: more than 10 requests/second` and
- * `Too many concurrent RPC requests for this account`. Treating these as
- * semantic answers (which they look like, since they arrive as `error` in a
- * 200 body) made every burst surface as a hard failure: truncated chain walks,
- * failed cache probes, and requests that took 20-70s or timed out. */
-function isRateLimited(e: unknown): boolean {
-  return e instanceof SemanticError && /\b429\b|burst limit|too many|rate limit/i.test(e.message);
-}
-
-// ── Outbound concurrency cap ────────────────────────────────────────────────
-// The plan bounds CONCURRENT requests as well as rate ("Too many concurrent
-// RPC requests for this account"), and one market fold fans out hundreds of
-// calls at once. A cap fixes the concurrency complaint cheaply.
-//
-// A fixed RATE limit was tried here and reverted: pacing every call to ~8/s
-// serialised a cold fold past the function timeout (measured: /api/state went
-// from ~15s to a 200s timeout). Throughput is instead governed adaptively by
-// the 429 backoff below, which slows down only when the endpoint actually
-// pushes back.
-const RPC_MAX_CONCURRENT = 8;
-const RPC_MIN_INTERVAL_MS = 0;
-let inFlightRpc = 0;
-let lastStart = 0;
-
-function acquireSlot(): Promise<void> {
-  return new Promise((resolve) => {
-    const attempt = () => {
-      const wait = lastStart + RPC_MIN_INTERVAL_MS - Date.now();
-      if (inFlightRpc < RPC_MAX_CONCURRENT && wait <= 0) {
-        inFlightRpc++;
-        lastStart = Date.now();
-        resolve();
-        return;
-      }
-      // Jitter so queued callers don't all wake into the same millisecond.
-      setTimeout(attempt, Math.max(wait, 10) + Math.random() * 15);
-    };
-    attempt();
-  });
-}
-
-const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-async function pacedPrimary(key: string, body: Record<string, unknown>, timeoutMs: number): Promise<any> {
-  await acquireSlot();
+async function rawCall(key: string, body: Record<string, unknown>, timeoutMs: number): Promise<any> {
   try {
     return await callEndpoint(NANO_RPC, key, body, timeoutMs);
-  } finally {
-    inFlightRpc--;
-  }
-}
-
-async function rawCall(key: string, body: Record<string, unknown>, timeoutMs: number): Promise<any> {
-  let lastErr: unknown = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  } catch (e) {
+    if (e instanceof SemanticError) throw new Error(e.message);
+    // Transport failure/timeout on nano.to → the one permitted fallback.
     try {
-      return await pacedPrimary(key, body, timeoutMs);
-    } catch (e) {
-      lastErr = e;
-      if (isRateLimited(e)) {
-        await pause(120 * 2 ** attempt + Math.random() * 80); // 120/240/480ms + jitter
-        continue;
-      }
-      if (e instanceof SemanticError) throw new Error(e.message);
-      break; // transport failure → fall through to the permitted fallback
+      return await callEndpoint(FALLBACK_RPC, key, body, timeoutMs);
+    } catch (e2) {
+      if (e2 instanceof SemanticError) throw new Error(e2.message);
+      throw e; // report the primary's failure
     }
-  }
-  // Primary unusable (transport dead, or still rate-limiting after backoff) →
-  // the one permitted keyless fallback. The key is never sent there.
-  try {
-    return await callEndpoint(FALLBACK_RPC, key, body, timeoutMs);
-  } catch (e2) {
-    if (e2 instanceof SemanticError) throw new Error(e2.message);
-    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
   }
 }
 
