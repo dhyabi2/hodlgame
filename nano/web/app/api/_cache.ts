@@ -14,6 +14,7 @@ export function withCacheHeaders(res: NextResponse): NextResponse {
   res.headers.set("x-tips-from-cache", String(c.tipsFromCache));
   res.headers.set("x-cache-store", c.store);
   res.headers.set("x-discovery", c.discovery);
+  res.headers.set("x-blocks", `cached=${c.blocksFromCache} walked=${c.blocksWalked}`);
   return res;
 }
 

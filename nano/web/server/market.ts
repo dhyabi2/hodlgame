@@ -181,6 +181,10 @@ export interface RawMarket {
   frontiers: Record<string, string>;
   /** Accounts whose tip came from the store rather than a live probe. */
   tipsFromCache: number;
+  /** Accounts whose whole verified chain came from the store (zero RPC) vs
+   * accounts actually re-walked. This is where the RPC budget goes. */
+  blocksFromCache: number;
+  blocksWalked: number;
 }
 
 // Deliberately UNCACHED. This used to be a 2-second in-memory cache shared
@@ -255,13 +259,16 @@ export interface CacheInfo {
   ageMs: number;
   /** Whether this compute re-scanned for new accounts or reused the list. */
   discovery: "fresh" | "cached";
+  /** Chains served from the store vs re-walked on the last fold. */
+  blocksFromCache: number;
+  blocksWalked: number;
   /** Accounts whose tip came from the store rather than a live probe. Non-zero
    * means the batched refresh could not reach the endpoint, so those chains may
    * be slightly behind — exactly the thing you want named in a header rather
    * than left to guesswork. */
   tipsFromCache: number;
 }
-let lastInfo: CacheInfo = { store: "skipped", discovery: "cached", hit: false, key: "", computedAt: 0, accounts: 0, ageMs: 0, tipsFromCache: 0 };
+let lastInfo: CacheInfo = { store: "skipped", discovery: "cached", blocksFromCache: 0, blocksWalked: 0, hit: false, key: "", computedAt: 0, accounts: 0, ageMs: 0, tipsFromCache: 0 };
 /** Provenance of the most recent compute — surfaced as response headers so
  * "is this cached / how old / keyed on what" is a header read, not a hunt. */
 export function cacheInfo(): CacheInfo {
@@ -370,7 +377,7 @@ async function sharedGet(shape: string, tips: Record<string, string>): Promise<s
     if (!p.at || Date.now() - p.at >= CACHE_MAX_AGE_MS) { lastStore = "miss-age"; return null; }
     if (!tipsAgree(p.tips, tips)) { lastStore = "miss-tips"; return null; }
     lastStore = "hit";
-    lastInfo = { store: lastStore, discovery: "cached", hit: true, key: tipsLabel(tips), computedAt: p.at, accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
+    lastInfo = { store: lastStore, discovery: "cached", blocksFromCache: lastInfo.blocksFromCache, blocksWalked: lastInfo.blocksWalked, hit: true, key: tipsLabel(tips), computedAt: p.at, accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
     return p.json;
   } catch {
     lastStore = "miss-error";
@@ -416,7 +423,7 @@ export async function cachedPayload(shape: string, fresh: boolean, produce: () =
   lastStore = "skipped";
   if (fresh || cacheDisabled()) {
     const v = JSON.stringify(await produce());
-    lastInfo = { store: lastStore, discovery: "cached", hit: false, key: "(bypass)", computedAt: Date.now(), accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
+    lastInfo = { store: lastStore, discovery: "cached", hit: false, key: "(bypass)", computedAt: Date.now(), accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache, blocksFromCache: lastInfo.blocksFromCache, blocksWalked: lastInfo.blocksWalked };
     return v;
   }
   const tips = await currentFingerprint();
@@ -436,6 +443,8 @@ export async function cachedPayload(shape: string, fresh: boolean, produce: () =
   lastInfo = {
     store: lastStore,
     discovery: "cached",
+    blocksFromCache: lastInfo.blocksFromCache,
+    blocksWalked: lastInfo.blocksWalked,
     hit: false,
     key: tips ? tipsLabel(tips) : "(probe failed)",
     computedAt: Date.now(),
@@ -454,7 +463,7 @@ async function computeMaybeCached(): Promise<RawMarket> {
   // A hit needs every tip we resolved now to match what the entry recorded, and
   // an age under the ceiling. Anything else recomputes.
   if (fp && prev && tipsAgree(prev.tips, fp.tips) && Date.now() - prev.at < CACHE_MAX_AGE_MS) {
-    lastInfo = { store: lastStore, discovery: "cached", hit: true, key: tipsLabel(fp.tips), computedAt: prev.at, accounts: prev.accounts.length, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
+    lastInfo = { store: lastStore, discovery: "cached", blocksFromCache: lastInfo.blocksFromCache, blocksWalked: lastInfo.blocksWalked, hit: true, key: tipsLabel(fp.tips), computedAt: prev.at, accounts: prev.accounts.length, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
     return prev.value;
   }
   const value = await computeFresh({ src, watched });
@@ -462,7 +471,7 @@ async function computeMaybeCached(): Promise<RawMarket> {
   cached = fp
     ? { tips: fp.tips, key: tipsLabel(fp.tips), at, value, accounts: value.accounts, pools: poolAddresses(value), hinted: fp.hinted }
     : null; // probe failed → store nothing, so the next request cannot hit on unverified evidence
-  lastInfo = { store: lastStore, discovery: "cached", hit: false, key: fp ? tipsLabel(fp.tips) : "(probe failed)", computedAt: at, accounts: value.accounts.length, ageMs: 0, tipsFromCache: value.tipsFromCache };
+  lastInfo = { store: lastStore, discovery: "cached", hit: false, key: fp ? tipsLabel(fp.tips) : "(probe failed)", computedAt: at, accounts: value.accounts.length, ageMs: 0, tipsFromCache: value.tipsFromCache, blocksFromCache: value.blocksFromCache, blocksWalked: value.blocksWalked };
   return value;
 }
 
@@ -471,7 +480,7 @@ function compute(fresh = false): Promise<RawMarket> {
   // uncached behaviour exactly while troubleshooting.
   if (fresh || cacheDisabled()) {
     return computeFresh().then((v) => {
-      lastInfo = { store: lastStore, discovery: "cached", hit: false, key: "(bypass)", computedAt: Date.now(), accounts: v.accounts.length, ageMs: 0, tipsFromCache: v.tipsFromCache };
+      lastInfo = { store: lastStore, discovery: "cached", hit: false, key: "(bypass)", computedAt: Date.now(), accounts: v.accounts.length, ageMs: 0, tipsFromCache: v.tipsFromCache, blocksFromCache: v.blocksFromCache, blocksWalked: v.blocksWalked };
       return v;
     });
   }
@@ -550,7 +559,7 @@ async function computeFresh(injected?: { src: NanoRpcSource; watched: string[] }
   const creators = new Map<string, string>();
   for (const [tokenId, s] of state) if (s.creator) creators.set(tokenId, s.creator);
   const metaAuthority = deriveMetaAuthority(idx.getMetaAnchors(), creators);
-  return { state, byToken, meta: reg, master, metaAuthority, events, idx, sellPayouts, accounts, frontiers: Object.fromEntries(src.frontiers), tipsFromCache: src.tipsFromCache.size };
+  return { state, byToken, meta: reg, master, metaAuthority, events, idx, sellPayouts, accounts, frontiers: Object.fromEntries(src.frontiers), tipsFromCache: src.tipsFromCache.size, blocksFromCache: src.blocksFromCache.size, blocksWalked: src.blocksWalked.size };
 }
 
 /** On-chain creator for a token (launch block signer), or null if the launch

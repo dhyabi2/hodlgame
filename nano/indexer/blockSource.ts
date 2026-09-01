@@ -133,6 +133,12 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
   private lastBatchOkAt = 0;
   /** Accounts served from a stored tip this request — surfaced for observability. */
   readonly tipsFromCache = new Set<string>();
+  /** Accounts whose whole verified chain came from the store (zero RPC), and
+   * accounts we actually re-walked. A fold on an unchanged chain should be
+   * nearly all cached — if it is not, the walk is where the RPC budget goes,
+   * and that is worth knowing from a header rather than inferring. */
+  readonly blocksFromCache = new Set<string>();
+  readonly blocksWalked = new Set<string>();
 
   // account → the exact tip (last block hash) this source replayed for it.
   // Published by the trust view so a browser can pin its own walk to the SAME
@@ -383,7 +389,7 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
       if (best.frontier) {
         try {
           const cached = await this.cache.getBlocks(account, best.frontier);
-          if (cached && cached.length) { this.frontiers.set(account, cached[cached.length - 1].hash); return cached; }
+          if (cached && cached.length) { this.blocksFromCache.add(account); this.frontiers.set(account, cached[cached.length - 1].hash); return cached; }
         } catch {}
       }
     }
@@ -409,6 +415,7 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
       (body) => fallbackRpc(body),
     ];
     const walks: { blocks: NanoBlock[]; complete: boolean }[] = [];
+    this.blocksWalked.add(account); // reached here ⇒ the store could not serve it
     for (let round = 0; round < 2; round++) {
       for (const source of sources) {
         let walk: { blocks: NanoBlock[]; complete: boolean } | null = null;
