@@ -17,6 +17,28 @@ const ALLOWED = new Set([
   "process",
 ]);
 
+// ── Immutable-response cache ────────────────────────────────────────────────
+// The browser is a heavy reader: the explorer, the verifier and every coin
+// page pull the same blocks over and over, and each one spends from the SAME
+// 10 req/s plan budget the server's own folds need. `blocks_info` is keyed by
+// block HASH and a Nano block is immutable and locally signature-verified, so
+// a cached answer can never be stale or forged — the safest possible thing to
+// cache, and the highest-volume browser call.
+//
+// Deliberately NOT cached: `account_info` (its frontier is what the wallet
+// builds the next block on — a stale one would fork the chain), `receivable`,
+// `process` and `work_generate`.
+const BLOCKS_TTL_MS = 10 * 60_000;
+const blocksCache = new Map<string, { at: number; value: any }>();
+const BLOCKS_CACHE_MAX = 4000;
+
+function blocksKey(body: any): string | null {
+  const h = body?.hashes;
+  if (!Array.isArray(h) || h.length === 0 || h.length > 200) return null;
+  if (!h.every((x) => typeof x === "string" && /^[0-9a-fA-F]{64}$/.test(x))) return null;
+  return h.map((x: string) => x.toUpperCase()).sort().join(",") + `|${body?.json_block ? 1 : 0}`;
+}
+
 // Simple in-memory per-IP rate limiter (sliding window).
 const hits = new Map<string, number[]>();
 function rateLimit(key: string, max: number, windowMs: number): boolean {
@@ -69,9 +91,28 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "rate limited" }, { status: 429 });
   }
 
+  // Immutable-by-hash reads: serve from memory when we already have them.
+  const bkey = action === "blocks_info" ? blocksKey(body) : null;
+  if (bkey) {
+    const hit = blocksCache.get(bkey);
+    if (hit && Date.now() - hit.at < BLOCKS_TTL_MS) {
+      return NextResponse.json(hit.value, { headers: { "x-rpc-cache": "hit" } });
+    }
+  }
+
   try {
     const result = await nanoRpc(loadNanoRpcKey(), body);
-    return NextResponse.json(result);
+    if (bkey) {
+      // Only cache a COMPLETE answer: this endpoint is known to silently omit
+      // some requested hashes depending on which backend replies, and caching
+      // a partial set would make the gap permanent.
+      const got = result?.blocks && typeof result.blocks === "object" ? Object.keys(result.blocks).length : 0;
+      if (got === (body.hashes as string[]).length) {
+        if (blocksCache.size > BLOCKS_CACHE_MAX) blocksCache.clear();
+        blocksCache.set(bkey, { at: Date.now(), value: result });
+      }
+    }
+    return NextResponse.json(result, { headers: bkey ? { "x-rpc-cache": "miss" } : undefined });
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? String(e) }, { status: 400 });
   }

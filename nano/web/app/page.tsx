@@ -539,7 +539,11 @@ export default function Home() {
     const j = await (await fetch(`/api/state?account=${acct}`)).json();
     setTokens(j.tokens ?? []);
     setFeedLoaded(true);
-  }, 15000, [keys?.address]);
+    // 30s, not 15s: each poll can cost a full chain fold server-side, and the
+    // RPC plan is a shared 10 req/s budget that the browser competes for.
+    // Live changes still arrive instantly via the websocket + wallet-dirty
+    // events; this is only the safety net.
+  }, 30000, [keys?.address]);
 
   // Detail — reset when nothing selected; otherwise poll (paused-when-hidden).
   useEffect(() => {
@@ -556,7 +560,8 @@ export default function Home() {
     // A successful response with no token (HTTP 404 {error:"unknown token"}) is a
     // CONFIRMED miss — show a not-found card instead of loading forever.
     else if (j.error && !detail) setDetailMissing(true);
-  }, 8000, [selectedId, keys?.address, detailTick]);
+    // 20s, not 8s — same reason as the feed poll above.
+  }, 20000, [selectedId, keys?.address, detailTick]);
 
   /** One-time 1-raw hello to the protocol anchor, so any indexer discovers
    * this account from chain data alone (no operator watch-list). Best-effort:
@@ -1041,7 +1046,7 @@ function ConnectedWallet({
   useWalletDirty(() => { refresh(); loadHistory(); });
   // A live websocket already receives deposits instantly; this poll is only a
   // safety net for a missed frame, so 30s (was 8s) + pause-when-hidden is plenty.
-  usePoll(() => receiveAll(false), 30000, [keys.address]);
+  usePoll(() => receiveAll(false), 60000, [keys.address]);
 
   // Live deposit detection: the moment a send to us confirms on the Nano
   // websocket, auto-receive it — no waiting for the 8s poll. (verifyXNO pattern.)
@@ -1592,7 +1597,7 @@ function Ranks({ onSelect, myAddress }: { onSelect: (id: string) => void; myAddr
   usePoll(async () => {
     const j = await (await fetch("/api/leaderboards")).json();
     if (!j.error) setLb(j);
-  }, 30000, []);
+  }, 60000, []);
 
   if (!lb) {
     return <div className="grid gap-3 sm:grid-cols-2"><Skel /><Skel /><Skel /><Skel /></div>;
@@ -2329,7 +2334,9 @@ function TokenDetail({
     try { const i = await rpc("account_info", { account: keys.address }); setXnoBal(i.balance ?? "0"); }
     catch { setXnoBal("0"); }
   };
-  usePoll(readXnoBal, 15000, [keys?.address, busy]);
+  // 45s: this is a direct RPC read against the shared key budget. Balance
+  // changes already push via the websocket and the wallet-dirty broadcast.
+  usePoll(readXnoBal, 45000, [keys?.address, busy]);
   useWalletDirty(readXnoBal); // re-read the instant any buy/sell/seed/receive lands
 
   // After a trade, re-fetch this coin's state (your position, earmark, price,
