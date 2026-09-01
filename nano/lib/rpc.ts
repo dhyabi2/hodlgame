@@ -93,15 +93,18 @@ function isRateLimited(e: unknown): boolean {
   return e instanceof SemanticError && /\b429\b|burst limit|too many|rate limit/i.test(e.message);
 }
 
-// ── Outbound pacing ─────────────────────────────────────────────────────────
-// The plan allows ~10 requests/second and bounded concurrency, while one full
-// market fold fans out hundreds of calls at once — so it used to throttle
-// itself into failure. Pace below the ceiling and queue the rest: a fold that
-// takes slightly longer but SUCCEEDS beats one that races and gets cut off.
-// Per-instance (serverless has many), so the 429 retry below is still the
-// safety net for the aggregate.
-const RPC_MAX_CONCURRENT = 4;
-const RPC_MIN_INTERVAL_MS = 125; // ~8/s, leaving headroom under the 10/s cap
+// ── Outbound concurrency cap ────────────────────────────────────────────────
+// The plan bounds CONCURRENT requests as well as rate ("Too many concurrent
+// RPC requests for this account"), and one market fold fans out hundreds of
+// calls at once. A cap fixes the concurrency complaint cheaply.
+//
+// A fixed RATE limit was tried here and reverted: pacing every call to ~8/s
+// serialised a cold fold past the function timeout (measured: /api/state went
+// from ~15s to a 200s timeout). Throughput is instead governed adaptively by
+// the 429 backoff below, which slows down only when the endpoint actually
+// pushes back.
+const RPC_MAX_CONCURRENT = 8;
+const RPC_MIN_INTERVAL_MS = 0;
 let inFlightRpc = 0;
 let lastStart = 0;
 
@@ -135,13 +138,13 @@ async function pacedPrimary(key: string, body: Record<string, unknown>, timeoutM
 
 async function rawCall(key: string, body: Record<string, unknown>, timeoutMs: number): Promise<any> {
   let lastErr: unknown = null;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
       return await pacedPrimary(key, body, timeoutMs);
     } catch (e) {
       lastErr = e;
       if (isRateLimited(e)) {
-        await pause(150 * 2 ** attempt + Math.random() * 120); // 150/300/600/1200ms + jitter
+        await pause(120 * 2 ** attempt + Math.random() * 80); // 120/240/480ms + jitter
         continue;
       }
       if (e instanceof SemanticError) throw new Error(e.message);
