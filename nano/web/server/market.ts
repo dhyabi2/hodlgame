@@ -450,6 +450,14 @@ async function computeFresh(injected?: { src: NanoRpcSource; watched: string[] }
   const src = injected?.src ?? new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache());
   const idx = new MultiIndexer(src, (id) => reg.get(id) ?? EMPTY_META, commit, poolKey);
   let accounts = watched;
+  // Resolve every account's tip in ~3 BATCH calls before walking any chain.
+  // Without this, `listBlocks` falls back to picking a best-of-three view per
+  // account — measured live at exactly 3 `account_info` calls per account,
+  // i.e. 114 calls for 38 accounts before a single block is fetched, against a
+  // plan that allows 10 requests/second. Safe to call repeatedly (it skips
+  // accounts already hinted), and best-effort: if it fails, every account just
+  // takes the original per-account path.
+  try { await src.warmFrontiers(watched); } catch {}
   let events = await idx.collectEvents(watched);
   // Second discovery pass: a creator's chain reveals each token's pool (the
   // seed-deposit link), even before the pool's own anchor hello lands — that
@@ -473,6 +481,7 @@ async function computeFresh(injected?: { src: NanoRpcSource; watched: string[] }
   }
   if (extra.size > 0) {
     accounts = [...watchedSet, ...extra].sort();
+    try { await src.warmFrontiers(accounts); } catch {} // newly discovered accounts too
     events = await idx.collectEvents(accounts);
     // Persist the first-time buyers found this pass into the shared watch-list
     // so they're replayed from the base set next time (fire-and-forget) — this
