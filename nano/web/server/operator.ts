@@ -107,6 +107,10 @@ export async function persistWatched(accounts: string[]): Promise<void> {
 const DISCOVERY_TTL_MS = 60_000;
 const DISCOVERY_AT_KEY = "watch-discovery-at";
 let lastDiscoveryFresh = false;
+/** In-instance guard. The shared timestamp lives in the store, but a store
+ * write is not instantly visible to the next read, so relying on it alone made
+ * a warm instance re-scan on nearly every request. */
+let lastLocalDiscoveryAt = 0;
 /** Did the most recent watchedAccounts() actually scan, or reuse the list? */
 export function discoveryWasFresh(): boolean {
   return lastDiscoveryFresh;
@@ -124,13 +128,19 @@ async function discoveryAge(): Promise<number> {
 export async function watchedAccounts(): Promise<string[]> {
   const env = watched();
   const storedNow = await loadStoredWatched();
-  // Fast path: a recent scan by ANY instance, and a non-empty base to reuse.
-  if (storedNow.length > 0 && (await discoveryAge()) < DISCOVERY_TTL_MS) {
+  // Fast path: a recent scan by THIS instance or any other, and a non-empty
+  // base to reuse. The local check comes first and needs no store round trip.
+  const localFresh = Date.now() - lastLocalDiscoveryAt < DISCOVERY_TTL_MS;
+  if (storedNow.length > 0 && (localFresh || (await discoveryAge()) < DISCOVERY_TTL_MS)) {
     lastDiscoveryFresh = false;
     return [...new Set([...env, ...storedNow])].sort();
   }
   lastDiscoveryFresh = true;
-  void saveBlob(DISCOVERY_AT_KEY, String(Date.now())).catch(() => {});
+  lastLocalDiscoveryAt = Date.now();
+  // AWAITED, not fire-and-forget. This was written with `void`, so the next
+  // request usually could not see it yet and re-ran a full ~99-call discovery —
+  // at the explorer's 5s poll that alone accounted for ~20 RPC calls/second.
+  try { await saveBlob(DISCOVERY_AT_KEY, String(Date.now())); } catch {}
   // The keyless cross-check is the expensive half and only ever ADDS accounts
   // the keyed view missed, so it is now a fallback: run it when the keyed pass
   // returned nothing (rate-limited or lagging), not on every fold.

@@ -183,7 +183,8 @@ export default function Explorer() {
       else { setData(j); setErr(""); if (view.kind === "feed") { setFeedItems(j.items); setFeedNext(j.nextCursor); } }
     }).catch((e) => live && first && setErr(e.message)).finally(() => live && first && setLoading(false));
     load(true);
-    const t = view.kind === "stats" || view.kind === "trust" || view.kind === "feed" ? setInterval(() => load(false), 5000) : null;
+    // 20s, not 5s: each of these views triggers a full market fold server-side.
+    const t = view.kind === "stats" || view.kind === "trust" || view.kind === "feed" ? setInterval(() => load(false), 20000) : null;
     return () => { live = false; if (t) clearInterval(t); };
   }, [JSON.stringify(view)]);
 

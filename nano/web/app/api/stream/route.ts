@@ -3,7 +3,12 @@ import { feed, detail } from "../../../server/market";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Server-sent events: push feed (or a single token) every 3s. */
+/** Server-sent events: push feed (or a single token) periodically.
+ *
+ * The interval was 3s, which is a FULL market fold every three seconds for as
+ * long as a connection is held open — and nothing in the app subscribes to
+ * this, so any stray client was pure invisible load. 30s matches the polling
+ * the UI actually uses. */
 export async function GET(req: Request) {
   const u = new URL(req.url);
   const tokenId = u.searchParams.get("token");
@@ -21,7 +26,7 @@ export async function GET(req: Request) {
         }
       };
       await push();
-      const timer = setInterval(push, 3000);
+      const timer = setInterval(push, 30000);
       req.signal.addEventListener("abort", () => {
         clearInterval(timer);
         controller.close();
