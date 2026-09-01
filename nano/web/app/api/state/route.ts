@@ -14,7 +14,7 @@ export async function GET(req: Request) {
     // else, so those keep the (correct, per-instance) path.
     const json = account
       ? JSON.stringify({ tokens: await feed(account, fresh) })
-      : await cachedPayload("state", fresh, async () => ({ tokens: await feed("", fresh) }));
+      : await cachedPayload("state", fresh, async () => ({ tokens: await feed("", true) }));
     return withCacheHeaders(new NextResponse(json, { headers: { "content-type": "application/json" } }));
   } catch (e: any) {
     return NextResponse.json({ error: e?.message ?? String(e) }, { status: 500 });

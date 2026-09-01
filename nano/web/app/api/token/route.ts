@@ -20,7 +20,7 @@ export async function GET(req: Request) {
     }
     let missing = false;
     const json = await cachedPayload(`token-${tokenId}`, fresh, async () => {
-      const token = await detail(tokenId, "", fresh);
+      const token = await detail(tokenId, "", true);
       if (!token) missing = true;
       return { token };
     });

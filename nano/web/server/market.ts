@@ -228,7 +228,9 @@ let inFlight: Promise<RawMarket> | null = null;
 // anchor and moves nobody's tip until the sweep receives it. So a first-ever
 // trader can be up to this old before discovery sees them. Everything else —
 // every trade by every known account — invalidates the moment it confirms.
-const CACHE_MAX_AGE_MS = 20_000;
+// Sized against reality: a full fold takes 12-15s in production, so a window
+// shorter than that leaves no room for a hit to ever land.
+const CACHE_MAX_AGE_MS = 90_000;
 interface CacheEntry {
   key: string;
   at: number;
@@ -375,6 +377,10 @@ export async function cachedPayload(shape: string, fresh: boolean, produce: () =
     const hit = await sharedGet(shape, fp);
     if (hit) return hit;
   }
+  // `produce` runs with the inner cache bypassed on purpose: this layer has
+  // already established the fingerprint, and letting the fold probe the chain
+  // AGAIN doubled the batch calls per request — which, under rate limiting, is
+  // what made the probe fail two thirds of the time in the first place.
   const json = JSON.stringify(await produce());
   if (fp) await sharedPut(shape, fp, json);
   return json;
