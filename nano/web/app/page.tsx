@@ -70,6 +70,32 @@ interface Notif {
   tokenId?: string;
 }
 const NOTIF_MAX = 30;
+
+/**
+ * Futures trading is HODLDEX's surface, not this app's — the two front ends
+ * read and write the SAME deterministic ledger, so a position opened there is
+ * the same signed block either app would produce, and duplicating the trading
+ * UI here would just be two doors onto one market.
+ *
+ * This hides the UI ONLY. The consensus ops (futOpen/futClose, SPEC §10) and
+ * the `futures` field on the API stay exactly as they are: the state machine
+ * has to keep folding those ops or replay diverges from the chain, and HODLDEX
+ * proxies this API, so stripping the field would break futures over there.
+ * Flip to `true` to bring the surface back.
+ */
+const SHOW_FUTURES_UI = false;
+
+type TabId = "explore" | "ranks" | "futures" | "portfolio" | "create" | "scan" | "wallet" | "list";
+/** Desktop nav. Its labels differ from the mobile bar's on purpose, so the two
+ * lists stay separate rather than being merged into one. */
+const DESKTOP_NAV: { id: TabId; label: string }[] = [
+  { id: "explore", label: "Coins" },
+  { id: "ranks", label: "Ranks" },
+  ...(SHOW_FUTURES_UI ? [{ id: "futures" as TabId, label: "Futures" }] : []),
+  { id: "scan", label: "Explorer" },
+  { id: "wallet", label: "Wallet" },
+  { id: "list", label: "List" },
+];
 interface ExitView {
   hash: string;
   time: number;
@@ -576,7 +602,7 @@ export default function Home() {
       const t = h.get("t");
       const tb = h.get("tab") as typeof tab | null;
       if (t) setSelectedId(t.toLowerCase());
-      else if (tb && ["explore", "ranks", "futures", "portfolio", "create", "scan", "wallet", "list"].includes(tb)) setTab(tb);
+      else if (tb && ["explore", "ranks", "futures", "portfolio", "create", "scan", "wallet", "list"].includes(tb) && (tb !== "futures" || SHOW_FUTURES_UI)) setTab(tb);
     } catch {}
   }, []);
 
@@ -716,7 +742,7 @@ export default function Home() {
           </button>
           {/* Desktop nav only — on mobile the bottom tab bar handles navigation. */}
           <nav className="hidden sm:flex items-center gap-4 text-xs font-bold uppercase tracking-wide text-neutral-400 min-w-0 overflow-x-auto">
-            {([["explore", "Coins"], ["ranks", "Ranks"], ["futures", "Futures"], ["scan", "Explorer"], ["wallet", "Wallet"], ["list", "List"]] as const).map(([id, label]) => (
+            {DESKTOP_NAV.map(({ id, label }) => (
               <button key={id} className={"whitespace-nowrap py-1 border-b-2 -mb-px " + (!selectedId && tab === id ? "text-white border-white" : "border-transparent hover:text-white")} onClick={() => { setSelectedId(null); setTab(id); }}>{label}</button>
             ))}
             <a className="hover:text-white whitespace-nowrap" href="/pro">Chart / Trade ↗</a>
@@ -837,7 +863,7 @@ export default function Home() {
           <Feed tokens={tokens} loaded={feedLoaded} onSelect={(id) => { setDetailTab("trade"); setSelectedId(id); }} myAddress={keys?.address} usd={usd} onCreate={() => setTab("create")} />
         ) : tab === "ranks" ? (
           <Ranks onSelect={(id) => { setDetailTab("trade"); setSelectedId(id); }} myAddress={keys?.address} />
-        ) : tab === "futures" ? (
+        ) : tab === "futures" && SHOW_FUTURES_UI ? (
           <FuturesMarkets tokens={tokens} loaded={feedLoaded} onSelect={(id) => { setDetailTab("futures"); setSelectedId(id); }} />
         ) : tab === "scan" ? (
           <Explorer />
@@ -2128,7 +2154,7 @@ function PosterCard({ t, usd, onSelect }: { t: Token; usd: number | null; onSele
         </div>
         <p className="text-[10px] uppercase tracking-wide text-neutral-500 truncate">
           <span title="Market cap">MC {fmtXno(t.marketCap)}</span>{usd != null && <> ({fmtUsd(t.marketCap, usd)})</>} · {t.holders} holder{t.holders === 1 ? "" : "s"}
-          {(t.futures?.openPairs ?? 0) > 0 && <> · <span className="text-amber-400">⚔ {t.futures.openPairs} duel{t.futures.openPairs === 1 ? "" : "s"}</span></>}
+          {SHOW_FUTURES_UI && (t.futures?.openPairs ?? 0) > 0 && <> · <span className="text-amber-400">⚔ {t.futures.openPairs} duel{t.futures.openPairs === 1 ? "" : "s"}</span></>}
         </p>
       </div>
       <span className="pointer-events-none absolute inset-x-0 bottom-0 hidden sm:block translate-y-full group-hover:translate-y-0 transition-transform duration-200 motion-reduce:transition-none motion-reduce:transform-none bg-white text-black text-[10px] font-black uppercase tracking-wide text-center py-1.5">
@@ -2898,12 +2924,14 @@ function TokenDetail({
           >
             Trade
           </button>
-          <button
-            className={"px-4 py-2 rounded-none text-sm font-bold " + (tab === "futures" ? "bg-white text-black" : "text-neutral-500 hover:text-white")}
-            onClick={() => setTab("futures")}
-          >
-            Futures{token.futures?.openPairs ? ` (${token.futures.openPairs})` : ""}
-          </button>
+          {SHOW_FUTURES_UI && (
+            <button
+              className={"px-4 py-2 rounded-none text-sm font-bold " + (tab === "futures" ? "bg-white text-black" : "text-neutral-500 hover:text-white")}
+              onClick={() => setTab("futures")}
+            >
+              Futures{token.futures?.openPairs ? ` (${token.futures.openPairs})` : ""}
+            </button>
+          )}
           <button
             className={"px-4 py-2 rounded-none text-sm font-bold " + (tab === "thread" ? "bg-white text-black" : "text-neutral-500 hover:text-white")}
             onClick={() => setTab("thread")}
@@ -2930,7 +2958,7 @@ function TokenDetail({
             side={side}
             setSide={setSide}
           />
-        ) : tab === "futures" ? (
+        ) : tab === "futures" && SHOW_FUTURES_UI ? (
           <FuturesBox token={token} busy={busy} sendOp={sendOp} sendFrag={sendFrag} myAddress={keys?.address ?? undefined} />
         ) : (
           <CommentThread tokenId={token.tokenId} comments={token.comments} keys={keys} isDev={keys?.address === token.creator} />
@@ -5087,7 +5115,6 @@ function Portfolio({ tokens, onSelect, account, sendOp, busy, usd }: { tokens: T
 const TABS: { id: "explore" | "ranks" | "futures" | "portfolio" | "create" | "scan" | "wallet" | "list"; label: string; icon: string }[] = [
   { id: "explore", label: "Explore", icon: "🏠" },
   { id: "ranks", label: "Ranks", icon: "🏆" },
-  { id: "futures", label: "Futures", icon: "📈" },
   { id: "create", label: "Launch", icon: "✨" },
   { id: "scan", label: "Explorer", icon: "🔎" },
   { id: "wallet", label: "Wallet", icon: "👛" },
@@ -5096,7 +5123,7 @@ const TABS: { id: "explore" | "ranks" | "futures" | "portfolio" | "create" | "sc
 function TabBar({ tab, setTab }: { tab: "explore" | "ranks" | "futures" | "portfolio" | "create" | "scan" | "wallet" | "list"; setTab: (t: "explore" | "ranks" | "futures" | "portfolio" | "create" | "scan" | "wallet" | "list") => void }) {
   return (
     <nav className="sm:hidden fixed bottom-0 inset-x-0 z-30 border-t border-neutral-800 bg-black/95 backdrop-blur pb-[env(safe-area-inset-bottom)]">
-      <div className="w-full grid grid-cols-6">
+      <div className="w-full grid" style={{ gridTemplateColumns: `repeat(${TABS.length}, minmax(0, 1fr))` }}>
         {TABS.map((t) => (
           <button
             key={t.id}
