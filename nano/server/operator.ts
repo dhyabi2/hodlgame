@@ -36,6 +36,14 @@ export function watched(): string[] {
 const WATCH_KEY = "watched-accounts";
 const HEX_ADDR = /^(nano|xrb)_[13][0-9a-z]{59}$/;
 
+/** The PERSISTED watch list. Unlike `watchedAccounts()` this does no live
+ * discovery, so it is stable call-to-call — which is what a cache fingerprint
+ * needs (a set that flickers with RPC weather produces a key that never
+ * repeats, and therefore a cache that never hits). */
+export async function storedWatched(): Promise<string[]> {
+  return loadStoredWatched();
+}
+
 async function loadStoredWatched(): Promise<string[]> {
   try {
     const raw = await loadBlob(WATCH_KEY);

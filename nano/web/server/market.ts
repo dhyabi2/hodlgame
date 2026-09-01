@@ -13,7 +13,7 @@ import { loadRegistry, EMPTY_META } from "./tokens";
 import { commentsFor, type Comment } from "./comments";
 import { commitResolver } from "./commits";
 import { loadNanoRpcKey } from "../lib/rpc";
-import { watchedAccounts, persistWatched } from "./operator";
+import { watchedAccounts, persistWatched, storedWatched } from "./operator";
 import { StoreBlockCache } from "./sharedCache";
 import { loadBlob, saveBlob } from "./store";
 import { ANCHOR_ADDRESS } from "../core/anchor";
@@ -284,7 +284,14 @@ async function chainFingerprint(
   try {
     const all = [...new Set([...accounts, ...pools, ANCHOR_ADDRESS])].sort();
     await src.warmFrontiers(all);
-    const hints = src.frontierHints();
+    let hints = src.frontierHints();
+    // One retry: the batch resolves via three views each under a short cap, so
+    // a single rate-limited moment can return nothing at all. Without this the
+    // probe reports "unknown" and every request pays for a full walk.
+    if (hints.size === 0) {
+      await src.warmFrontiers(all);
+      hints = src.frontierHints();
+    }
     // Guard against a degraded RPC silently turning this into a plain timer:
     // if the batch resolves nothing, we know nothing, so we cannot claim the
     // chain is unchanged.
@@ -340,9 +347,13 @@ async function sharedPut(shape: string, fp: string, json: string): Promise<void>
 async function currentFingerprint(): Promise<string | null> {
   try {
     const src = new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache());
-    const watched = await watchedAccounts();
+    // The PERSISTED set, not live discovery: discovery unions several flaky
+    // sources and its output varies between calls, which would change the key
+    // every time and defeat the cache entirely. The persisted list only grows,
+    // so an account it hasn't caught up to yet is covered by the age ceiling.
+    const stable = await storedWatched();
     const prev = cached;
-    const fp = await chainFingerprint(src, [...watched, ...(prev?.accounts ?? [])], prev?.pools ?? []);
+    const fp = await chainFingerprint(src, [...stable, ...(prev?.accounts ?? [])], prev?.pools ?? []);
     return fp?.key ?? null;
   } catch {
     return null;
