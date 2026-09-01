@@ -125,13 +125,28 @@ async function discoveryAge(): Promise<number> {
   }
 }
 
-export async function watchedAccounts(): Promise<string[]> {
+/**
+ * `scan` decides whether this caller may run live discovery. Only the once-a-
+ * minute cron passes true.
+ *
+ * A TTL alone could not hold the line: the timestamp lives in the durable
+ * store, a store write is not instantly visible to the next read, and every
+ * cold serverless instance starts with an empty local guard — so discovery was
+ * still running on about a third of requests, once per new instance, instead of
+ * once per minute. Making the cron the only scanner bounds it to exactly one
+ * scan per minute no matter how many instances or requests there are. New
+ * accounts still appear within the same 60s, and the persisted list is
+ * append-only, so a request that reuses it can only ever be missing a brand-new
+ * account, never wrong about an existing one.
+ */
+export async function watchedAccounts(scan = false): Promise<string[]> {
   const env = watched();
   const storedNow = await loadStoredWatched();
-  // Fast path: a recent scan by THIS instance or any other, and a non-empty
-  // base to reuse. The local check comes first and needs no store round trip.
+  // Reuse unless this caller is allowed to scan and the TTL has lapsed. An
+  // empty stored list means first boot, where somebody has to scan.
   const localFresh = Date.now() - lastLocalDiscoveryAt < DISCOVERY_TTL_MS;
-  if (storedNow.length > 0 && (localFresh || (await discoveryAge()) < DISCOVERY_TTL_MS)) {
+  const mayScan = scan || storedNow.length === 0;
+  if (!mayScan || (storedNow.length > 0 && (localFresh || (await discoveryAge()) < DISCOVERY_TTL_MS))) {
     lastDiscoveryFresh = false;
     return [...new Set([...env, ...storedNow])].sort();
   }
@@ -186,7 +201,9 @@ export async function runSweep(onlyToken: string | null) {
     if (!masterSeed) return { error: "POOL_SEED not set" };
     const key = loadNanoRpcKey();
     const idx = await indexer();
-    const events = await idx.collectEvents(await watchedAccounts());
+    // The cron sweep is the one caller allowed to run live discovery, so the
+    // scan happens exactly once a minute regardless of instance count.
+    const events = await idx.collectEvents(await watchedAccounts(true));
     const credits = creditedBuys(events);
     const { state: replayed } = analyze(events);
 
