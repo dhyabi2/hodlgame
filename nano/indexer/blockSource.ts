@@ -149,6 +149,15 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
    * so an endpoint that doesn't support accounts_frontiers changes nothing but
    * speed. Call before collectChains; safe to call repeatedly (skips hinted).
    */
+  /** The batch-resolved tips from `warmFrontiers` (account → frontier hash).
+   * Exposed so a caller can fingerprint "what the chain looks like right now"
+   * in ~1 RPC call, without walking any chain. An account missing from the map
+   * is simply unresolved — callers must treat that as "unknown", never "empty".
+   */
+  frontierHints(): Map<string, string> {
+    return new Map(this.frontierHint);
+  }
+
   async warmFrontiers(accounts: string[]): Promise<void> {
     const need = accounts.filter((a) => !this.frontierHint.has(a));
     if (need.length === 0) return;

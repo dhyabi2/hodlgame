@@ -4,6 +4,7 @@
 
 import { MultiIndexer, type IndexedEvent } from "../indexer/multiIndexer";
 import { deriveAddress } from "nanocurrency";
+import { blake2bHex } from "blakejs";
 import { NanoRpcSource } from "../indexer/blockSource";
 import { analyze, type PricePoint, type TokenAnalytics, type DuelEvent } from "./analytics";
 import { exitView, type ExitView } from "./exits";
@@ -14,6 +15,7 @@ import { commitResolver } from "./commits";
 import { loadNanoRpcKey } from "../lib/rpc";
 import { watchedAccounts, persistWatched } from "./operator";
 import { StoreBlockCache } from "./sharedCache";
+import { ANCHOR_ADDRESS } from "../core/anchor";
 import { deriveMetaAuthority, type MetaAuthorityState } from "../core/metaAnchor";
 import { claimableReward } from "../core/state";
 import { futuresActive, markPrice, refPrice, type FutState } from "../core/futures";
@@ -200,23 +202,156 @@ export interface RawMarket {
 // caller arriving 1ms after settle still triggers a brand-new walk.
 let inFlight: Promise<RawMarket> | null = null;
 
-function compute(): Promise<RawMarket> {
+// ── Chain-fingerprint cache ─────────────────────────────────────────────────
+//
+// The market is a DETERMINISTIC fold of a set of chains: identical blocks in
+// identical order give byte-identical state. So the safe cache key is the
+// chain itself — the tip (frontier) of every account we replay, plus the
+// receivable sets discovery reads to find accounts we don't know about yet.
+// Resolving that costs ~2 batch RPC calls; recomputing costs a walk of every
+// watched chain (measured: 11-16s per request, on EVERY request).
+//
+// The rule this obeys: THE KEY FULLY DETERMINES THE VALUE. A hit is not "close
+// enough", it is provably the same answer a recompute would produce — which is
+// why this adds no staleness window and nothing new to reason about when
+// debugging. (An earlier 2s time-based cache was removed for exactly the
+// staleness reason; this is not that.) Freshness is event-driven, not timed:
+// the moment any watched account publishes a block the fingerprint changes and
+// the next request recomputes.
+//
+// Fails toward recompute, always: any probe error, any account whose frontier
+// can't be resolved, or a changed hint state → miss.
+// A ceiling, not the mechanism. Frontier changes invalidate instantly; this
+// only bounds the ONE blind spot a frontier probe has: a brand-new wallet's
+// very first op is a 1-raw "hello" send, which sits as a RECEIVABLE on the
+// anchor and moves nobody's tip until the sweep receives it. So a first-ever
+// trader can be up to this old before discovery sees them. Everything else —
+// every trade by every known account — invalidates the moment it confirms.
+const CACHE_MAX_AGE_MS = 20_000;
+interface CacheEntry {
+  key: string;
+  at: number;
+  value: RawMarket;
+  accounts: string[];
+  pools: string[];
+  hinted: number; // how many tips the probe resolved when this was computed
+}
+let cached: CacheEntry | null = null;
+
+export interface CacheInfo {
+  hit: boolean;
+  key: string;
+  computedAt: number;
+  accounts: number;
+  ageMs: number;
+}
+let lastInfo: CacheInfo = { hit: false, key: "", computedAt: 0, accounts: 0, ageMs: 0 };
+/** Provenance of the most recent compute — surfaced as response headers so
+ * "is this cached / how old / keyed on what" is a header read, not a hunt. */
+export function cacheInfo(): CacheInfo {
+  return { ...lastInfo, ageMs: lastInfo.computedAt ? Date.now() - lastInfo.computedAt : 0 };
+}
+/** Env kill-switch: set CACHE_DISABLED=1 to make every request compute fresh. */
+function cacheDisabled(): boolean {
+  return process.env.CACHE_DISABLED === "1";
+}
+
+/** Pool addresses this market replays — part of the probe surface. */
+function poolAddresses(raw: RawMarket): string[] {
+  const out = new Set<string>();
+  try {
+    for (const set of raw.idx.getChainPoolSet().values()) {
+      for (const pub of set) {
+        try { out.add(deriveAddress(pub, { useNanoPrefix: true })); } catch {}
+      }
+    }
+  } catch {}
+  return [...out].sort();
+}
+
+/**
+ * Fingerprint the live chain in ~1 batch RPC call: every account's tip.
+ * Returns null when it cannot be established with confidence, and the caller
+ * then recomputes — so every failure mode degrades to exactly today's
+ * behaviour (correct, just slow), never to a stale answer.
+ */
+async function chainFingerprint(
+  src: NanoRpcSource,
+  accounts: string[],
+  pools: string[]
+): Promise<{ key: string; hinted: number } | null> {
+  try {
+    const all = [...new Set([...accounts, ...pools, ANCHOR_ADDRESS])].sort();
+    await src.warmFrontiers(all);
+    const hints = src.frontierHints();
+    // Guard against a degraded RPC silently turning this into a plain timer:
+    // if the batch resolves nothing, we know nothing, so we cannot claim the
+    // chain is unchanged.
+    if (hints.size === 0) return null;
+    // An account that flips between resolved and unresolved changes the key, so
+    // a partial blip can only ever cost an extra recompute, never a false hit.
+    const parts = all.map((a) => a + ":" + (hints.get(a) ?? "-"));
+    return {
+      key: blake2bHex(new TextEncoder().encode(parts.join("|")), undefined, 32),
+      hinted: hints.size,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function computeMaybeCached(): Promise<RawMarket> {
+  const src = new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache());
+  const watched = await watchedAccounts();
+  const prev = cached;
+  const fp = await chainFingerprint(src, [...watched, ...(prev?.accounts ?? [])], prev?.pools ?? []);
+  // A hit needs: the same chain tips, no LOSS of probe coverage since the entry
+  // was built, and an age under the ceiling. Anything else recomputes.
+  if (fp && prev && prev.key === fp.key && fp.hinted >= prev.hinted && Date.now() - prev.at < CACHE_MAX_AGE_MS) {
+    lastInfo = { hit: true, key: fp.key, computedAt: prev.at, accounts: prev.accounts.length, ageMs: 0 };
+    return prev.value;
+  }
+  const value = await computeFresh({ src, watched });
+  const at = Date.now();
+  cached = fp
+    ? { key: fp.key, at, value, accounts: value.accounts, pools: poolAddresses(value), hinted: fp.hinted }
+    : null; // probe failed → store nothing, so the next request cannot hit on an unverified key
+  lastInfo = { hit: false, key: fp ? fp.key : "(probe failed)", computedAt: at, accounts: value.accounts.length, ageMs: 0 };
+  return value;
+}
+
+function compute(fresh = false): Promise<RawMarket> {
+  // `fresh` is a full bypass — no read, no write — so one flag reproduces the
+  // uncached behaviour exactly while troubleshooting.
+  if (fresh || cacheDisabled()) {
+    return computeFresh().then((v) => {
+      lastInfo = { hit: false, key: "(bypass)", computedAt: Date.now(), accounts: v.accounts.length, ageMs: 0 };
+      return v;
+    });
+  }
   if (inFlight) return inFlight;
-  const p = computeFresh().finally(() => { if (inFlight === p) inFlight = null; });
+  const p = computeMaybeCached().finally(() => { if (inFlight === p) inFlight = null; });
   inFlight = p;
   return p;
 }
 
-async function computeFresh(): Promise<RawMarket> {
+async function computeFresh(injected?: { src: NanoRpcSource; watched: string[] }): Promise<RawMarket> {
   // Prologue reads are independent live sources — overlap them instead of
   // stacking three round-trips. Values are unchanged; only wall-clock differs.
-  const [reg, commit, watched] = await Promise.all([loadRegistry(), commitResolver(), watchedAccounts()]);
+  const [reg, commit, watchedFresh] = await Promise.all([
+    loadRegistry(),
+    commitResolver(),
+    injected ? Promise.resolve(injected.watched) : watchedAccounts(),
+  ]);
+  const watched = watchedFresh;
   const master = process.env.POOL_SEED ?? "";
   const poolKey = (tokenId: string) => (master ? tokenPoolKeys(master, tokenId).publicKey : null);
   // Shared monotonic frontier + block cache (server-only): makes every request
   // fold the SAME freshest-ever verified chain per account, so holder counts /
   // poolXno / trades stop flickering across instances and RPC backends.
-  const src = new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache());
+  // Reused from the cache probe when there is one, so its batch frontier
+  // resolution is not paid for twice.
+  const src = injected?.src ?? new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache());
   const idx = new MultiIndexer(src, (id) => reg.get(id) ?? EMPTY_META, commit, poolKey);
   let accounts = watched;
   let events = await idx.collectEvents(watched);
@@ -280,8 +415,8 @@ export async function authorityStateOf(tokenId: string): Promise<MetaAuthoritySt
 }
 
 /** Raw market internals (events, indexer, payouts) for the explorer layer. */
-export async function raw(): Promise<RawMarket> {
-  return compute();
+export async function raw(fresh = false): Promise<RawMarket> {
+  return compute(fresh);
 }
 
 /** Percent change vs the last price at or before `now - secondsAgo` (step fn). */
@@ -384,8 +519,8 @@ async function toView(tokenId: string, a: TokenAnalytics, raw: RawMarket, accoun
 }
 
 /** Feed view: all tokens, trimmed (spark only, no full series/trades/comments). */
-export async function feed(account = ""): Promise<TokenView[]> {
-  const raw = await compute();
+export async function feed(account = "", fresh = false): Promise<TokenView[]> {
+  const raw = await compute(fresh);
   const out: TokenView[] = [];
   for (const [tokenId, a] of raw.byToken) {
     const v = await toView(tokenId, a, raw, account, false);
@@ -406,8 +541,8 @@ export async function feed(account = ""): Promise<TokenView[]> {
  * boards read them). Drops only the heavy series + comments. Fixes the
  * always-empty "Top holders" board caused by feeding computeLeaderboards the
  * fully-stripped feed() payload. */
-export async function ranksFeed(account = ""): Promise<TokenView[]> {
-  const raw = await compute();
+export async function ranksFeed(account = "", fresh = false): Promise<TokenView[]> {
+  const raw = await compute(fresh);
   const out: TokenView[] = [];
   for (const [tokenId, a] of raw.byToken) {
     const v = await toView(tokenId, a, raw, account, false);
@@ -420,8 +555,8 @@ export async function ranksFeed(account = ""): Promise<TokenView[]> {
 }
 
 /** Detail view: a single token with full series, trades, holders, comments. */
-export async function detail(tokenId: string, account = ""): Promise<TokenView | null> {
-  const raw = await compute();
+export async function detail(tokenId: string, account = "", fresh = false): Promise<TokenView | null> {
+  const raw = await compute(fresh);
   const a = raw.byToken.get(tokenId);
   if (!a) return null;
   return toView(tokenId, a, raw, account);

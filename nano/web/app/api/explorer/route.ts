@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { stats, feed, opDetail, accountView, tokenExplorer, trustDashboard, search } from "../../../server/explorerApi";
+import { withCacheHeaders } from "../_cache";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,7 +23,7 @@ export async function GET(req: Request) {
   try {
     switch (view) {
       case "stats":
-        return NextResponse.json(await stats());
+        return withCacheHeaders(NextResponse.json(await stats()));
       case "feed":
         return NextResponse.json(await feed({ cursor: num("cursor"), limit: num("limit", 50), kind: url.searchParams.get("kind") || undefined, token: url.searchParams.get("token") || undefined }));
       case "op": {
@@ -36,7 +37,7 @@ export async function GET(req: Request) {
         return r ? NextResponse.json(r) : NextResponse.json({ error: "unknown token" }, { status: 404 });
       }
       case "trust":
-        return NextResponse.json(await trustDashboard());
+        return withCacheHeaders(NextResponse.json(await trustDashboard()));
       case "search":
         return NextResponse.json(await search(q));
       default:
