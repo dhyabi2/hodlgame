@@ -11,6 +11,7 @@ export function withCacheHeaders(res: NextResponse): NextResponse {
   res.headers.set("x-cache-age-ms", String(c.ageMs));
   res.headers.set("x-computed-at", c.computedAt ? new Date(c.computedAt).toISOString() : "-");
   res.headers.set("x-accounts", String(c.accounts));
+  res.headers.set("x-tips-from-cache", String(c.tipsFromCache));
   return res;
 }
 

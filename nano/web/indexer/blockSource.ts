@@ -115,7 +115,28 @@ export interface SharedBlockCache {
 }
 
 export class NanoRpcSource implements BlockSource, CounterpartyReader {
-  constructor(private apiKey: string, private cache?: SharedBlockCache) {}
+  /**
+   * `opts.staleTips` lets a READ path serve an account's last known tip from
+   * the shared store instead of paying the 3-view probe, when the cheap batch
+   * refresh could not resolve it. Off by default, and deliberately never
+   * enabled for the payout sweep: money must not move on a stale view.
+   */
+  constructor(
+    private apiKey: string,
+    private cache?: SharedBlockCache,
+    private opts: { staleTips?: boolean } = {}
+  ) {}
+
+  /** When the batched tip refresh last resolved ANYTHING. If it is working,
+   * an account it did not resolve is genuinely unopened rather than hidden by
+   * rate limiting — which is what makes a stored tip safe to lean on. */
+  private lastBatchOkAt = 0;
+  /** How long a stored tip may stand in for a live probe once the batch stops
+   * working. Bounds staleness: past this we pay for the probe rather than risk
+   * serving an indefinitely old chain. */
+  private static readonly STALE_TIP_MS = 120_000;
+  /** Accounts served from a stored tip this request — surfaced for observability. */
+  readonly tipsFromCache = new Set<string>();
 
   // account → the exact tip (last block hash) this source replayed for it.
   // Published by the trust view so a browser can pin its own walk to the SAME
@@ -181,7 +202,7 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
     for (const account of need) {
       const hs = [f0[account], f1[account], f2[account]].filter((h) => typeof h === "string" && /^[0-9a-fA-F]{64}$/.test(h));
       if (hs.length === 0) continue; // unopened/unknown everywhere → leave unhinted
-      if (new Set(hs.map((h) => h.toUpperCase())).size === 1) this.frontierHint.set(account, hs[0]);
+      if (new Set(hs.map((h) => h.toUpperCase())).size === 1) { this.frontierHint.set(account, hs[0]); this.lastBatchOkAt = Date.now(); }
       else disagree.push(account); // views differ → resolve precisely by height
     }
     await Promise.all(disagree.map(async (account) => {
@@ -317,8 +338,24 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
     // a batched call — skip the 3 per-account account_info round-trips.
     let best: { frontier: string; height: number };
     const hinted = this.frontierHint.get(account);
+    // The shared store is consulted BEFORE the probe, not after it. Measured
+    // live: the probe costs 3 account_info calls per account (114 for 38
+    // accounts) and used to run even when the store already held that
+    // account's verified chain — the cache sat behind the very cost it exists
+    // to avoid. A stored tip is monotonic (it never regresses), so leaning on
+    // it can only mean "slightly behind", never "wrong".
+    let stored: { frontier: string; height: number } | null = null;
+    if (!hinted && this.opts.staleTips && this.cache) {
+      const batchHealthy = Date.now() - this.lastBatchOkAt < NanoRpcSource.STALE_TIP_MS;
+      if (batchHealthy) {
+        try { stored = await this.cache.getFrontier(account); } catch {}
+      }
+    }
     if (hinted) {
       best = { frontier: hinted, height: 0 };
+    } else if (stored?.frontier) {
+      best = stored;
+      this.tipsFromCache.add(account);
     } else {
       const view = async (fn: () => Promise<any>) => {
         try { const i = await fn(); return { frontier: String(i?.frontier ?? ""), height: Number(i?.block_count ?? 0) }; }

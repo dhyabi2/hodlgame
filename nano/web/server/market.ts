@@ -179,6 +179,8 @@ export interface RawMarket {
   /** account → the exact tip hash replayed for it, so a browser verifier can pin
    * its walk to the same frontier and match the root without a freshness race. */
   frontiers: Record<string, string>;
+  /** Accounts whose tip came from the store rather than a live probe. */
+  tipsFromCache: number;
 }
 
 // Deliberately UNCACHED. This used to be a 2-second in-memory cache shared
@@ -247,8 +249,13 @@ export interface CacheInfo {
   computedAt: number;
   accounts: number;
   ageMs: number;
+  /** Accounts whose tip came from the store rather than a live probe. Non-zero
+   * means the batched refresh could not reach the endpoint, so those chains may
+   * be slightly behind — exactly the thing you want named in a header rather
+   * than left to guesswork. */
+  tipsFromCache: number;
 }
-let lastInfo: CacheInfo = { hit: false, key: "", computedAt: 0, accounts: 0, ageMs: 0 };
+let lastInfo: CacheInfo = { hit: false, key: "", computedAt: 0, accounts: 0, ageMs: 0, tipsFromCache: 0 };
 /** Provenance of the most recent compute — surfaced as response headers so
  * "is this cached / how old / keyed on what" is a header read, not a hunt. */
 export function cacheInfo(): CacheInfo {
@@ -330,7 +337,7 @@ async function sharedGet(shape: string, fp: string): Promise<string | null> {
     const p = JSON.parse(raw) as { fp?: string; at?: number; json?: string };
     if (!p?.fp || p.fp !== fp || typeof p.json !== "string") return null;
     if (!p.at || Date.now() - p.at >= CACHE_MAX_AGE_MS) return null;
-    lastInfo = { hit: true, key: fp, computedAt: p.at, accounts: lastInfo.accounts, ageMs: 0 };
+    lastInfo = { hit: true, key: fp, computedAt: p.at, accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
     return p.json;
   } catch {
     return null;
@@ -348,7 +355,7 @@ async function sharedPut(shape: string, fp: string, json: string): Promise<void>
  * callers that want to check the shared cache before folding anything. */
 async function currentFingerprint(): Promise<string | null> {
   try {
-    const src = new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache());
+    const src = new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache(), { staleTips: true });
     // The PERSISTED set, not live discovery: discovery unions several flaky
     // sources and its output varies between calls, which would change the key
     // every time and defeat the cache entirely. The persisted list only grows,
@@ -369,7 +376,7 @@ async function currentFingerprint(): Promise<string | null> {
 export async function cachedPayload(shape: string, fresh: boolean, produce: () => Promise<unknown>): Promise<string> {
   if (fresh || cacheDisabled()) {
     const v = JSON.stringify(await produce());
-    lastInfo = { hit: false, key: "(bypass)", computedAt: Date.now(), accounts: lastInfo.accounts, ageMs: 0 };
+    lastInfo = { hit: false, key: "(bypass)", computedAt: Date.now(), accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
     return v;
   }
   const fp = await currentFingerprint();
@@ -392,19 +399,20 @@ export async function cachedPayload(shape: string, fresh: boolean, produce: () =
     computedAt: Date.now(),
     accounts: lastInfo.accounts,
     ageMs: 0,
+    tipsFromCache: lastInfo.tipsFromCache,
   };
   return json;
 }
 
 async function computeMaybeCached(): Promise<RawMarket> {
-  const src = new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache());
+  const src = new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache(), { staleTips: true });
   const watched = await watchedAccounts();
   const prev = cached;
   const fp = await chainFingerprint(src, [...watched, ...(prev?.accounts ?? [])], prev?.pools ?? []);
   // A hit needs: the same chain tips, no LOSS of probe coverage since the entry
   // was built, and an age under the ceiling. Anything else recomputes.
   if (fp && prev && prev.key === fp.key && fp.hinted >= prev.hinted && Date.now() - prev.at < CACHE_MAX_AGE_MS) {
-    lastInfo = { hit: true, key: fp.key, computedAt: prev.at, accounts: prev.accounts.length, ageMs: 0 };
+    lastInfo = { hit: true, key: fp.key, computedAt: prev.at, accounts: prev.accounts.length, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
     return prev.value;
   }
   const value = await computeFresh({ src, watched });
@@ -412,7 +420,7 @@ async function computeMaybeCached(): Promise<RawMarket> {
   cached = fp
     ? { key: fp.key, at, value, accounts: value.accounts, pools: poolAddresses(value), hinted: fp.hinted }
     : null; // probe failed → store nothing, so the next request cannot hit on an unverified key
-  lastInfo = { hit: false, key: fp ? fp.key : "(probe failed)", computedAt: at, accounts: value.accounts.length, ageMs: 0 };
+  lastInfo = { hit: false, key: fp ? fp.key : "(probe failed)", computedAt: at, accounts: value.accounts.length, ageMs: 0, tipsFromCache: value.tipsFromCache };
   return value;
 }
 
@@ -421,7 +429,7 @@ function compute(fresh = false): Promise<RawMarket> {
   // uncached behaviour exactly while troubleshooting.
   if (fresh || cacheDisabled()) {
     return computeFresh().then((v) => {
-      lastInfo = { hit: false, key: "(bypass)", computedAt: Date.now(), accounts: v.accounts.length, ageMs: 0 };
+      lastInfo = { hit: false, key: "(bypass)", computedAt: Date.now(), accounts: v.accounts.length, ageMs: 0, tipsFromCache: v.tipsFromCache };
       return v;
     });
   }
@@ -447,7 +455,7 @@ async function computeFresh(injected?: { src: NanoRpcSource; watched: string[] }
   // poolXno / trades stop flickering across instances and RPC backends.
   // Reused from the cache probe when there is one, so its batch frontier
   // resolution is not paid for twice.
-  const src = injected?.src ?? new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache());
+  const src = injected?.src ?? new NanoRpcSource(loadNanoRpcKey(), new StoreBlockCache(), { staleTips: true });
   const idx = new MultiIndexer(src, (id) => reg.get(id) ?? EMPTY_META, commit, poolKey);
   let accounts = watched;
   // Resolve every account's tip in ~3 BATCH calls before walking any chain.
@@ -494,7 +502,7 @@ async function computeFresh(injected?: { src: NanoRpcSource; watched: string[] }
   const creators = new Map<string, string>();
   for (const [tokenId, s] of state) if (s.creator) creators.set(tokenId, s.creator);
   const metaAuthority = deriveMetaAuthority(idx.getMetaAnchors(), creators);
-  return { state, byToken, meta: reg, master, metaAuthority, events, idx, sellPayouts, accounts, frontiers: Object.fromEntries(src.frontiers) };
+  return { state, byToken, meta: reg, master, metaAuthority, events, idx, sellPayouts, accounts, frontiers: Object.fromEntries(src.frontiers), tipsFromCache: src.tipsFromCache.size };
 }
 
 /** On-chain creator for a token (launch block signer), or null if the launch
