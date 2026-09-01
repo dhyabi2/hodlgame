@@ -131,10 +131,6 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
    * an account it did not resolve is genuinely unopened rather than hidden by
    * rate limiting — which is what makes a stored tip safe to lean on. */
   private lastBatchOkAt = 0;
-  /** How long a stored tip may stand in for a live probe once the batch stops
-   * working. Bounds staleness: past this we pay for the probe rather than risk
-   * serving an indefinitely old chain. */
-  private static readonly STALE_TIP_MS = 120_000;
   /** Accounts served from a stored tip this request — surfaced for observability. */
   readonly tipsFromCache = new Set<string>();
 
@@ -344,12 +340,17 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
     // account's verified chain — the cache sat behind the very cost it exists
     // to avoid. A stored tip is monotonic (it never regresses), so leaning on
     // it can only mean "slightly behind", never "wrong".
+    // No health gate here. An earlier version only allowed this when the
+    // batched refresh had recently succeeded, which inverted the intent: on a
+    // cold serverless instance `lastBatchOkAt` is 0, so the stored tip was
+    // refused in exactly the situation it exists for. And if the batch is
+    // failing, the per-account probe hits the SAME rate-limited endpoint and
+    // mostly fails too — serving a last-known verified chain beats serving
+    // nothing. Staleness stays visible instead: the count of accounts served
+    // this way is reported as x-tips-from-cache.
     let stored: { frontier: string; height: number } | null = null;
     if (!hinted && this.opts.staleTips && this.cache) {
-      const batchHealthy = Date.now() - this.lastBatchOkAt < NanoRpcSource.STALE_TIP_MS;
-      if (batchHealthy) {
-        try { stored = await this.cache.getFrontier(account); } catch {}
-      }
+      try { stored = await this.cache.getFrontier(account); } catch {}
     }
     if (hinted) {
       best = { frontier: hinted, height: 0 };
