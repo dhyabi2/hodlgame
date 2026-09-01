@@ -437,10 +437,12 @@ export class MultiIndexer {
     // per-account fetches on a cold serverless instance), so it's disabled. The
     // per-account best-view frontier in listBlocks + the module-level
     // FRONTIER_CACHE + the request-scoped block memo are the kept, safe wins.
-    // 3, not 10. Each account walk can itself talk to the RPC several times, so
-    // ten at once meant tens of concurrent requests against a plan that caps
-    // both rate and concurrency — the fold was throttling itself.
-    const CONCURRENCY = 3;
+    // Back to 10. This was cut to 3 to stop RPC bursts, but the measurement
+    // that followed showed walks now serve entirely from the durable store
+    // (blocks cached=38 walked=0), so the limit was throttling BLOB reads, not
+    // RPC — turning a store-served fold into a 14s serial crawl. Accounts that
+    // genuinely changed still hit the RPC, and those are few.
+    const CONCURRENCY = 10;
     const out: (DecodedChain | null)[] = new Array(accounts.length).fill(null);
     let cursor = 0;
     let done = 0;

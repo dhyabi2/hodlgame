@@ -559,6 +559,8 @@ async function computeFresh(injected?: { src: NanoRpcSource; watched: string[] }
   const creators = new Map<string, string>();
   for (const [tokenId, s] of state) if (s.creator) creators.set(tokenId, s.creator);
   const metaAuthority = deriveMetaAuthority(idx.getMetaAnchors(), creators);
+  // Persist the batched tip index once, rather than once per account.
+  try { await (src as any).cache?.flush?.(); } catch {}
   return { state, byToken, meta: reg, master, metaAuthority, events, idx, sellPayouts, accounts, frontiers: Object.fromEntries(src.frontiers), tipsFromCache: src.tipsFromCache.size, blocksFromCache: src.blocksFromCache.size, blocksWalked: src.blocksWalked.size };
 }
 

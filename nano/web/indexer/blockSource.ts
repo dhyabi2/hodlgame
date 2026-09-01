@@ -108,6 +108,8 @@ async function fallbackPending(account: string): Promise<string[]> {
  * All methods are best-effort; a store error just falls back to live RPC.
  */
 export interface SharedBlockCache {
+  /** Optional: persist any batched index once, after a fold. */
+  flush?(): Promise<void>;
   getFrontier(account: string): Promise<{ frontier: string; height: number } | null>;
   putFrontier(account: string, frontier: string, height: number): Promise<void>;
   getBlocks(account: string, frontier: string): Promise<NanoBlock[] | null>;
@@ -123,7 +125,7 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
    */
   constructor(
     private apiKey: string,
-    private cache?: SharedBlockCache,
+    readonly cache?: SharedBlockCache,
     private opts: { staleTips?: boolean } = {}
   ) {}
 
@@ -195,11 +197,17 @@ export class NanoRpcSource implements BlockSource, CounterpartyReader {
         return j && typeof j.frontiers === "object" && j.frontiers ? j.frontiers : {};
       } catch { return {}; }
     };
-    const [f0, f1, f2] = await Promise.all([
-      af((b) => nanoRpc(this.apiKey, b)),
-      af((b) => nanoRpc("", b)),
-      af((b) => fallbackRpc(b)),
-    ]);
+    // Keyed view FIRST, alone. This used to query all three views in parallel,
+    // which was fine when it ran once per fold — but it now runs on EVERY
+    // request as the cache's freshness check, so it was three RPC calls of
+    // constant floor per request. The other two views only ever ADD accounts
+    // the keyed one missed, so they are a fallback for when it comes back
+    // empty, exactly as discovery now works.
+    const f0 = await af((b) => nanoRpc(this.apiKey, b));
+    const enough = need.every((a) => typeof f0[a] === "string");
+    const [f1, f2] = enough
+      ? [{} as Record<string, string>, {} as Record<string, string>]
+      : await Promise.all([af((b) => nanoRpc("", b)), af((b) => fallbackRpc(b))]);
     const disagree: string[] = [];
     for (const account of need) {
       const hs = [f0[account], f1[account], f2[account]].filter((h) => typeof h === "string" && /^[0-9a-fA-F]{64}$/.test(h));
