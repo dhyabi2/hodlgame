@@ -383,6 +383,16 @@ export async function cachedPayload(shape: string, fresh: boolean, produce: () =
   // what made the probe fail two thirds of the time in the first place.
   const json = JSON.stringify(await produce());
   if (fp) await sharedPut(shape, fp, json);
+  // Report THIS layer's verdict, not the inner bypass the producer just ran —
+  // otherwise every miss reads "(bypass)" and the header stops telling you why
+  // it missed, which is the entire reason the header exists.
+  lastInfo = {
+    hit: false,
+    key: fp ?? "(probe failed)",
+    computedAt: Date.now(),
+    accounts: lastInfo.accounts,
+    ageMs: 0,
+  };
   return json;
 }
 
