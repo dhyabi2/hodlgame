@@ -89,13 +89,57 @@ export async function persistWatched(accounts: string[]): Promise<void> {
 // so a wrongly-INCLUDED account is impossible; the only real risk was ever a
 // wrongly-EXCLUDED one, which unioning eliminates as long as at least one of
 // the two calls has current data.
+/**
+ * Discovery is CACHED, because it was the biggest RPC consumer left.
+ *
+ * Measured per fold: discovery ~54 calls and it ran TWICE (keyed + keyless) =
+ * ~108, against 38 for the actual chain walk and 3 for the tip probe. That is
+ * a burst of ~4x the real work to answer a question whose answer almost never
+ * changes — "which accounts exist?" — while the persisted watch list already
+ * accumulates permanently and never shrinks.
+ *
+ * So a full scan runs at most once per DISCOVERY_TTL_MS across ALL instances
+ * (the timestamp lives in the shared store), and every fold in between reuses
+ * the accumulated list for free. The bounded cost is that a brand-new wallet
+ * can take up to the TTL to appear — the same trade the tip cache makes, and
+ * reported as `x-discovery` so it is never a mystery.
+ */
+const DISCOVERY_TTL_MS = 60_000;
+const DISCOVERY_AT_KEY = "watch-discovery-at";
+let lastDiscoveryFresh = false;
+/** Did the most recent watchedAccounts() actually scan, or reuse the list? */
+export function discoveryWasFresh(): boolean {
+  return lastDiscoveryFresh;
+}
+async function discoveryAge(): Promise<number> {
+  try {
+    const raw = await loadBlob(DISCOVERY_AT_KEY);
+    const at = raw ? Number(raw) : 0;
+    return Number.isFinite(at) && at > 0 ? Date.now() - at : Number.MAX_SAFE_INTEGER;
+  } catch {
+    return Number.MAX_SAFE_INTEGER;
+  }
+}
+
 export async function watchedAccounts(): Promise<string[]> {
   const env = watched();
-  const [keyed, keyless, stored] = await Promise.allSettled([
-    discoverAccounts(new NanoRpcSource(loadNanoRpcKey()), ANCHOR_ADDRESS),
-    discoverAccounts(new NanoRpcSource(""), ANCHOR_ADDRESS),
-    loadStoredWatched(),
-  ]);
+  const storedNow = await loadStoredWatched();
+  // Fast path: a recent scan by ANY instance, and a non-empty base to reuse.
+  if (storedNow.length > 0 && (await discoveryAge()) < DISCOVERY_TTL_MS) {
+    lastDiscoveryFresh = false;
+    return [...new Set([...env, ...storedNow])].sort();
+  }
+  lastDiscoveryFresh = true;
+  void saveBlob(DISCOVERY_AT_KEY, String(Date.now())).catch(() => {});
+  // The keyless cross-check is the expensive half and only ever ADDS accounts
+  // the keyed view missed, so it is now a fallback: run it when the keyed pass
+  // returned nothing (rate-limited or lagging), not on every fold.
+  const keyed = await Promise.allSettled([discoverAccounts(new NanoRpcSource(loadNanoRpcKey()), ANCHOR_ADDRESS)]).then((r) => r[0]);
+  const keyedOk = keyed.status === "fulfilled" && keyed.value.users.length > 0;
+  const keyless = keyedOk
+    ? ({ status: "rejected" } as PromiseSettledResult<Awaited<ReturnType<typeof discoverAccounts>>>)
+    : await Promise.allSettled([discoverAccounts(new NanoRpcSource(""), ANCHOR_ADDRESS)]).then((r) => r[0]);
+  const stored = { status: "fulfilled", value: storedNow } as PromiseSettledResult<string[]>;
   const users = new Set(env);
   // The persisted union is the stable base — nothing ever disappears from it.
   if (stored.status === "fulfilled") for (const u of stored.value) users.add(u);

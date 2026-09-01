@@ -13,7 +13,7 @@ import { loadRegistry, EMPTY_META } from "./tokens";
 import { commentsFor, type Comment } from "./comments";
 import { commitResolver } from "./commits";
 import { loadNanoRpcKey } from "../lib/rpc";
-import { watchedAccounts, persistWatched, storedWatched } from "./operator";
+import { watchedAccounts, persistWatched, storedWatched, discoveryWasFresh } from "./operator";
 import { StoreBlockCache } from "./sharedCache";
 import { loadBlob, saveBlob } from "./store";
 import { ANCHOR_ADDRESS } from "../core/anchor";
@@ -253,17 +253,19 @@ export interface CacheInfo {
   computedAt: number;
   accounts: number;
   ageMs: number;
+  /** Whether this compute re-scanned for new accounts or reused the list. */
+  discovery: "fresh" | "cached";
   /** Accounts whose tip came from the store rather than a live probe. Non-zero
    * means the batched refresh could not reach the endpoint, so those chains may
    * be slightly behind — exactly the thing you want named in a header rather
    * than left to guesswork. */
   tipsFromCache: number;
 }
-let lastInfo: CacheInfo = { store: "skipped", hit: false, key: "", computedAt: 0, accounts: 0, ageMs: 0, tipsFromCache: 0 };
+let lastInfo: CacheInfo = { store: "skipped", discovery: "cached", hit: false, key: "", computedAt: 0, accounts: 0, ageMs: 0, tipsFromCache: 0 };
 /** Provenance of the most recent compute — surfaced as response headers so
  * "is this cached / how old / keyed on what" is a header read, not a hunt. */
 export function cacheInfo(): CacheInfo {
-  return { ...lastInfo, store: lastStore, ageMs: lastInfo.computedAt ? Date.now() - lastInfo.computedAt : 0 };
+  return { ...lastInfo, store: lastStore, discovery: discoveryWasFresh() ? "fresh" : "cached", ageMs: lastInfo.computedAt ? Date.now() - lastInfo.computedAt : 0 };
 }
 /** Env kill-switch: set CACHE_DISABLED=1 to make every request compute fresh. */
 function cacheDisabled(): boolean {
@@ -368,7 +370,7 @@ async function sharedGet(shape: string, tips: Record<string, string>): Promise<s
     if (!p.at || Date.now() - p.at >= CACHE_MAX_AGE_MS) { lastStore = "miss-age"; return null; }
     if (!tipsAgree(p.tips, tips)) { lastStore = "miss-tips"; return null; }
     lastStore = "hit";
-    lastInfo = { store: lastStore, hit: true, key: tipsLabel(tips), computedAt: p.at, accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
+    lastInfo = { store: lastStore, discovery: "cached", hit: true, key: tipsLabel(tips), computedAt: p.at, accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
     return p.json;
   } catch {
     lastStore = "miss-error";
@@ -414,7 +416,7 @@ export async function cachedPayload(shape: string, fresh: boolean, produce: () =
   lastStore = "skipped";
   if (fresh || cacheDisabled()) {
     const v = JSON.stringify(await produce());
-    lastInfo = { store: lastStore, hit: false, key: "(bypass)", computedAt: Date.now(), accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
+    lastInfo = { store: lastStore, discovery: "cached", hit: false, key: "(bypass)", computedAt: Date.now(), accounts: lastInfo.accounts, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
     return v;
   }
   const tips = await currentFingerprint();
@@ -433,6 +435,7 @@ export async function cachedPayload(shape: string, fresh: boolean, produce: () =
   // it missed, which is the entire reason the header exists.
   lastInfo = {
     store: lastStore,
+    discovery: "cached",
     hit: false,
     key: tips ? tipsLabel(tips) : "(probe failed)",
     computedAt: Date.now(),
@@ -451,7 +454,7 @@ async function computeMaybeCached(): Promise<RawMarket> {
   // A hit needs every tip we resolved now to match what the entry recorded, and
   // an age under the ceiling. Anything else recomputes.
   if (fp && prev && tipsAgree(prev.tips, fp.tips) && Date.now() - prev.at < CACHE_MAX_AGE_MS) {
-    lastInfo = { store: lastStore, hit: true, key: tipsLabel(fp.tips), computedAt: prev.at, accounts: prev.accounts.length, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
+    lastInfo = { store: lastStore, discovery: "cached", hit: true, key: tipsLabel(fp.tips), computedAt: prev.at, accounts: prev.accounts.length, ageMs: 0, tipsFromCache: lastInfo.tipsFromCache };
     return prev.value;
   }
   const value = await computeFresh({ src, watched });
@@ -459,7 +462,7 @@ async function computeMaybeCached(): Promise<RawMarket> {
   cached = fp
     ? { tips: fp.tips, key: tipsLabel(fp.tips), at, value, accounts: value.accounts, pools: poolAddresses(value), hinted: fp.hinted }
     : null; // probe failed → store nothing, so the next request cannot hit on unverified evidence
-  lastInfo = { store: lastStore, hit: false, key: fp ? tipsLabel(fp.tips) : "(probe failed)", computedAt: at, accounts: value.accounts.length, ageMs: 0, tipsFromCache: value.tipsFromCache };
+  lastInfo = { store: lastStore, discovery: "cached", hit: false, key: fp ? tipsLabel(fp.tips) : "(probe failed)", computedAt: at, accounts: value.accounts.length, ageMs: 0, tipsFromCache: value.tipsFromCache };
   return value;
 }
 
@@ -468,7 +471,7 @@ function compute(fresh = false): Promise<RawMarket> {
   // uncached behaviour exactly while troubleshooting.
   if (fresh || cacheDisabled()) {
     return computeFresh().then((v) => {
-      lastInfo = { store: lastStore, hit: false, key: "(bypass)", computedAt: Date.now(), accounts: v.accounts.length, ageMs: 0, tipsFromCache: v.tipsFromCache };
+      lastInfo = { store: lastStore, discovery: "cached", hit: false, key: "(bypass)", computedAt: Date.now(), accounts: v.accounts.length, ageMs: 0, tipsFromCache: v.tipsFromCache };
       return v;
     });
   }
@@ -518,7 +521,13 @@ async function computeFresh(injected?: { src: NanoRpcSource; watched: string[] }
   // several sets), then resolve counterparties in parallel — independent RPC
   // calls unioned into a Set, so the discovered `extra` set is identical to the
   // serial version, just faster. Over-inclusion is re-validated by replay.
-  const poolPubs = [...new Set([...idx.getChainPoolSet().values()].flatMap((s) => [...s]))];
+  // Gated on the same signal as discovery itself. This scan exists to catch a
+  // first-time buyer, so it only needs to run when we are actually looking for
+  // new accounts — running it on EVERY fold cost another ~45 calls to re-learn
+  // what the persisted watch list already knows.
+  const poolPubs = discoveryWasFresh()
+    ? [...new Set([...idx.getChainPoolSet().values()].flatMap((s) => [...s]))]
+    : [];
   const cps = await Promise.all(
     poolPubs.map((pub) => src.counterparties(deriveAddress(pub, { useNanoPrefix: true })).catch(() => null))
   );
