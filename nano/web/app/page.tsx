@@ -16,7 +16,7 @@ import { Sparkline } from "./components/Sparkline";
 import Explorer from "./components/Explorer";
 import HalftoneGenome from "./components/HalftoneGenome";
 import { loadWallet, saveWallet, removeWallet, encryptSeed, decryptSeed, saveSessionKeys, loadSessionKeys, clearSessionKeys } from "./lib/wallet";
-import { useNanoWebsocket } from "./lib/nano-ws";
+import { useNanoWebsocket, useNanoConfirmations } from "./lib/nano-ws";
 import { QRCodeSVG } from "qrcode.react";
 import { toRaw, clampSlippage, isNanoAddr, fmtNum, fmtXno, fmtXnoPlain } from "./lib/trade";
 import { shareCard, svgQrToCanvas } from "./lib/sharecard";
@@ -658,6 +658,16 @@ export default function Home() {
     else setDetailMissing(false);
   }, [selectedId]);
   const [detailTick, setDetailTick] = useState(0);
+  // Chain events instead of a stopwatch. Any confirmed block involving this
+  // wallet — its own trade landing, or someone paying it — refreshes the views
+  // immediately, so the 20-30s polls are only a safety net for what the socket
+  // misses rather than the way anything is learned. The socket is read-only and
+  // carries no credentials; signing stays in trade.ts on this device.
+  useNanoConfirmations([keys?.address], () => {
+    markWalletDirty();
+    setDetailTick((t) => t + 1);
+  });
+
   const refreshDetail = () => setDetailTick((t) => t + 1); // force an immediate re-fetch (e.g. right after seeding)
   usePoll(async () => {
     if (!selectedId) return; // nothing open → no request
