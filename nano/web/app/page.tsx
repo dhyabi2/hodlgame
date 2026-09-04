@@ -394,6 +394,25 @@ const inputC =
 const btn =
   "w-full rounded-none bg-white px-4 py-3 text-sm font-black uppercase tracking-wide text-black hover:bg-neutral-200 disabled:opacity-40 transition duration-200 motion-reduce:transition-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-white focus-visible:outline-offset-2";
 
+/** HODLDEX is the trading front end for this same ledger — futures live there
+ * (see SHOW_FUTURES_UI), so the header needs a way to reach it. */
+function DexLink({ className = "" }: { className?: string }) {
+  return (
+    <a
+      href="https://www.hodldex.app"
+      target="_blank"
+      rel="noreferrer"
+      title="HODLDEX — charts, pro trading and futures on this same ledger"
+      className={
+        "rounded-none border border-neutral-700 px-2 py-1 text-[11px] font-black uppercase tracking-wide text-neutral-300 hover:border-white hover:text-white " +
+        className
+      }
+    >
+      DEX
+    </a>
+  );
+}
+
 function GitHubLink({ className = "" }: { className?: string }) {
   return (
     <a
@@ -795,6 +814,7 @@ export default function Home() {
                 )}
               </div>
             )}
+            <DexLink />
             <GitHubLink />
             <button
               className="rounded-none bg-white px-3 py-1.5 text-xs font-black uppercase tracking-wide text-black hover:bg-neutral-200"
